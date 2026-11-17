@@ -40,6 +40,12 @@ class BinanceWebSocketManager(
     private val _lastMessageTime = MutableStateFlow<Long?>(null)
     val lastMessageTime: StateFlow<Long?> = _lastMessageTime.asStateFlow()
 
+    private val _activeStreamLabel = MutableStateFlow("Binance USDT-M Futures WebSocket")
+    val activeStreamLabel: StateFlow<String> = _activeStreamLabel.asStateFlow()
+
+    private val _isFuturesStream = MutableStateFlow(true)
+    val isFuturesStream: StateFlow<Boolean> = _isFuturesStream.asStateFlow()
+
     private var webSocket: WebSocket? = null
     private val isRunning = AtomicBoolean(false)
     private var reconnectAttempts = 0
@@ -64,25 +70,34 @@ class BinanceWebSocketManager(
         _isConnected.value = false
     }
 
+    private data class WsEndpointConfig(
+        val url: String,
+        val label: String,
+        val isFutures: Boolean
+    )
+
     private val wsEndpoints = listOf(
-        "wss://stream.binance.com:9443/ws/!miniTicker@arr",
-        "wss://stream.binance.us:9443/ws/!miniTicker@arr"
+        WsEndpointConfig("wss://fstream.binance.com/ws/!miniTicker@arr", "Binance USDT-M Futures WS", true),
+        WsEndpointConfig("wss://stream.binance.com:9443/ws/!miniTicker@arr", "Binance Spot WS (Fallback)", false),
+        WsEndpointConfig("wss://stream.binance.us:9443/ws/!miniTicker@arr", "Binance.US Spot WS (Fallback)", false)
     )
     private var currentEndpointIndex = 0
 
     private fun connect() {
         if (!isRunning.get()) return
 
-        val endpoint = wsEndpoints[currentEndpointIndex]
+        val endpointCfg = wsEndpoints[currentEndpointIndex]
         val request = Request.Builder()
-            .url(endpoint)
+            .url(endpointCfg.url)
             .build()
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 _isConnected.value = true
+                _activeStreamLabel.value = endpointCfg.label
+                _isFuturesStream.value = endpointCfg.isFutures
                 reconnectAttempts = 0
-                Log.d("BinanceWS", "WebSocket connected successfully to $endpoint")
+                Log.d("BinanceWS", "WebSocket connected successfully to ${endpointCfg.url}")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -101,8 +116,7 @@ class BinanceWebSocketManager(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 _isConnected.value = false
-                Log.w("BinanceWS", "WebSocket failure on $endpoint: ${t.message} (HTTP ${response?.code})")
-                // Rotate to alternate endpoint on error (e.g. HTTP 451 geo-block)
+                Log.w("BinanceWS", "WebSocket failure on ${endpointCfg.url}: ${t.message} (HTTP ${response?.code})")
                 currentEndpointIndex = (currentEndpointIndex + 1) % wsEndpoints.size
                 scheduleReconnect()
             }

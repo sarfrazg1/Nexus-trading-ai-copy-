@@ -79,7 +79,7 @@ object OfflineTradingAnalysisEngine {
             q.contains("fall further") || q.contains("drop more") || q.contains("crash more") || q.contains("mazeed gir") || q.contains("نیچے جا") || q.contains("مزید گر") -> FallbackIntent.FURTHER_DOWNSIDE_RISK
             q.contains("support") || q.contains("resistance") || q.contains("levels") || q.contains("سپورٹ") || q.contains("مزاحمت") -> FallbackIntent.SUPPORT_RESISTANCE_LEVELS
             q.contains("good time to buy") || q.contains("should i buy") || q.contains("entry zone") || q.contains("entry") || q.contains("kharid") || q.contains("buy") || q.contains("انٹری") || q.contains("خرید") -> FallbackIntent.BUY_OPPORTUNITY_AND_ENTRY
-            q.contains("falling") || q.contains("dump") || q.contains("crash") || q.contains("moving") || q.contains("causing") || q.contains("why is") || q.contains("gir") || q.contains("کیوں گر") || q.contains("کیوں") -> FallbackIntent.MARKET_FALL_OR_MOVE
+            q.contains("falling") || q.contains("dump") || q.contains("crash") || q.contains("moving") || q.contains("causing") || q.contains("why is") || q.contains("tvl") || q.contains("defi") || q.contains("fear") || q.contains("greed") || q.contains("bybit") || q.contains("gir") || q.contains("کیوں گر") || q.contains("کیوں") -> FallbackIntent.MARKET_FALL_OR_MOVE
             q.contains("5m") || q.contains("15m") || q.contains("1h") || q.contains("4h") -> FallbackIntent.TIMEFRAME_COMPARISON
             q.contains("risk") || q.contains("leverage") || q.contains("stop loss") || q.contains("رسک") || q.contains("لیوریج") || q.contains("اسٹاپ لاس") -> FallbackIntent.RISK_MANAGEMENT
             q.contains("trend") || q.contains("analy") || q.contains("price") || q.contains("btc") || q.contains("eth") || q.contains("sol") || q.contains("gold") || q.contains("تجزیہ") || q.contains("قیمت") -> FallbackIntent.GENERAL_ASSET_SNAPSHOT
@@ -95,27 +95,27 @@ object OfflineTradingAnalysisEngine {
         lang: LearningLanguageMode,
         unavailableReason: String?
     ): String {
-        val reasonNote = unavailableReason?.takeIf { it.isNotBlank() } ?: "Online Gemini AI unavailable"
-        val dataMeta = "${ctx.dataStatus} • ${ctx.dataSource} (${ctx.lastUpdatedFormatted})"
+        val reasonNote = unavailableReason?.takeIf { it.isNotBlank() } ?: "User-Selected Offline Rule-Based Mode"
+        val dataMeta = "${ctx.dataStatus} • ${ctx.instrumentTypeLabel} • ${ctx.dataSource} (${ctx.lastUpdatedFormatted})"
         return when (lang) {
             LearningLanguageMode.ENGLISH -> """
                 ⚠️ [LIMITED OFFLINE RULE-BASED ANALYSIS — Not Conversational AI]
-                Online AI status: $reasonNote
+                Mode / Status: $reasonNote
                 Market Data: $dataMeta
             """.trimIndent()
             LearningLanguageMode.ROMAN_URDU -> """
-                ⚠️ [OFFLINE RULE-BASED ANALYSIS — Limited Fallback (Online AI Dastiyab Nahi)]
-                Wajah: $reasonNote
+                ⚠️ [OFFLINE RULE-BASED ANALYSIS — Limited Rule-Based Mode]
+                Status / Wajah: $reasonNote
                 Data Status: $dataMeta
             """.trimIndent()
             LearningLanguageMode.STANDARD_URDU -> """
-                ⚠️ [آف لائن اصولوں پر مبنی تجارتی تجزیہ — محدود متبادل موڈ]
-                آن لائن اے آئی دستیاب نہ ہونے کی وجہ: $reasonNote
-                مارکیٹ ڈیٹا کا وقت: $dataMeta
+                ⚠️ [آف لائن اصولوں پر مبنی تجارتی تجزیہ — محدود اصولی موڈ]
+                اسٹیٹس / وجہ: $reasonNote
+                مارکیٹ ڈیٹا: $dataMeta
             """.trimIndent()
             LearningLanguageMode.BILINGUAL -> """
-                ⚠️ [HYBRID BILINGUAL ANALYSIS / محدود آف لائن اصولی تجزیہ — Online AI Unavailable]
-                Reason: $reasonNote | Data: $dataMeta
+                ⚠️ [LIMITED OFFLINE BILINGUAL ANALYSIS / محدود آف لائن اصولی تجزیہ]
+                Status: $reasonNote | Data: $dataMeta
             """.trimIndent()
         }
     }
@@ -125,54 +125,69 @@ object OfflineTradingAnalysisEngine {
         ctx: MarketContextSnapshot,
         lang: LearningLanguageMode
     ): String {
-        val priceStr = if (ctx.isRealData) String.format(Locale.US, "$%.2f", ctx.currentPrice) else "Unavailable"
+        val priceStr = if (ctx.isRealData) fmtPrice(ctx.currentPrice) else "Unavailable"
         val chgStr = if (ctx.isRealData) String.format(Locale.US, "%+.2f%%", ctx.change24hPercent) else "N/A"
         val rsiStr = ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "Unavailable"
         val derivLine = ctx.derivativesSummary ?: "Derivatives data (Funding/OI) unavailable right now."
+        val crossEx = ctx.crossExchangeSummary ?: "Bybit V5 cross-check unavailable"
+        val globalLine = ctx.coinGeckoGlobalSummary ?: "CoinGecko global overview unavailable"
+        val defiLine = ctx.defiLlamaSummary ?: "DefiLlama TVL & stablecoin data unavailable"
+        val fngLine = ctx.fearGreedSummary ?: "Alternative.me Fear & Greed unavailable"
         val newsNote = if (ctx.recentNewsHeadlines.isNotEmpty()) {
-            "News feed (${ctx.newsSourceStatus}): ${ctx.recentNewsHeadlines.take(2).joinToString(" | ")}"
+            "Filtered headlines (${ctx.newsSourceStatus} — unverified causal claims): ${ctx.recentNewsHeadlines.take(2).joinToString(" | ")}"
         } else {
             "Live breaking news catalyst unavailable."
         }
 
         return when (lang) {
             LearningLanguageMode.ENGLISH -> """
-                📉 Verified Market Movement Breakdown (${ctx.assetName} / ${ctx.symbol})
-                • Current Price: $priceStr (24h: $chgStr)
-                • Broad Market: ${ctx.marketBreadthDetails}
-                • Momentum & Structure: RSI(14) is $rsiStr | ${ctx.emaCondition ?: "EMA structure unavailable"} | ${ctx.bosChochCondition ?: "SMC structure pending"}
+                📉 VERIFIED FACTS (${ctx.assetName} / ${ctx.symbol} • ${ctx.instrumentTypeLabel})
+                • Price: $priceStr (24h: $chgStr) | Market Breadth: ${ctx.marketBreadthDetails}
+                • Cross-Exchange Check: $crossEx
+                • Global / Rankings: $globalLine
+                • DeFi & Stablecoin Liquidity: $defiLine
+                • Sentiment (Fear & Greed): $fngLine
+                • Technicals & SMC: RSI(14) = $rsiStr | ${ctx.emaCondition ?: "EMA unavailable"} | ${ctx.bosChochCondition ?: "SMC structure pending"}
                 • Derivatives Positioning: $derivLine
-                • News Context: $newsNote
 
-                Honest Assessment: Live technicals and market breadth above show what price is doing right now, without guessing unverified news rumors. Watch support at ${fmtPrice(ctx.supportLevel)} and resistance at ${fmtPrice(ctx.resistanceLevel)}.
+                🔎 POSSIBLE EXPLANATIONS & HEADLINE CONTEXT (Not Proven Causal Drivers)
+                • News Wire: $newsNote
+                • Market Mechanics Note: Intraday drops or rallies frequently reflect leveraged positioning, funding crowding, or support/resistance liquidity sweeps rather than a single news headline. Watch support ${fmtPrice(ctx.supportLevel)} and resistance ${fmtPrice(ctx.resistanceLevel)}.
             """.trimIndent()
             LearningLanguageMode.ROMAN_URDU -> """
-                📉 Market Harkat Ka Haqeeqi Jaiza (${ctx.assetName} / ${ctx.symbol})
-                • Mojooda Qeemat: $priceStr (24h: $chgStr)
-                • Market Breadth: ${ctx.marketBreadthDetails}
-                • Momentum aur Structure: RSI(14) = $rsiStr | ${ctx.emaCondition ?: "EMA data dastiyab nahi"} | ${ctx.bosChochCondition ?: "SMC structure range mein hai"}
+                📉 TASDEEQ SHUDA HAQAIQ / VERIFIED FACTS (${ctx.assetName} / ${ctx.symbol} • ${ctx.instrumentTypeLabel})
+                • Mojooda Qeemat: $priceStr (24h: $chgStr) | Breadth: ${ctx.marketBreadthDetails}
+                • Cross-Exchange Mawazna: $crossEx
+                • Global Cap & Sentiment: $globalLine | $fngLine
+                • DeFi TVL & Stablecoins: $defiLine
+                • Momentum & Structure: RSI(14) = $rsiStr | ${ctx.emaCondition ?: "EMA dastiyab nahi"} | ${ctx.bosChochCondition ?: "SMC pending"}
                 • Derivatives (Funding/OI): $derivLine
-                • News Soorat-e-Haal: $newsNote
 
-                Wazahat: Rule-based fallback koi jhooti wajah nahi banata. Agar live news mein koi khas khabar nahi to harkat ki wajah zyada tar liquidity sweeps, funding positioning, aur technical levels hote hain. Support ${fmtPrice(ctx.supportLevel)} aur Resistance ${fmtPrice(ctx.resistanceLevel)} par nazar rakhein.
+                🔎 MUMKINA WUJOOOHAT AUR KHABREIN (Tasdeeq Shuda Sabab Nahi)
+                • News Context: $newsNote
+                • Wazahat: Kisi aik headline ko baghair saboot market ki wajah nahi samjha ja sakta; harkat ke peeche funding pressure, liquidity sweep ya technical resistance ho sakti hai. Support ${fmtPrice(ctx.supportLevel)} aur Resistance ${fmtPrice(ctx.resistanceLevel)} dekhein.
             """.trimIndent()
             LearningLanguageMode.STANDARD_URDU -> """
-                📉 مارکیٹ کی حالیہ حرکت کا مستند جائزہ (${ctx.assetName} / ${ctx.symbol})
-                • موجودہ قیمت: $priceStr (24 گھنٹے: $chgStr)
-                • مجموعی مارکیٹ صورتحال: ${ctx.marketBreadthDetails}
-                • مومینٹم اور اسٹرکچر: RSI(14) = $rsiStr | ${ctx.emaCondition ?: "ای ایم اے ڈیٹا دستیاب نہیں"}
+                📉 تصدیق شدہ حقائق / VERIFIED FACTS (${ctx.assetName} / ${ctx.symbol} • ${ctx.instrumentTypeLabel})
+                • موجودہ قیمت: $priceStr (24 گھنٹے: $chgStr) | مجموعی صورتحال: ${ctx.marketBreadthDetails}
+                • کراس ایکسچینج چیک: $crossEx
+                • عالمی کیپ و جذبات: $globalLine | $fngLine
+                • ڈی فائی اور اسٹیبل کوائن لیکویڈیٹی: $defiLine
+                • مومینٹم اور اسٹرکچر: RSI(14) = $rsiStr | ${ctx.emaCondition ?: "ای ایم اے دستیاب نہیں"}
                 • ڈیریویٹوز (فنڈنگ/اوپن انٹرسٹ): $derivLine
-                • خبروں کی صورتحال: $newsNote
 
-                نوٹ: آف لائن اصولی تجزیہ صرف تصدیق شدہ ڈیٹا دکھاتا ہے اور کوئی فرضی وجہ نہیں گھڑتا۔ اہم سپورٹ ${fmtPrice(ctx.supportLevel)} اور مزاحمت ${fmtPrice(ctx.resistanceLevel)} پر نظر رکھیں۔
+                🔎 ممکنہ وضاحتیں اور خبریں (حتمی سبب کے طور پر تصدیق شدہ نہیں)
+                • خبری صورتحال: $newsNote
+                • اہم نوٹ: صرف کسی خبر کی سرخی کو مارکیٹ حرکت کی حتمی وجہ قرار نہیں دیا جا سکتا؛ اکثر لیکویڈیشن، فنڈنگ ریٹ اور سپورٹ (${fmtPrice(ctx.supportLevel)}) یا مزاحمت (${fmtPrice(ctx.resistanceLevel)}) اہم کردار ادا کرتے ہیں۔
             """.trimIndent()
             LearningLanguageMode.BILINGUAL -> """
-                📉 Market Move Breakdown (${ctx.symbol}) / مارکیٹ کی حرکت کا جائزہ
-                • Price: $priceStr ($chgStr) | RSI(14): $rsiStr
-                • Breadth: ${ctx.marketBreadthDetails}
+                📉 VERIFIED FACTS (${ctx.symbol} • ${ctx.instrumentTypeLabel}) / تصدیق شدہ حقائق
+                • Price: $priceStr ($chgStr) | RSI(14): $rsiStr | Sentiment: $fngLine
+                • Cross-Exchange: $crossEx
+                • Global & DeFi: $globalLine | $defiLine
                 • Derivatives: $derivLine
-                • News: $newsNote
-                • اردو خلاصہ: تصدیق شدہ ڈیٹا کے مطابق اہم سپورٹ ${fmtPrice(ctx.supportLevel)} اور مزاحمت ${fmtPrice(ctx.resistanceLevel)} ہے؛ بغیر تصدیق کسی خبر پر قیاس آرائی نہ کریں۔
+                • Possible Explanations (ممکنہ وجوہات): $newsNote
+                • اردو خلاصہ: سپورٹ ${fmtPrice(ctx.supportLevel)} اور مزاحمت ${fmtPrice(ctx.resistanceLevel)} اہم ہیں؛ بغیر تصدیق کسی خبر کو حتمی وجہ نہ مانیں۔
             """.trimIndent()
         }
     }
@@ -553,38 +568,52 @@ object OfflineTradingAnalysisEngine {
         }
         val priceStr = fmtPrice(ctx.currentPrice)
         val changeStr = String.format(Locale.US, "%+.2f%%", ctx.change24hPercent)
+        val crossEx = ctx.crossExchangeSummary ?: "Bybit cross-check unavailable"
+        val globalLine = ctx.coinGeckoGlobalSummary ?: "CoinGecko global unavailable"
+        val defiLine = ctx.defiLlamaSummary ?: "DefiLlama unavailable"
+        val fngLine = ctx.fearGreedSummary ?: "Sentiment unavailable"
 
         return when (lang) {
             LearningLanguageMode.ENGLISH -> """
-                📊 [OFFLINE RULE-BASED ANALYSIS]
-                Asset: ${ctx.assetName} (${ctx.symbol}) | Price: $priceStr ($changeStr) | TF: ${ctx.timeframe}
+                📊 [OFFLINE RULE-BASED ANALYSIS — VERIFIED FACTS]
+                Asset: ${ctx.assetName} (${ctx.symbol} • ${ctx.instrumentTypeLabel}) | Price: $priceStr ($changeStr) | TF: ${ctx.timeframe}
+                • Cross-Exchange: $crossEx
+                • Global & DeFi: $globalLine | $defiLine
+                • Fear & Greed: $fngLine
                 • RSI (14): ${ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) + " — $rsiStatus" } ?: "Unavailable"}
                 • Trend / EMA: ${ctx.emaCondition ?: "Unavailable"}
                 • SMC Structure: ${ctx.bosChochCondition ?: "Pending"} | ${ctx.fvgStatus ?: "No FVG data"}
                 • Key Levels: Support ${fmtPrice(ctx.supportLevel)} | Resistance ${fmtPrice(ctx.resistanceLevel)} | Fib ${ctx.fibGoldenPocket ?: "N/A"}
                 • Derivatives: ${ctx.derivativesSummary ?: "Unavailable"}
-                • Scenario Guidance: ${if (rsi > 70.0) "Extended/overbought — wait for pullback confirmation before longing." else if (rsi < 30.0) "Oversold — watch for bullish structure shift at support." else "Balanced range — wait for clean breakout above resistance or hold at support with 1-2% risk."}
+                • Scenario Guidance (Possible Outcomes): ${if (rsi > 70.0) "Extended/overbought — wait for pullback confirmation before longing." else if (rsi < 30.0) "Oversold — watch for bullish structure shift at support." else "Balanced range — wait for clean breakout above resistance or hold at support with 1-2% risk."}
             """.trimIndent()
             LearningLanguageMode.ROMAN_URDU -> """
-                📊 [OFFLINE RULE-BASED ANALYSIS - NO FAKE AI]
-                Asset: ${ctx.assetName} (${ctx.symbol}) | Qeemat: $priceStr ($changeStr) | TF: ${ctx.timeframe}
+                📊 [OFFLINE RULE-BASED ANALYSIS — VERIFIED FACTS]
+                Asset: ${ctx.assetName} (${ctx.symbol} • ${ctx.instrumentTypeLabel}) | Qeemat: $priceStr ($changeStr) | TF: ${ctx.timeframe}
+                • Cross-Exchange: $crossEx
+                • Global & Sentiment: $globalLine | $fngLine
+                • DeFi Liquidity: $defiLine
                 • RSI (14): ${ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "N/A"} ($rsiStatus)
                 • EMA Trend: ${ctx.emaCondition ?: "Dastiyab nahi"}
                 • Support: ${fmtPrice(ctx.supportLevel)} | Resistance: ${fmtPrice(ctx.resistanceLevel)}
                 • Derivatives: ${ctx.derivativesSummary ?: "Dastiyab nahi"}
-                • Mashwara: Support ya Resistance ki confirmation ke baghair jaldi mein trade na lein aur Stop Loss lagayein.
+                • Mashwara (Possible Scenarios): Support ya Resistance ki confirmation ke baghair jaldi mein trade na lein aur Stop Loss lagayein.
             """.trimIndent()
             LearningLanguageMode.STANDARD_URDU -> """
-                📊 [آف لائن اصولوں پر مبنی تجارتی تجزیہ]
-                اثاثہ: ${ctx.assetName} (${ctx.symbol}) | قیمت: $priceStr ($changeStr) | ٹائم فریم: ${ctx.timeframe}
+                📊 [آف لائن اصولوں پر مبنی تجارتی تجزیہ — تصدیق شدہ حقائق]
+                اثاثہ: ${ctx.assetName} (${ctx.symbol} • ${ctx.instrumentTypeLabel}) | قیمت: $priceStr ($changeStr) | ٹائم فریم: ${ctx.timeframe}
+                • کراس ایکسچینج: $crossEx
+                • عالمی مارکیٹ اور جذبات: $globalLine | $fngLine
+                • ڈی فائی لیکویڈیٹی: $defiLine
                 • آر ایس آئی (RSI 14): ${ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "دستیاب نہیں"}
                 • رجحان (EMA): ${ctx.emaCondition ?: "دستیاب نہیں"}
                 • سپورٹ: ${fmtPrice(ctx.supportLevel)} | مزاحمت: ${fmtPrice(ctx.resistanceLevel)}
                 • ہدایت: تصدیق کے بغیر جلد بازی میں ٹریڈ نہ لگائیں اور ۱ تا ۲ فیصد سے زیادہ رسک نہ لیں۔
             """.trimIndent()
             LearningLanguageMode.BILINGUAL -> """
-                📊 [HYBRID BILINGUAL ANALYSIS / مشترکہ تجزیہ]
-                Asset: ${ctx.assetName} (${ctx.symbol}) | Price: $priceStr ($changeStr)
+                📊 [OFFLINE BILINGUAL ANALYSIS / مشترکہ اصولی تجزیہ]
+                Asset: ${ctx.assetName} (${ctx.symbol} • ${ctx.instrumentTypeLabel}) | Price: $priceStr ($changeStr)
+                • Sentiment & DeFi: $fngLine | $defiLine
                 • RSI(14): ${ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "N/A"} | Support: ${fmtPrice(ctx.supportLevel)} | Resistance: ${fmtPrice(ctx.resistanceLevel)}
                 • اردو خلاصہ: تصدیق شدہ لیولز کے مطابق واضح بریک آؤٹ یا سپورٹ ری ٹیسٹ کا انتظار کریں اور اسٹاپ لاس لازمی لگائیں۔
             """.trimIndent()

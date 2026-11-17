@@ -70,7 +70,7 @@ class NexusAiAssistantTest {
         val promptContext = snapshot.toPromptContext(LearningLanguageMode.ENGLISH)
         assertTrue(promptContext.contains("BTCUSDT"))
         assertTrue(promptContext.contains("92500.0"))
-        assertTrue(promptContext.contains("VERIFIED MARKET CONTEXT"))
+        assertTrue(promptContext.contains("VERIFIED HYBRID MARKET FACTS"))
     }
 
     @Test

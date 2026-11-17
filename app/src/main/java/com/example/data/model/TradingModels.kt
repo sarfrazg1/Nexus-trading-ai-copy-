@@ -105,18 +105,22 @@ data class MarketAlert(
 )
 
 data class MarketOverview(
-    val fearAndGreedIndex: Int = 67,
-    val sentimentLabel: String = "Greed",
-    val bullishAssetsPercent: Int = 62,
-    val volatilityState: String = "Moderate (19.4%)",
-    val activeSignalsCount: Int = 8,
-    val marketStatus: String = "Open / Trading",
-    val connectedFeedsCount: Int = 1,
+    val fearAndGreedIndex: Int = 0,
+    val sentimentLabel: String = "Unavailable",
+    val bullishAssetsPercent: Int = 0,
+    val volatilityState: String = "Unavailable",
+    val activeSignalsCount: Int = 0,
+    val marketStatus: String = "Syncing Public Feeds",
+    val connectedFeedsCount: Int = 0,
     val totalFeedsCount: Int = 20,
-    val totalCryptoMarketCap: String = "$2.48 Trillion",
-    val cryptoVolume24h: String = "$84.2 Billion",
-    val btcDominance: String = "56.4%",
-    val dataProviderSummary: String = "Binance WebSocket (Live) • CoinGecko API • Commodities Feed"
+    val totalCryptoMarketCap: String = "Unavailable",
+    val cryptoVolume24h: String = "Unavailable",
+    val btcDominance: String = "Unavailable",
+    val dataProviderSummary: String = "Binance USDT-M Futures • Bybit V5 • CoinGecko • DefiLlama • Alternative.me",
+    val defiTvlFormatted: String = "Unavailable",
+    val stablecoinSupplyFormatted: String = "Unavailable",
+    val sentimentTimestamp: String = "Unavailable",
+    val hasLiveSentiment: Boolean = false
 )
 
 data class ScannerCriteria(

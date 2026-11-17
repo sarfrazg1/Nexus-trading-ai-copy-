@@ -70,10 +70,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import com.example.data.ai.AiProviderAvailability
+import com.example.data.ai.AiProviderStatus
+import com.example.data.ai.AiProviderType
 import com.example.data.ai.MessageSender
 import com.example.data.ai.NexusChatMessage
 import com.example.data.ai.NexusConversation
 import com.example.data.learning.LearningLanguageMode
+import com.example.data.model.MarketDataStatus
+import com.example.data.providers.UnifiedHybridMarketState
 import com.example.data.settings.UrduFontSize
 import com.example.ui.theme.NexusTheme
 import com.example.ui.theme.NotoNastaliqUrduFontFamily
@@ -88,13 +95,19 @@ fun NexusAiScreen(
     isLoading: Boolean,
     isOnlineAiAvailable: Boolean,
     lastAiError: String? = null,
-    dataFreshnessLabel: String = "Binance Public Feeds",
+    dataFreshnessLabel: String = "Binance USDT-M Futures",
     currentAssetSymbol: String,
     currentAssetPrice: Double,
     languageMode: LearningLanguageMode,
     urduFontSize: UrduFontSize = UrduFontSize.MEDIUM,
+    selectedAiProvider: AiProviderType = AiProviderType.GEMINI_FIREBASE,
+    aiProviderStatuses: List<AiProviderStatus> = emptyList(),
+    hybridMarketState: UnifiedHybridMarketState = UnifiedHybridMarketState(),
     onSendMessage: (String) -> Unit,
     onRetryMessage: (String) -> Unit = {},
+    onRetryLastFailedQuery: () -> Unit = {},
+    onRunOfflineFallback: () -> Unit = {},
+    onSelectAiProvider: (AiProviderType) -> Unit = {},
     onDismissError: () -> Unit = {},
     onNewChat: () -> Unit,
     onClearChat: () -> Unit,
@@ -107,6 +120,7 @@ fun NexusAiScreen(
     val context = LocalContext.current
     val listState = rememberLazyListState()
     var inputText by remember { mutableStateOf("") }
+    var showHybridFeedsDetails by remember { mutableStateOf(false) }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length, isLoading) {
         if (messages.isNotEmpty()) {
@@ -154,7 +168,15 @@ fun NexusAiScreen(
         }
     }
 
-    val isFallbackModeActive = !isOnlineAiAvailable || lastAiError != null
+    val isFallbackModeActive = selectedAiProvider == AiProviderType.OFFLINE_RULE_BASED ||
+        (!isOnlineAiAvailable && lastAiError == null)
+    val headerSubtitle = when {
+        lastAiError != null -> "Online AI Runtime Error • Retry or Switch"
+        selectedAiProvider == AiProviderType.OFFLINE_RULE_BASED -> "Offline Rule-Based Analyzer Active"
+        selectedAiProvider == AiProviderType.DEEPSEEK -> "DeepSeek Chat • 6-Source Hybrid Grounded"
+        !isOnlineAiAvailable -> "Limited Offline Fallback Active"
+        else -> "Gemini 3.8 Flash • Free Tier"
+    }
 
     Column(
         modifier = modifier
@@ -205,16 +227,22 @@ fun NexusAiScreen(
                                     modifier = Modifier
                                         .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(if (!isFallbackModeActive) colors.bullishGreen else colors.gold)
+                                        .background(
+                                            when {
+                                                lastAiError != null -> colors.bearishRed
+                                                isFallbackModeActive -> colors.gold
+                                                else -> colors.bullishGreen
+                                            }
+                                        )
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (!isFallbackModeActive) {
-                                        "Gemini 3.8 Flash • Free Tier"
-                                    } else {
-                                        "Limited Offline Fallback Active"
+                                    text = headerSubtitle,
+                                    color = when {
+                                        lastAiError != null -> colors.bearishRed
+                                        isFallbackModeActive -> colors.gold
+                                        else -> colors.textSecondary
                                     },
-                                    color = if (!isFallbackModeActive) colors.textSecondary else colors.gold,
                                     fontSize = 11.sp
                                 )
                             }
@@ -249,7 +277,7 @@ fun NexusAiScreen(
                     }
                 }
 
-                // Active Market Context & Data Freshness Badge
+                // Active Market Context & Data Freshness Badge + Collapsible 6-Source Hybrid Status
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -276,6 +304,137 @@ fun NexusAiScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+
+                // AI Provider Selector Chips + 6-Source Hybrid Feed Toggle
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AiProviderType.entries.forEach { provider ->
+                        val status = aiProviderStatuses.firstOrNull { it.provider == provider }
+                        val isSelected = selectedAiProvider == provider
+                        val dotColor = when (status?.availability) {
+                            AiProviderAvailability.READY -> colors.bullishGreen
+                            AiProviderAvailability.COOLDOWN_RATE_LIMIT -> colors.gold
+                            AiProviderAvailability.DISABLED_PAYMENT_REQUIRED,
+                            AiProviderAvailability.ERROR -> colors.bearishRed
+                            AiProviderAvailability.UNCONFIGURED -> colors.textSecondary
+                            null -> if (provider == AiProviderType.OFFLINE_RULE_BASED) colors.gold else colors.textSecondary
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) colors.gold.copy(alpha = 0.18f) else colors.background,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isSelected) colors.gold else colors.border
+                            ),
+                            modifier = Modifier
+                                .clickable(enabled = !isLoading) { onSelectAiProvider(provider) }
+                                .testTag("provider_chip_${provider.id}")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(dotColor)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = provider.badgeLabel,
+                                    color = if (isSelected) colors.gold else colors.textPrimary,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    val liveFeeds = hybridMarketState.providerStatuses.values.count { it.dataStatus == MarketDataStatus.LIVE }
+                    val totalTracked = hybridMarketState.providerStatuses.size.coerceAtLeast(6)
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.background,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border),
+                        modifier = Modifier
+                            .clickable { showHybridFeedsDetails = !showHybridFeedsDetails }
+                            .testTag("hybrid_feeds_toggle")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Feeds $liveFeeds/$totalTracked Live",
+                                color = colors.textSecondary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                imageVector = if (showHybridFeedsDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle Hybrid Feeds Details",
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (showHybridFeedsDetails && hybridMarketState.providerStatuses.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.background,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.7f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                text = "6-Source Public Data Status (${hybridMarketState.assembledAtUtc})",
+                                color = colors.gold,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            hybridMarketState.providerStatuses.values.forEach { meta ->
+                                val statusColor = when (meta.dataStatus) {
+                                    MarketDataStatus.LIVE -> colors.bullishGreen
+                                    MarketDataStatus.STALE, MarketDataStatus.DELAYED -> colors.gold
+                                    MarketDataStatus.UNAVAILABLE -> colors.bearishRed
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 1.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = meta.providerName,
+                                        color = colors.textPrimary,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${meta.dataStatus.label} (${meta.health.label})",
+                                        color = statusColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Conversation Threads Switcher (when multiple chats exist)
@@ -329,55 +488,92 @@ fun NexusAiScreen(
             }
         }
 
-        // Transparent Online AI Error Banner with Retry & Dismiss
+        // Transparent Online AI Runtime Error Banner with Retry, Switch Provider & Explicit Offline Trigger
         if (lastAiError != null) {
             val lastFallbackMsgId = messages.lastOrNull { it.isOfflineEngine && it.originalQueryForRetry != null }?.id
             Surface(
-                color = colors.gold.copy(alpha = 0.14f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.gold.copy(alpha = 0.4f)),
+                color = colors.bearishRed.copy(alpha = 0.12f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, colors.bearishRed.copy(alpha = 0.45f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 6.dp)
                     .testTag("ai_error_banner"),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.WarningAmber,
-                        contentDescription = "AI Warning",
-                        tint = colors.gold,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = lastAiError,
-                        color = colors.textPrimary,
-                        fontSize = 11.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (lastFallbackMsgId != null && !isLoading) {
-                        TextButton(
-                            onClick = { onRetryMessage(lastFallbackMsgId) },
-                            modifier = Modifier.testTag("ai_banner_retry_button")
-                        ) {
-                            Text("Retry", color = colors.gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    IconButton(
-                        onClick = onDismissError,
-                        modifier = Modifier.size(28.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Dismiss error",
-                            tint = colors.textSecondary,
-                            modifier = Modifier.size(14.dp)
+                            imageVector = Icons.Default.WarningAmber,
+                            contentDescription = "AI Runtime Error",
+                            tint = colors.bearishRed,
+                            modifier = Modifier.size(18.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = lastAiError,
+                            color = colors.textPrimary,
+                            fontSize = 11.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onDismissError,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss error",
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                if (lastFallbackMsgId != null) onRetryMessage(lastFallbackMsgId)
+                                else onRetryLastFailedQuery()
+                            },
+                            enabled = !isLoading,
+                            modifier = Modifier.testTag("ai_banner_retry_button")
+                        ) {
+                            Text("Retry Online AI", color = colors.gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        val altProvider = if (selectedAiProvider == AiProviderType.GEMINI_FIREBASE) {
+                            AiProviderType.DEEPSEEK
+                        } else {
+                            AiProviderType.GEMINI_FIREBASE
+                        }
+                        TextButton(
+                            onClick = { onSelectAiProvider(altProvider) },
+                            enabled = !isLoading,
+                            modifier = Modifier.testTag("ai_switch_provider_button")
+                        ) {
+                            Text("Switch to ${altProvider.badgeLabel}", color = colors.textPrimary, fontSize = 11.sp)
+                        }
+
+                        TextButton(
+                            onClick = onRunOfflineFallback,
+                            enabled = !isLoading,
+                            modifier = Modifier.testTag("ai_explicit_offline_button")
+                        ) {
+                            Text("Run Limited Offline Analyzer", color = colors.textSecondary, fontSize = 11.sp)
+                        }
                     }
                 }
             }
@@ -599,7 +795,7 @@ fun NexusAiScreen(
                     }
 
                     Text(
-                        text = "Free-Tier Gemini • Public Binance",
+                        text = "${selectedAiProvider.badgeLabel} • 6-Source Public Feeds",
                         color = colors.textSecondary,
                         fontSize = 10.sp
                     )
@@ -722,7 +918,7 @@ private fun ChatMessageItem(
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 ) {
                     Text(
-                        text = "Limited Offline Fallback",
+                        text = message.providerUsed.ifBlank { "Limited Offline Fallback" },
                         color = colors.gold,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold
@@ -736,8 +932,9 @@ private fun ChatMessageItem(
                         .background(colors.bullishGreen.copy(alpha = 0.14f))
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 ) {
+                    val activeBadge = message.providerUsed.ifBlank { "Gemini 3.8 Flash" }
                     Text(
-                        text = if (message.isStreaming) "Gemini Streaming…" else "Gemini 3.8 Flash",
+                        text = if (message.isStreaming) "$activeBadge Streaming…" else activeBadge,
                         color = colors.bullishGreen,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold

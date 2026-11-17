@@ -20,7 +20,8 @@ data class NexusChatMessage(
     val originalQueryForRetry: String? = null,
     val dataTimestampBadge: String? = null,
     val attachedContextSummary: String? = null,
-    val suggestedFollowUps: List<String> = emptyList()
+    val suggestedFollowUps: List<String> = emptyList(),
+    val providerUsed: String = "Gemini 3.8 Flash"
 )
 
 enum class MessageSender {
@@ -40,8 +41,8 @@ data class NexusConversation(
 )
 
 /**
- * Comprehensive, timestamped Market Context snapshot built from live Binance public streams,
- * 22 technical indicators, SMC analysis, watchlist scanners, and financial news.
+ * Comprehensive, timestamped Market Context snapshot built from all 6 verified public data feeds,
+ * 22 technical indicators, SMC analysis, watchlist scanners, cross-exchange checks, and filtered GDELT news.
  */
 data class MarketContextSnapshot(
     val symbol: String,
@@ -80,13 +81,20 @@ data class MarketContextSnapshot(
     val multiTimeframeSummary: String? = null,
     val newsSourceStatus: String = "Preloaded Macro Reference",
     val recentNewsHeadlines: List<String> = emptyList(),
-    val contextBuiltAtFormatted: String = lastUpdatedFormatted
+    val contextBuiltAtFormatted: String = lastUpdatedFormatted,
+    // Hybrid Multi-Provider Verified Sections
+    val instrumentTypeLabel: String = "USDT-M Perpetual Futures",
+    val crossExchangeSummary: String? = null,
+    val coinGeckoGlobalSummary: String? = null,
+    val defiLlamaSummary: String? = null,
+    val fearGreedSummary: String? = null,
+    val providerHealthSummary: String? = null
 ) {
     fun toPromptContext(lang: LearningLanguageMode): String {
         val sb = StringBuilder()
-        sb.appendLine("=== VERIFIED MARKET CONTEXT (DO NOT FABRICATE DATA) ===")
+        sb.appendLine("=== VERIFIED HYBRID MARKET FACTS (NEVER INVENT DATA) ===")
         sb.appendLine("Context Built At: $contextBuiltAtFormatted")
-        sb.appendLine("Primary Asset: $assetName ($symbol)")
+        sb.appendLine("Primary Asset: $assetName ($symbol) | Instrument: $instrumentTypeLabel")
         if (isRealData && currentPrice > 0.0) {
             sb.appendLine("Price: $$currentPrice (24h: ${String.format(Locale.US, "%+.2f%%", change24hPercent)})")
             high24h?.let { h -> low24h?.let { l -> sb.appendLine("24h Range: $$l - $$h") } }
@@ -94,8 +102,16 @@ data class MarketContextSnapshot(
         } else {
             sb.appendLine("Price: UNAVAILABLE (Live quote not yet connected for $symbol)")
         }
-        sb.appendLine("Data Status: $dataStatus | Data Source: $dataSource | Asset Timestamp: $lastUpdatedFormatted")
+        sb.appendLine("Data Status: $dataStatus | Source Attribution: $dataSource | Timestamp: $lastUpdatedFormatted")
         sb.appendLine("Active Chart Timeframe: $timeframe")
+
+        sb.appendLine("--- Cross-Exchange Consistency (Binance Futures vs Bybit V5) ---")
+        sb.appendLine(crossExchangeSummary ?: "Cross-exchange comparison unavailable.")
+
+        sb.appendLine("--- Global Crypto, Sentiment & On-Chain DeFi Liquidity ---")
+        sb.appendLine("CoinGecko Global & Rankings: ${coinGeckoGlobalSummary ?: "Unavailable"}")
+        sb.appendLine("Alternative.me Fear & Greed: ${fearGreedSummary ?: "Unavailable"}")
+        sb.appendLine("DefiLlama DeFi TVL & Stablecoins: ${defiLlamaSummary ?: "Unavailable"}")
 
         sb.appendLine("--- Technical Indicators & SMC ---")
         rsi14?.let {
@@ -112,7 +128,7 @@ data class MarketContextSnapshot(
         multiTimeframeSummary?.let { sb.appendLine("Multi-Timeframe Structure: $it") }
         signalDecision?.let { sb.appendLine("NEXUS Signal Engine Decision: $it (Confidence: ${confidenceScore ?: "N/A"}/100)") }
 
-        sb.appendLine("--- Binance Futures Derivatives ---")
+        sb.appendLine("--- Binance USDT-M Futures Derivatives ---")
         if (!derivativesSummary.isNullOrBlank()) {
             sb.appendLine(derivativesSummary)
         } else {
@@ -135,17 +151,23 @@ data class MarketContextSnapshot(
             sb.appendLine(it)
         }
 
-        sb.appendLine("--- News & Macroeconomic Feed ($newsSourceStatus) ---")
+        sb.appendLine("--- Filtered News Headlines ($newsSourceStatus) ---")
+        sb.appendLine("IMPORTANT: Headlines below are unverified potential context, NOT proven causal explanations.")
         if (recentNewsHeadlines.isNotEmpty()) {
             recentNewsHeadlines.forEach { sb.appendLine("• $it") }
         } else {
             relevantNewsSummary?.let { sb.appendLine("Recent Asset News: $it") }
             macroEventSummary?.let { sb.appendLine("Macro Environment: $it") }
             if (relevantNewsSummary == null && macroEventSummary == null) {
-                sb.appendLine("No live news items available.")
+                sb.appendLine("No live filtered news items available.")
             }
         }
-        sb.appendLine("======================================================")
+
+        providerHealthSummary?.let {
+            sb.appendLine("--- Provider Health & Cache Status ---")
+            sb.appendLine(it)
+        }
+        sb.appendLine("==========================================================")
         return sb.toString()
     }
 }

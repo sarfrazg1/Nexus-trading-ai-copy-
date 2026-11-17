@@ -16,7 +16,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class FinancialNewsService {
+class FinancialNewsService(
+    private val gdeltProvider: com.example.data.providers.GdeltNewsProvider = com.example.data.providers.GdeltNewsProvider()
+) {
 
     private var cachedNews: List<MarketNews> = emptyList()
     private var lastFetchTimestamp: Long = 0L
@@ -29,6 +31,14 @@ class FinancialNewsService {
     var lastFetchTimeFormatted: String = "Preloaded Reference"
         private set
 
+    @Volatile
+    var lastFilteredNews: List<com.example.data.providers.FilteredNewsItem> = emptyList()
+        private set
+
+    @Volatile
+    var lastGdeltMetadata: com.example.data.providers.ProviderMetadata? = null
+        private set
+
     suspend fun fetchMarketNews(forceRefresh: Boolean = false): List<MarketNews> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         // Cache for 3 minutes unless force refreshed
@@ -36,92 +46,26 @@ class FinancialNewsService {
             return@withContext cachedNews
         }
 
-        val networkNews = tryFetchGdeltNews()
-        val combined = if (networkNews.isNotEmpty()) {
+        val outcome = gdeltProvider.fetchFilteredNews()
+        lastGdeltMetadata = outcome.metadata
+        val filteredItems = outcome.data.orEmpty()
+        lastFilteredNews = filteredItems
+
+        val combined = if (filteredItems.isNotEmpty()) {
             lastFetchWasLive = true
-            lastFetchTimeFormatted = SimpleDateFormat("HH:mm:ss dd-MMM-yyyy", Locale.US).format(Date(now))
-            networkNews
+            lastFetchTimeFormatted = outcome.metadata.timestampFormatted
+            filteredItems.map { it.article }
         } else {
             lastFetchWasLive = false
-            lastFetchTimeFormatted = "Live feed unavailable (showing static macro reference)"
+            lastFetchTimeFormatted = outcome.metadata.errorMessage?.let {
+                "Live GDELT unavailable ($it) — showing static macro reference"
+            } ?: "Live GDELT unavailable (showing static macro reference)"
             getVerifiedMacroNews()
         }
 
         cachedNews = combined
         lastFetchTimestamp = now
         combined
-    }
-
-    private fun tryFetchGdeltNews(): List<MarketNews> {
-        val newsList = mutableListOf<MarketNews>()
-        var connection: HttpURLConnection? = null
-        try {
-            // Free GDELT Project API for financial, central bank, and crypto coverage
-            val queryUrl = "https://api.gdeltproject.org/api/v2/doc/doc?query=(bitcoin+OR+crypto+OR+\"federal+reserve\"+OR+inflation+OR+gold+OR+\"crude+oil\")+sourcelang:english&mode=artlist&maxrecords=20&format=json"
-            val url = URL(queryUrl)
-            connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 5000
-                readTimeout = 6000
-                setRequestProperty("User-Agent", "NexusTradingAI/1.0 (Android)")
-                setRequestProperty("Accept", "application/json")
-            }
-
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                val responseStr = reader.use { it.readText() }
-                val rootJson = JSONObject(responseStr)
-
-                if (rootJson.has("articles")) {
-                    val articlesArray = rootJson.getJSONArray("articles")
-                    for (i in 0 until articlesArray.length()) {
-                        val art = articlesArray.getJSONObject(i)
-                        val title = art.optString("title", "").trim()
-                        if (title.isBlank()) continue
-
-                        val articleUrl = art.optString("url", "")
-                        val domain = art.optString("domain", "Financial Wire")
-                        val seendate = art.optString("seendate", "")
-                        val formattedDate = formatGdeltDate(seendate)
-
-                        val rawNews = MarketNews(
-                            id = "gdelt_${i}_${seendate.take(8)}",
-                            title = title,
-                            source = domain.replaceFirstChar { it.uppercase() },
-                            timestamp = formattedDate,
-                            category = "Financial Wire",
-                            summary = "Real-time dispatch from $domain regarding macroeconomic catalysts and market structural shifts.",
-                            impact = NewsImpact.NEUTRAL,
-                            fullContent = "Direct financial wire report from $domain.\n\nSource: $articleUrl\n\nMonitor verified volume and order book reaction across timeframes.",
-                            url = articleUrl
-                        )
-
-                        val enriched = NewsImpactAnalyzer.enrichNewsItem(rawNews)
-                        newsList.add(enriched)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w("FinancialNewsService", "GDELT live news fetch failed or timed out: ${e.message}")
-        } finally {
-            connection?.disconnect()
-        }
-        return newsList
-    }
-
-    private fun formatGdeltDate(gdeltDate: String): String {
-        return try {
-            if (gdeltDate.length >= 14) {
-                val inputFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US)
-                val date = inputFormat.parse(gdeltDate) ?: Date()
-                val outputFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.US)
-                "${outputFormat.format(date)} UTC"
-            } else {
-                "Recent Wire"
-            }
-        } catch (_: Exception) {
-            "Recent Wire"
-        }
     }
 
     /**

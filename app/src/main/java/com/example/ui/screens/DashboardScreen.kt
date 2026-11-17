@@ -314,7 +314,9 @@ fun DashboardScreen(
                 fearAndGreedIndex = overview.fearAndGreedIndex,
                 sentimentLabel = overview.sentimentLabel,
                 bullishPercent = overview.bullishAssetsPercent,
-                volatilityState = overview.volatilityState
+                volatilityState = overview.volatilityState,
+                hasLiveSentiment = overview.hasLiveSentiment,
+                sourceLabel = overview.sentimentTimestamp
             )
         }
 
@@ -499,6 +501,33 @@ private fun MarketOverviewHeader(
                         text = overview.btcDominance,
                         style = MaterialTheme.typography.bodyMedium.copy(color = BullishGreen, fontWeight = FontWeight.Bold)
                     )
+                }
+            }
+
+            if (overview.defiTvlFormatted != "Unavailable" || overview.stablecoinSupplyFormatted != "Unavailable") {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NavySurfaceVariant.copy(alpha = 0.45f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("DeFi TVL (DefiLlama)", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
+                        Text(
+                            text = overview.defiTvlFormatted,
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Stablecoin Float", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
+                        Text(
+                            text = overview.stablecoinSupplyFormatted,
+                            style = MaterialTheme.typography.bodySmall.copy(color = BullishGreen, fontWeight = FontWeight.Bold)
+                        )
+                    }
                 }
             }
 

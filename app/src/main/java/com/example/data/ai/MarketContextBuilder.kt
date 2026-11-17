@@ -120,7 +120,8 @@ object MarketContextBuilder {
         allAiSignals: List<AiTradingSignal> = emptyList(),
         derivatives: BinanceFuturesApiClient.DerivativesSnapshot? = null,
         isLiveNewsFeed: Boolean = false,
-        newsLastFetchedFormatted: String = "Preloaded Macro Reference"
+        newsLastFetchedFormatted: String = "Preloaded Macro Reference",
+        hybridState: com.example.data.providers.UnifiedHybridMarketState? = null
     ): MarketContextSnapshot {
         val symbol = asset?.symbol ?: signal?.symbol ?: futuresSignal?.symbol ?: "BTCUSDT"
         val assetName = asset?.name ?: futuresSignal?.baseAsset ?: "Bitcoin"
@@ -257,6 +258,63 @@ object MarketContextBuilder {
             "${item.title} [${item.source} • ${item.timestamp} • ${item.impact.label}/${item.impactLevel.label}]"
         }
 
+        val resolvedBinancePair = when {
+            symbol.contains("/") -> symbol.replace("/", "").uppercase(Locale.US)
+            symbol.endsWith("USDT", ignoreCase = true) -> symbol.uppercase(Locale.US)
+            else -> "${(asset?.id ?: symbol).uppercase(Locale.US)}USDT"
+        }
+
+        val sourceLower = (asset?.dataSourceName ?: "").lowercase(Locale.US)
+        val instrumentTypeLabel = when {
+            sourceLower.contains("spot") -> "Spot Market"
+            sourceLower.contains("futures") || sourceLower.contains("perpetual") -> "USDT-M Perpetual Futures"
+            asset?.category == AssetCategory.COMMODITIES -> "Commodities / Macro Quote"
+            hybridState?.primaryFuturesQuotes?.containsKey(resolvedBinancePair) == true -> "USDT-M Perpetual Futures"
+            else -> "USDT-M Perpetual Futures"
+        }
+
+        val crossExchangeText = hybridState?.crossExchangeComparisons?.get(resolvedBinancePair)?.let { cmp ->
+            if (cmp.isComparable && cmp.secondaryQuote != null) {
+                "Verified Match (${cmp.symbol}, ${cmp.marketType.label}): ${cmp.primaryQuote.exchange} $${fmt(cmp.primaryQuote.lastPrice)} vs ${cmp.secondaryQuote.exchange} $${fmt(cmp.secondaryQuote.lastPrice)} | ${cmp.validationNote}"
+            } else {
+                cmp.validationNote
+            }
+        }
+
+        val coinGeckoText = hybridState?.coinGeckoGlobal?.let { cg ->
+            val btc7d = cg.btc7dChangePercent?.let { String.format(Locale.US, " | BTC 7d: %+.2f%%", it) } ?: ""
+            val top5 = cg.topRankedCoins.take(5).joinToString(", ") {
+                "#${it.rank} ${it.symbol} $${fmt(it.currentPriceUsd)} (${String.format(Locale.US, "%+.2f%%", it.change24hPercent)})"
+            }
+            val rankStr = if (top5.isNotBlank()) " | Top Rankings (Spot): $top5" else ""
+            "Cap: ${cg.totalMarketCapFormatted} | 24h Vol: ${cg.totalVolume24hFormatted} | BTC Dom: ${cg.btcDominanceFormatted}$btc7d$rankStr [${cg.metadata.dataStatus.label} @ ${cg.metadata.timestampFormatted}]"
+        }
+
+        val defiLlamaText = hybridState?.defiSnapshot?.let { defi ->
+            val chainsStr = defi.topChains.take(3).joinToString(", ") {
+                "${it.chainName}: ${com.example.data.providers.formatCompactUsd(it.tvlUsd)}"
+            }
+            val domParts = listOfNotNull(
+                defi.usdtDominancePercent?.let { String.format(Locale.US, "USDT %.1f%%", it) },
+                defi.usdcDominancePercent?.let { String.format(Locale.US, "USDC %.1f%%", it) }
+            ).joinToString(" / ")
+            val domStr = if (domParts.isNotBlank()) " ($domParts)" else ""
+            "Total DeFi TVL: ${defi.totalTvlFormatted} (Top: $chainsStr) | Stablecoin Float: ${defi.totalStablecoinFormatted}$domStr [${defi.metadata.dataStatus.label} @ ${defi.metadata.timestampFormatted}]"
+        }
+
+        val fearGreedText = hybridState?.fearGreed?.let { fg ->
+            val delta7d = fg.sevenDayDelta?.let {
+                String.format(Locale.US, " | 7d Delta: %+d pts", it)
+            } ?: ""
+            "${fg.value}/100 (${fg.classification})$delta7d [${fg.metadata.dataStatus.label} @ ${fg.metadata.timestampFormatted}]"
+        }
+
+        val providerHealthText = hybridState?.providerStatuses?.values?.takeIf { it.isNotEmpty() }?.joinToString("\n") { meta ->
+            val note = meta.rateLimitNote ?: meta.errorMessage
+            val suffix = if (!note.isNullOrBlank()) " — $note" else ""
+            "• ${meta.providerName}: ${meta.dataStatus.label} (${meta.health.label}) @ ${meta.timestampFormatted}$suffix"
+        }
+
         return MarketContextSnapshot(
             symbol = symbol,
             assetName = assetName,
@@ -307,7 +365,13 @@ object MarketContextBuilder {
             multiTimeframeSummary = multiTfSummary,
             newsSourceStatus = newsSourceDesc,
             recentNewsHeadlines = headlines,
-            contextBuiltAtFormatted = contextBuiltAt
+            contextBuiltAtFormatted = contextBuiltAt,
+            instrumentTypeLabel = instrumentTypeLabel,
+            crossExchangeSummary = crossExchangeText,
+            coinGeckoGlobalSummary = coinGeckoText,
+            defiLlamaSummary = defiLlamaText,
+            fearGreedSummary = fearGreedText,
+            providerHealthSummary = providerHealthText
         )
     }
 

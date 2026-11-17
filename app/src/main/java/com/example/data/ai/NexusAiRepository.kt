@@ -3,11 +3,6 @@ package com.example.data.ai
 import android.content.Context
 import android.util.Log
 import com.example.data.learning.LearningLanguageMode
-import com.google.firebase.Firebase
-import com.google.firebase.ai.ai
-import com.google.firebase.ai.type.Content
-import com.google.firebase.ai.type.content
-import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
@@ -30,189 +25,270 @@ sealed interface NexusAiStreamResult {
         val message: NexusChatMessage,
         val onlineErrorReason: String? = null
     ) : NexusAiStreamResult
+    data class Error(
+        val provider: AiProviderType,
+        val errorMessage: String,
+        val failedQuery: String,
+        val contextSnapshot: MarketContextSnapshot,
+        val canRetry: Boolean = true,
+        val isQuotaOrPaymentDisabled: Boolean = false
+    ) : NexusAiStreamResult
 }
 
 /**
- * Abstraction over generative AI inference so Firebase AI Logic (Gemini 3.8 Flash)
- * is used in production and deterministic/faked clients can be tested on JVM.
- */
-interface GenerativeAiClient {
-    fun isConfigured(): Boolean
-    fun streamChat(
-        systemInstruction: String,
-        history: List<Pair<String, String>>,
-        userMessage: String
-    ): Flow<String>
-}
-
-class FirebaseGenerativeAiClient : GenerativeAiClient {
-    private val probeModel by lazy {
-        try {
-            Firebase.ai.generativeModel(NEXUS_GEMINI_MODEL_NAME)
-        } catch (e: Exception) {
-            Log.e(TAG, "Firebase AI Logic probe initialization failed", e)
-            null
-        }
-    }
-
-    override fun isConfigured(): Boolean = probeModel != null
-
-    override fun streamChat(
-        systemInstruction: String,
-        history: List<Pair<String, String>>,
-        userMessage: String
-    ): Flow<String> = flow {
-        val model = Firebase.ai.generativeModel(
-            modelName = NEXUS_GEMINI_MODEL_NAME,
-            generationConfig = generationConfig {
-                temperature = 0.45f
-                topP = 0.9f
-                maxOutputTokens = 2048
-            },
-            systemInstruction = content { text(systemInstruction) }
-        )
-
-        val sdkHistory: List<Content> = history.map { (role, text) ->
-            content(role) { text(text) }
-        }
-
-        val responseFlow = if (sdkHistory.isNotEmpty()) {
-            model.startChat(history = sdkHistory).sendMessageStream(userMessage)
-        } else {
-            model.generateContentStream(userMessage)
-        }
-
-        responseFlow.collect { chunk ->
-            val chunkText = chunk.text.orEmpty()
-            if (chunkText.isNotEmpty()) {
-                emit(chunkText)
-            }
-        }
-    }
-}
-
-/**
- * Manages Online Generative AI via Firebase AI Logic (free-tier Gemini 3.8 Flash)
- * with multi-turn conversation memory, real-time market grounding, categorized error handling,
- * retry support, and transparent fallback to OfflineTradingAnalysisEngine.
+ * Manages Multi-Provider Generative AI (Firebase AI Logic Gemini 3.8 Flash + DeepSeek Provider Interface)
+ * and explicit user-triggered Offline Rule-Based Analyzer.
+ *
+ * CRITICAL RUNTIME FIX:
+ * Online AI failures (App Check 403, Quota 429, Payment Required 402, Network/Timeout, SDK role errors)
+ * are NEVER hidden behind silent offline fallback. Failures emit NexusAiStreamResult.Error explicitly so
+ * users and tests see the real runtime state, can Retry, switch providers, or explicitly choose Offline mode.
  */
 class NexusAiRepository(
     private val context: Context? = null,
-    private val aiClient: GenerativeAiClient = FirebaseGenerativeAiClient()
+    private val aiClient: GenerativeAiClient = FirebaseGenerativeAiClient(context),
+    private val deepSeekProvider: OnlineAiProvider = DeepSeekAiProvider()
 ) {
     private val sharedPrefs = context?.getSharedPreferences("nexus_ai_conversations", Context.MODE_PRIVATE)
 
-    fun isOnlineAiAvailable(): Boolean = aiClient.isConfigured()
+    private val geminiProviderAdapter: OnlineAiProvider = if (aiClient is OnlineAiProvider) {
+        aiClient
+    } else {
+        object : OnlineAiProvider {
+            override val providerType: AiProviderType = AiProviderType.GEMINI_FIREBASE
+            override fun isConfigured(): Boolean = aiClient.isConfigured()
+            override fun getStatus(): AiProviderStatus = if (aiClient.isConfigured()) {
+                AiProviderStatus(
+                    provider = AiProviderType.GEMINI_FIREBASE,
+                    availability = AiProviderAvailability.READY,
+                    detail = "Firebase AI Logic ($NEXUS_GEMINI_MODEL_NAME) ready"
+                )
+            } else {
+                AiProviderStatus(
+                    provider = AiProviderType.GEMINI_FIREBASE,
+                    availability = AiProviderAvailability.UNCONFIGURED,
+                    detail = "Firebase AI client not configured."
+                )
+            }
+
+            override fun streamChat(
+                systemInstruction: String,
+                history: List<Pair<String, String>>,
+                userMessage: String
+            ): Flow<String> = aiClient.streamChat(systemInstruction, history, userMessage)
+        }
+    }
+
+    fun isOnlineAiAvailable(): Boolean =
+        geminiProviderAdapter.isConfigured() || deepSeekProvider.isConfigured()
+
+    fun getProviderStatuses(): List<AiProviderStatus> = listOf(
+        geminiProviderAdapter.getStatus(),
+        deepSeekProvider.getStatus(),
+        AiProviderStatus(
+            provider = AiProviderType.OFFLINE_RULE_BASED,
+            availability = AiProviderAvailability.READY,
+            detail = "Deterministic local indicator & glossary engine (Zero network required)"
+        )
+    )
 
     fun generateResponseStream(
         userPrompt: String,
         contextSnapshot: MarketContextSnapshot,
         languageMode: LearningLanguageMode,
-        recentHistory: List<NexusChatMessage> = emptyList()
+        recentHistory: List<NexusChatMessage> = emptyList(),
+        selectedProvider: AiProviderType = AiProviderType.GEMINI_FIREBASE
     ): Flow<NexusAiStreamResult> = flow {
         val contextSummary = "${contextSnapshot.assetName} (${contextSnapshot.symbol}) @ $${contextSnapshot.currentPrice}"
-        val dataBadge = "${contextSnapshot.dataStatus} • ${contextSnapshot.lastUpdatedFormatted}"
+        val dataBadge = "${contextSnapshot.dataStatus} • ${contextSnapshot.instrumentTypeLabel} • ${contextSnapshot.lastUpdatedFormatted}"
         val followUps = generateFollowUps(languageMode, contextSnapshot, userPrompt)
         val messageId = UUID.randomUUID().toString()
-        var onlineErrorReason: String? = null
 
-        if (aiClient.isConfigured()) {
-            val accumulatedText = StringBuilder()
-            try {
-                val systemInstruction = buildSystemInstruction(languageMode)
-                val historyPairs = buildConversationHistory(recentHistory, userPrompt)
-                val groundedTurnPrompt = buildGroundedTurnPrompt(userPrompt, contextSnapshot, languageMode)
-
-                withTimeout(AI_TIMEOUT_MS) {
-                    aiClient.streamChat(
-                        systemInstruction = systemInstruction,
-                        history = historyPairs,
-                        userMessage = groundedTurnPrompt
-                    ).collect { chunkText ->
-                        if (chunkText.isNotEmpty()) {
-                            accumulatedText.append(chunkText)
-                            emit(
-                                NexusAiStreamResult.Chunk(
-                                    NexusChatMessage(
-                                        id = messageId,
-                                        conversationId = "",
-                                        sender = MessageSender.ASSISTANT,
-                                        text = accumulatedText.toString(),
-                                        isStreaming = true,
-                                        isOfflineEngine = false,
-                                        isErrorFallback = false,
-                                        dataTimestampBadge = dataBadge,
-                                        attachedContextSummary = contextSummary
-                                    )
-                                )
-                            )
-                        }
-                    }
-                }
-
-                val finalText = accumulatedText.toString().trim()
-                if (finalText.isNotEmpty()) {
-                    emit(
-                        NexusAiStreamResult.Completed(
-                            message = NexusChatMessage(
-                                id = messageId,
-                                conversationId = "",
-                                sender = MessageSender.ASSISTANT,
-                                text = finalText,
-                                isStreaming = false,
-                                isOfflineEngine = false,
-                                isErrorFallback = false,
-                                dataTimestampBadge = dataBadge,
-                                attachedContextSummary = contextSummary,
-                                suggestedFollowUps = followUps
-                            )
-                        )
-                    )
-                    return@flow
-                } else {
-                    onlineErrorReason = "Gemini returned an empty response. Tap Retry."
-                    Log.e(TAG, onlineErrorReason)
-                }
-            } catch (e: TimeoutCancellationException) {
-                Log.e(TAG, "Gemini streaming timed out after 60s", e)
-                onlineErrorReason = "Gemini AI timed out after 60 seconds. Tap Retry."
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Firebase AI streaming failed", e)
-                onlineErrorReason = classifyOnlineAiError(e)
-            }
-        } else {
-            onlineErrorReason = "Firebase AI Logic is not configured on this device."
-            Log.e(TAG, onlineErrorReason)
+        if (selectedProvider == AiProviderType.OFFLINE_RULE_BASED) {
+            val offlineMsg = runOfflineRuleBasedAnalysis(
+                userPrompt = userPrompt,
+                contextSnapshot = contextSnapshot,
+                languageMode = languageMode,
+                unavailableReason = "User-Selected Offline Rule-Based Analyzer",
+                recentHistory = recentHistory
+            )
+            emit(NexusAiStreamResult.Completed(message = offlineMsg))
+            return@flow
         }
 
-        val offlineResponse = OfflineTradingAnalysisEngine.generateAnalysis(
+        val activeProvider = when (selectedProvider) {
+            AiProviderType.DEEPSEEK -> deepSeekProvider
+            AiProviderType.GEMINI_FIREBASE -> geminiProviderAdapter
+            AiProviderType.OFFLINE_RULE_BASED -> geminiProviderAdapter
+        }
+
+        val providerStatus = activeProvider.getStatus()
+        if (!activeProvider.isConfigured()) {
+            val notReadyMsg = providerStatus.detail.ifBlank {
+                "${selectedProvider.displayName} is not configured or disabled."
+            }
+            Log.e(TAG, "${selectedProvider.displayName} not ready: $notReadyMsg")
+            emit(
+                NexusAiStreamResult.Error(
+                    provider = selectedProvider,
+                    errorMessage = notReadyMsg,
+                    failedQuery = userPrompt.trim(),
+                    contextSnapshot = contextSnapshot,
+                    canRetry = providerStatus.availability != AiProviderAvailability.DISABLED_PAYMENT_REQUIRED,
+                    isQuotaOrPaymentDisabled = providerStatus.availability == AiProviderAvailability.DISABLED_PAYMENT_REQUIRED ||
+                        providerStatus.availability == AiProviderAvailability.COOLDOWN_RATE_LIMIT
+                )
+            )
+            return@flow
+        }
+
+        val accumulatedText = StringBuilder()
+        try {
+            val systemInstruction = buildSystemInstruction(languageMode)
+            val historyPairs = buildConversationHistory(recentHistory, userPrompt)
+            val groundedTurnPrompt = buildGroundedTurnPrompt(userPrompt, contextSnapshot, languageMode)
+
+            withTimeout(AI_TIMEOUT_MS) {
+                activeProvider.streamChat(
+                    systemInstruction = systemInstruction,
+                    history = historyPairs,
+                    userMessage = groundedTurnPrompt
+                ).collect { chunkText ->
+                    if (chunkText.isNotEmpty()) {
+                        accumulatedText.append(chunkText)
+                        emit(
+                            NexusAiStreamResult.Chunk(
+                                NexusChatMessage(
+                                    id = messageId,
+                                    conversationId = "",
+                                    sender = MessageSender.ASSISTANT,
+                                    text = accumulatedText.toString(),
+                                    isStreaming = true,
+                                    isOfflineEngine = false,
+                                    isErrorFallback = false,
+                                    dataTimestampBadge = dataBadge,
+                                    attachedContextSummary = contextSummary,
+                                    providerUsed = selectedProvider.badgeLabel
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+
+            val finalText = accumulatedText.toString().trim()
+            if (finalText.isNotEmpty()) {
+                emit(
+                    NexusAiStreamResult.Completed(
+                        message = NexusChatMessage(
+                            id = messageId,
+                            conversationId = "",
+                            sender = MessageSender.ASSISTANT,
+                            text = finalText,
+                            isStreaming = false,
+                            isOfflineEngine = false,
+                            isErrorFallback = false,
+                            dataTimestampBadge = dataBadge,
+                            attachedContextSummary = contextSummary,
+                            suggestedFollowUps = followUps,
+                            providerUsed = selectedProvider.badgeLabel
+                        )
+                    )
+                )
+            } else {
+                val emptyMsg = "${selectedProvider.badgeLabel} returned an empty response. Check runtime logs or Retry."
+                Log.e(TAG, emptyMsg)
+                emit(
+                    NexusAiStreamResult.Error(
+                        provider = selectedProvider,
+                        errorMessage = emptyMsg,
+                        failedQuery = userPrompt.trim(),
+                        contextSnapshot = contextSnapshot,
+                        canRetry = true,
+                        isQuotaOrPaymentDisabled = false
+                    )
+                )
+            }
+        } catch (e: TimeoutCancellationException) {
+            Log.e(TAG, "${selectedProvider.badgeLabel} timed out after 60s", e)
+            emit(
+                NexusAiStreamResult.Error(
+                    provider = selectedProvider,
+                    errorMessage = "${selectedProvider.badgeLabel} timed out after 60s. Check connection and tap Retry, Switch Provider, or Run Limited Offline Analyzer.",
+                    failedQuery = userPrompt.trim(),
+                    contextSnapshot = contextSnapshot,
+                    canRetry = true,
+                    isQuotaOrPaymentDisabled = false
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: AiProviderException) {
+            Log.e(TAG, "${e.provider.badgeLabel} runtime failure", e)
+            emit(
+                NexusAiStreamResult.Error(
+                    provider = e.provider,
+                    errorMessage = e.message ?: classifyOnlineAiError(e, e.provider),
+                    failedQuery = userPrompt.trim(),
+                    contextSnapshot = contextSnapshot,
+                    canRetry = !e.isPaymentRequired,
+                    isQuotaOrPaymentDisabled = e.isPaymentRequired || e.isQuotaExhausted
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "${selectedProvider.badgeLabel} runtime exception", e)
+            val errMsg = classifyOnlineAiError(e, selectedProvider)
+            val isQuota = errMsg.contains("quota", ignoreCase = true) ||
+                errMsg.contains("429") ||
+                errMsg.contains("402")
+            emit(
+                NexusAiStreamResult.Error(
+                    provider = selectedProvider,
+                    errorMessage = errMsg,
+                    failedQuery = userPrompt.trim(),
+                    contextSnapshot = contextSnapshot,
+                    canRetry = !errMsg.contains("402"),
+                    isQuotaOrPaymentDisabled = isQuota
+                )
+            )
+        }
+    }
+
+    /**
+     * Explicitly invokes NEXUS OfflineTradingAnalysisEngine ONLY when selected by the user
+     * or when the user taps "Use Limited Offline Analyzer" on an explicit error card.
+     */
+    fun runOfflineRuleBasedAnalysis(
+        userPrompt: String,
+        contextSnapshot: MarketContextSnapshot,
+        languageMode: LearningLanguageMode,
+        unavailableReason: String? = null,
+        recentHistory: List<NexusChatMessage> = emptyList()
+    ): NexusChatMessage {
+        val contextSummary = "${contextSnapshot.assetName} (${contextSnapshot.symbol}) @ $${contextSnapshot.currentPrice}"
+        val dataBadge = "${contextSnapshot.dataStatus} • ${contextSnapshot.instrumentTypeLabel} • ${contextSnapshot.lastUpdatedFormatted}"
+        val followUps = generateFollowUps(languageMode, contextSnapshot, userPrompt)
+        val offlineText = OfflineTradingAnalysisEngine.generateAnalysis(
             query = userPrompt,
             context = contextSnapshot,
             language = languageMode,
-            unavailableReason = onlineErrorReason,
+            unavailableReason = unavailableReason,
             recentHistory = recentHistory
         )
-
-        emit(
-            NexusAiStreamResult.Completed(
-                message = NexusChatMessage(
-                    id = messageId,
-                    conversationId = "",
-                    sender = MessageSender.ASSISTANT,
-                    text = offlineResponse,
-                    isStreaming = false,
-                    isOfflineEngine = true,
-                    isErrorFallback = true,
-                    errorReason = onlineErrorReason,
-                    originalQueryForRetry = userPrompt.trim(),
-                    dataTimestampBadge = dataBadge,
-                    attachedContextSummary = contextSummary,
-                    suggestedFollowUps = followUps
-                ),
-                onlineErrorReason = onlineErrorReason
-            )
+        return NexusChatMessage(
+            conversationId = "",
+            sender = MessageSender.ASSISTANT,
+            text = offlineText,
+            isStreaming = false,
+            isOfflineEngine = true,
+            isErrorFallback = !unavailableReason.isNullOrBlank() &&
+                !unavailableReason.contains("User-Selected", ignoreCase = true),
+            errorReason = unavailableReason,
+            originalQueryForRetry = userPrompt.trim(),
+            dataTimestampBadge = dataBadge,
+            attachedContextSummary = contextSummary,
+            suggestedFollowUps = followUps,
+            providerUsed = AiProviderType.OFFLINE_RULE_BASED.badgeLabel
         )
     }
 
@@ -220,32 +296,39 @@ class NexusAiRepository(
         userPrompt: String,
         contextSnapshot: MarketContextSnapshot,
         languageMode: LearningLanguageMode,
-        recentHistory: List<NexusChatMessage> = emptyList()
+        recentHistory: List<NexusChatMessage> = emptyList(),
+        selectedProvider: AiProviderType = AiProviderType.GEMINI_FIREBASE
     ): NexusChatMessage {
         var finalMessage: NexusChatMessage? = null
-        generateResponseStream(userPrompt, contextSnapshot, languageMode, recentHistory).collect { result ->
+        var terminalError: NexusAiStreamResult.Error? = null
+        generateResponseStream(
+            userPrompt = userPrompt,
+            contextSnapshot = contextSnapshot,
+            languageMode = languageMode,
+            recentHistory = recentHistory,
+            selectedProvider = selectedProvider
+        ).collect { result ->
             when (result) {
                 is NexusAiStreamResult.Chunk -> Unit
                 is NexusAiStreamResult.Completed -> finalMessage = result.message
+                is NexusAiStreamResult.Error -> terminalError = result
             }
         }
-        return finalMessage ?: NexusChatMessage(
-            conversationId = "",
-            sender = MessageSender.ASSISTANT,
-            text = OfflineTradingAnalysisEngine.generateAnalysis(userPrompt, contextSnapshot, languageMode),
-            isOfflineEngine = true,
-            isErrorFallback = true,
-            originalQueryForRetry = userPrompt.trim()
+        if (finalMessage != null) return finalMessage!!
+        val err = terminalError
+        throw AiProviderException(
+            provider = err?.provider ?: selectedProvider,
+            isQuotaExhausted = err?.isQuotaOrPaymentDisabled == true,
+            message = err?.errorMessage ?: "Online AI request failed."
         )
     }
 
-    private fun buildConversationHistory(
+    internal fun buildConversationHistory(
         recentHistory: List<NexusChatMessage>,
         currentUserPrompt: String
     ): List<Pair<String, String>> {
         val trimmedCurrent = currentUserPrompt.trim()
         val filtered = recentHistory.filter { it.text.isNotBlank() && !it.isStreaming }
-        // Exclude the just-appended current user prompt if it's at the tail
         val withoutCurrent = if (filtered.lastOrNull()?.sender == MessageSender.USER &&
             filtered.lastOrNull()?.text?.trim() == trimmedCurrent
         ) {
@@ -254,22 +337,22 @@ class NexusAiRepository(
             filtered
         }
 
-        // Keep up to 16 recent turns, skipping raw offline fallback error blocks so Gemini stays conversational
-        return withoutCurrent
+        val rawPairs = withoutCurrent
             .filter { !it.isErrorFallback }
-            .takeLast(16)
             .map { msg ->
                 val role = if (msg.sender == MessageSender.USER) "user" else "model"
                 role to msg.text
             }
+
+        return FirebaseChatHistorySanitizer.sanitize(rawPairs, maxMessages = 16)
     }
 
     internal fun buildSystemInstruction(lang: LearningLanguageMode): String {
         val langInstruction = when (lang) {
             LearningLanguageMode.ENGLISH ->
-                "Respond in clear, natural, helpful English. Use beginner-friendly explanations when the user asks educational questions, and institutional precision for market analysis."
+                "Respond in clear, natural, helpful English. Use beginner-friendly explanations for educational questions, and institutional precision for market analysis."
             LearningLanguageMode.ROMAN_URDU ->
-                "Respond in natural, fluent Roman Urdu (conversational Pakistani style). Keep technical terms like RSI, BOS, Stop Loss, CPI, PPI, Open Interest clear and easy to understand."
+                "Respond in natural, fluent Roman Urdu (conversational Pakistani style). Keep technical terms like RSI, BOS, Stop Loss, CPI, PPI, Open Interest, TVL clear."
             LearningLanguageMode.STANDARD_URDU ->
                 "Respond in fluent, natural Pakistani Urdu in URDU SCRIPT (اردو رسم الخط). Keep technical terms clear alongside Urdu explanations."
             LearningLanguageMode.BILINGUAL ->
@@ -281,21 +364,24 @@ class NexusAiRepository(
             You answer ANY free-form user question directly and naturally — never repeat canned scripts or force unrelated templates.
 
             CORE CAPABILITIES:
-            - Crypto, Commodities (Gold/Silver/Oil/Gas), Forex/Macro (CPI, PPI, Fed/FOMC, NFP, DXY, Treasury Yields).
+            - Crypto Futures (Binance USDT-M & Bybit V5 cross-check), CoinGecko Global Cap & Rankings, DefiLlama DeFi TVL & Stablecoin Float, Alternative.me Fear & Greed, GDELT Macro/Financial Wire.
             - Derivatives & Market Mechanics (Funding Rates, Open Interest, Liquidations, Long/Short Ratios).
             - Smart Money Concepts (BOS, CHoCH, Order Blocks, FVGs, Liquidity Sweeps) & 22 Technical Indicators.
-            - Multi-turn conversation memory: understand follow-up questions ("why?", "what about ETH?", "where is invalidation?", "explain simply") using the chat history.
+            - Multi-turn conversation memory: understand follow-up questions using the sanitized chat history.
 
             LANGUAGE POLICY:
             - Default language setting: $langInstruction
-            - If the user writes explicitly in another language or asks you to reply in English/Roman Urdu/Urdu, honor their explicit request naturally.
+            - If the user writes explicitly in Standard Urdu, Roman Urdu, or English, honor their request naturally.
 
-            TRUTHFULNESS & DATA GROUNDING (CRITICAL):
-            1. For market/price/setup questions, use ONLY the real data in the attached VERIFIED MARKET CONTEXT (prices, 24h changes, RSI, EMAs, SMC levels, Funding Rate, Open Interest, Watchlist setups, and News).
-            2. ALWAYS mention the data freshness/timestamp (and disclose clearly if live data, derivatives, or live news are STALE or UNAVAILABLE).
-            3. NEVER invent prices, indicator values, whale transactions, or news catalysts that are not present in the context. If live news shows no clear catalyst for a move, state that honestly and explain what technical/derivatives/broad-market data shows instead.
-            4. For trade or buying questions: NEVER guarantee profits and NEVER force a BUY or SELL call. Always provide balanced Bullish and Bearish scenarios, possible entry zones, invalidation/Stop Loss levels, and key risks (1-2% capital risk).
-            5. For general or educational questions (e.g., "What is PPI?", "How do funding rates work?"), answer naturally and clearly even if no trade setup is active.
+            TRUTHFULNESS & STRICT SEPARATION RULES (CRITICAL):
+            1. For market/price/setup questions, cite ONLY real values in the attached VERIFIED HYBRID MARKET FACTS.
+            2. ALWAYS distinguish Spot Market vs USDT-M Perpetual Futures explicitly; NEVER blend Spot and Futures quotes silently.
+            3. ALWAYS report timestamps (UTC) and disclose when any provider is STALE, RATE_LIMITED, or UNAVAILABLE.
+            4. SEPARATE VERIFIED FACTS vs POSSIBLE EXPLANATIONS:
+               - Present verified price, funding, OI, cross-exchange spread, global cap, TVL, and sentiment under VERIFIED FACTS.
+               - Present filtered news headlines ONLY under POSSIBLE EXPLANATIONS / CONTEXT — NEVER treat headlines as proven causal drivers without corroborating official/on-chain evidence.
+            5. NEVER invent prices, indicator values, missing API fields, whale transactions, or news catalysts.
+            6. For trade or buying questions: NEVER guarantee profits and NEVER force a BUY or SELL call. Provide balanced Bullish and Bearish scenarios, possible entry zones, invalidation/Stop Loss levels, and key risks (1-2% capital risk).
         """.trimIndent()
     }
 
@@ -312,18 +398,24 @@ class NexusAiRepository(
         """.trimIndent()
     }
 
-    private fun classifyOnlineAiError(e: Exception): String {
+    private fun classifyOnlineAiError(e: Exception, provider: AiProviderType): String {
         val msg = (e.message ?: e.localizedMessage ?: "").lowercase()
+        val label = provider.badgeLabel
         return when {
+            msg.contains("402") || msg.contains("payment") || msg.contains("insufficient balance") ->
+                "$label returned HTTP 402 (payment/balance required) — disabled automatically under zero-cost policy."
             msg.contains("429") || msg.contains("quota") || msg.contains("resource_exhausted") || msg.contains("rate limit") ->
-                "Free-tier Gemini AI quota reached. Please wait briefly and tap Retry."
-            msg.contains("403") || msg.contains("appcheck") || msg.contains("app check") || msg.contains("attestation") ->
-                "App Check attestation rejected (HTTP 403). Ensure debug/Play integrity config is active."
+                "$label free-tier quota or rate limit reached (HTTP 429). Wait briefly and tap Retry or switch provider."
+            msg.contains("401") || msg.contains("403") || msg.contains("unauthenticated") ||
+                msg.contains("appcheck") || msg.contains("app check") || msg.contains("attestation") ->
+                "Firebase App Check attestation rejected (HTTP 401/403). Verify debug token or Play Integrity attestation on device."
+            msg.contains("role") || msg.contains("alternat") || msg.contains("content") ->
+                "$label chat turn history formatting error (${e.localizedMessage ?: "invalid turn sequence"})."
             e is UnknownHostException || e is ConnectException || e is SocketTimeoutException ||
                 msg.contains("unable to resolve host") || msg.contains("failed to connect") || msg.contains("network") ->
-                "No internet connection to reach Gemini AI. Tap Retry once online."
+                "No internet connection to reach $label. Tap Retry once online or use Limited Offline Analyzer."
             else ->
-                "Online Gemini AI unavailable (${e.localizedMessage ?: e::class.java.simpleName})."
+                "$label runtime error: ${e.localizedMessage ?: e::class.java.simpleName}"
         }
     }
 
@@ -337,8 +429,8 @@ class NexusAiRepository(
             LearningLanguageMode.ENGLISH -> when {
                 q.contains("fall") || q.contains("crash") || q.contains("drop") -> listOf(
                     "Could ${ctx.symbol} fall further or bounce from ${ctx.supportLevel?.let { "$${String.format("%.2f", it)}" } ?: "support"}?",
-                    "What are the funding rate and open interest saying?",
-                    "Which watchlist coin is holding up best?"
+                    "What are Binance vs Bybit spread, funding rate, and OI saying?",
+                    "Which watchlist coin has the strongest setup?"
                 )
                 q.contains("buy") || q.contains("entry") -> listOf(
                     "Where is the safest invalidation / stop loss?",
@@ -347,8 +439,8 @@ class NexusAiRepository(
                 )
                 else -> listOf(
                     "What are key support and resistance levels for ${ctx.symbol}?",
-                    "Which watchlist coin has the strongest setup right now?",
-                    "Explain funding rate and open interest impact"
+                    "Show DeFi TVL, stablecoin float, and Fear & Greed impact",
+                    "Which watchlist coin has the strongest setup right now?"
                 )
             }
             LearningLanguageMode.ROMAN_URDU -> listOf(
@@ -392,7 +484,7 @@ class NexusAiRepository(
                 )
             }
             if (list.isEmpty()) listOf(NexusConversation(id = "default_session", title = "Market Analysis")) else list
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             listOf(NexusConversation(id = "default_session", title = "Market Analysis"))
         }
     }
@@ -430,12 +522,13 @@ class NexusAiRepository(
                         errorReason = obj.optString("errorReason").takeIf { it.isNotEmpty() },
                         originalQueryForRetry = obj.optString("originalQueryForRetry").takeIf { it.isNotEmpty() },
                         dataTimestampBadge = obj.optString("dataTimestampBadge").takeIf { it.isNotEmpty() },
-                        attachedContextSummary = obj.optString("attachedContextSummary").takeIf { it.isNotEmpty() }
+                        attachedContextSummary = obj.optString("attachedContextSummary").takeIf { it.isNotEmpty() },
+                        providerUsed = obj.optString("providerUsed").ifEmpty { "Gemini 3.8 Flash" }
                     )
                 )
             }
             list
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyList()
         }
     }
@@ -454,6 +547,7 @@ class NexusAiRepository(
                 put("originalQueryForRetry", msg.originalQueryForRetry ?: "")
                 put("dataTimestampBadge", msg.dataTimestampBadge ?: "")
                 put("attachedContextSummary", msg.attachedContextSummary ?: "")
+                put("providerUsed", msg.providerUsed)
             }
             arr.put(obj)
         }

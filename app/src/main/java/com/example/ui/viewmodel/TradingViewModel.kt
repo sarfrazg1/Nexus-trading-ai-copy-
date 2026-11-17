@@ -142,6 +142,10 @@ data class TradingUiState(
     val isAiLoading: Boolean = false,
     val isOnlineAiAvailable: Boolean = false,
     val lastAiError: String? = null,
+    val lastAiErrorState: com.example.data.ai.NexusAiStreamResult.Error? = null,
+    val selectedAiProvider: com.example.data.ai.AiProviderType = com.example.data.ai.AiProviderType.GEMINI_FIREBASE,
+    val aiProviderStatuses: List<com.example.data.ai.AiProviderStatus> = emptyList(),
+    val hybridMarketState: com.example.data.providers.UnifiedHybridMarketState = com.example.data.providers.UnifiedHybridMarketState(),
     val urduFontSize: com.example.data.settings.UrduFontSize = com.example.data.settings.UrduFontSize.MEDIUM,
 
     // Binance USDT-M Futures Auto-Scanner State
@@ -214,6 +218,8 @@ class TradingViewModel(
     private val _aiMessages = MutableStateFlow<List<com.example.data.ai.NexusChatMessage>>(emptyList())
     private val _isAiLoading = MutableStateFlow(false)
     private val _lastAiError = MutableStateFlow<String?>(null)
+    private val _lastAiErrorState = MutableStateFlow<com.example.data.ai.NexusAiStreamResult.Error?>(null)
+    private val _selectedAiProvider = MutableStateFlow(com.example.data.ai.AiProviderType.GEMINI_FIREBASE)
     private var lastDiscussedAiAssetId: String? = null
 
     val uiState: StateFlow<TradingUiState> = combine(
@@ -333,8 +339,15 @@ class TradingViewModel(
             aiConversations = _aiConversations.value,
             currentAiConversationId = _currentAiConversationId.value,
             isAiLoading = _isAiLoading.value,
-            isOnlineAiAvailable = nexusAiRepo.isOnlineAiAvailable(),
+            isOnlineAiAvailable = nexusAiRepo.getProviderStatuses().any {
+                it.provider != com.example.data.ai.AiProviderType.OFFLINE_RULE_BASED &&
+                    it.availability == com.example.data.ai.AiProviderAvailability.READY
+            },
             lastAiError = _lastAiError.value,
+            lastAiErrorState = _lastAiErrorState.value,
+            selectedAiProvider = _selectedAiProvider.value,
+            aiProviderStatuses = nexusAiRepo.getProviderStatuses(),
+            hybridMarketState = repository.hybridMarketState.value,
             urduFontSize = appSettingsRepo.urduFontSize.value,
             futuresScannerState = futuresScannerRepo.scannerState.value,
             futuresWatchlist = futuresScannerRepo.watchlist.value,
@@ -658,9 +671,10 @@ class TradingViewModel(
     }
 
     fun bindLearningContext(context: Context) {
-        learningPrefsRepo.bindContext(context)
-        appSettingsRepo.bindContext(context)
-        nexusAiRepo = com.example.data.ai.NexusAiRepository(context)
+        val appContext = context.applicationContext ?: context
+        learningPrefsRepo.bindContext(appContext)
+        appSettingsRepo.bindContext(appContext)
+        nexusAiRepo = com.example.data.ai.NexusAiRepository(appContext)
         _aiConversations.value = nexusAiRepo.loadConversations()
         val activeId = _aiConversations.value.firstOrNull()?.id ?: "default_session"
         _currentAiConversationId.value = activeId
@@ -693,6 +707,7 @@ class TradingViewModel(
         _aiMessages.value = baseList
         _isAiLoading.value = true
         _lastAiError.value = null
+        _lastAiErrorState.value = null
         updateConversationTitleIfDefault(currentId, trimmedQuery)
 
         executeAiTurn(
@@ -700,6 +715,48 @@ class TradingViewModel(
             query = trimmedQuery,
             baseList = baseList
         )
+    }
+
+    fun switchAiProvider(provider: com.example.data.ai.AiProviderType) {
+        _selectedAiProvider.value = provider
+        _lastAiError.value = null
+        _lastAiErrorState.value = null
+        _learningUpdate.value++
+    }
+
+    fun retryLastFailedAiQuery() {
+        if (_isAiLoading.value) return
+        val err = _lastAiErrorState.value ?: return
+        val currentId = _currentAiConversationId.value
+        val currentList = _aiMessages.value
+        _isAiLoading.value = true
+        _lastAiError.value = null
+        _lastAiErrorState.value = null
+
+        executeAiTurn(
+            conversationId = currentId,
+            query = err.failedQuery,
+            baseList = currentList
+        )
+    }
+
+    fun runExplicitOfflineFallback() {
+        if (_isAiLoading.value) return
+        val err = _lastAiErrorState.value ?: return
+        val currentId = _currentAiConversationId.value
+        val offlineMsg = nexusAiRepo.runOfflineRuleBasedAnalysis(
+            userPrompt = err.failedQuery,
+            contextSnapshot = err.contextSnapshot,
+            languageMode = appSettingsRepo.languageMode.value,
+            unavailableReason = "${err.provider.badgeLabel}: ${err.errorMessage}",
+            recentHistory = _aiMessages.value.takeLast(16)
+        ).copy(conversationId = currentId)
+        val finalized = _aiMessages.value + offlineMsg
+        _aiMessages.value = finalized
+        nexusAiRepo.saveMessages(currentId, finalized)
+        _lastAiError.value = null
+        _lastAiErrorState.value = null
+        _learningUpdate.value++
     }
 
     fun retryAiMessage(messageId: String) {
@@ -715,6 +772,7 @@ class TradingViewModel(
         _aiMessages.value = baseList
         _isAiLoading.value = true
         _lastAiError.value = null
+        _lastAiErrorState.value = null
 
         executeAiTurn(
             conversationId = currentId,
@@ -725,6 +783,7 @@ class TradingViewModel(
 
     fun dismissAiError() {
         _lastAiError.value = null
+        _lastAiErrorState.value = null
     }
 
     private fun executeAiTurn(
@@ -734,23 +793,39 @@ class TradingViewModel(
     ) {
         viewModelScope.launch {
             try {
-                // 1. Ensure fresh live Binance & news feeds if missing or older than 20s
+                // 1. Ensure fresh live Binance & news feeds with tight bounds so optional feeds never stall AI
                 val now = System.currentTimeMillis()
                 val btcAsset = repository.assets.value.firstOrNull { it.id.equals("BTC", ignoreCase = true) }
                 val isMarketMissingOrStale = btcAsset?.currentPrice == null ||
                     btcAsset.lastUpdated == null ||
                     (now - btcAsset.lastUpdated) > 20_000L
-                if (isMarketMissingOrStale) {
-                    try {
-                        repository.refreshData()
-                    } catch (_: Exception) { }
-                }
 
-                if (!repository.financialNewsService.lastFetchWasLive) {
-                    try {
-                        repository.refreshNews(forceRefresh = false)
-                    } catch (_: Exception) { }
-                }
+                val marketRefreshJob = if (isMarketMissingOrStale) {
+                    async {
+                        kotlinx.coroutines.withTimeoutOrNull(6_000L) {
+                            try {
+                                repository.refreshData()
+                            } catch (ce: kotlinx.coroutines.CancellationException) {
+                                throw ce
+                            } catch (_: Exception) { }
+                        }
+                    }
+                } else null
+
+                val newsRefreshJob = if (!repository.financialNewsService.lastFetchWasLive) {
+                    async {
+                        kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                            try {
+                                repository.refreshNews(forceRefresh = false)
+                            } catch (ce: kotlinx.coroutines.CancellationException) {
+                                throw ce
+                            } catch (_: Exception) { }
+                        }
+                    }
+                } else null
+
+                marketRefreshJob?.await()
+                newsRefreshJob?.await()
 
                 // 2. Resolve target asset from user query, prior conversation memory, or active screen
                 val allAssets = repository.assets.value
@@ -769,21 +844,40 @@ class TradingViewModel(
                 val resolvedName = activeAsset?.name ?: resolvedSymbol
                 val tf = _analysisTimeframe.value
 
-                // 3. Gather fresh candles, technical indicators, SMC, and Binance Futures derivatives
+                // 3. Gather fresh candles, technical indicators, SMC, and Binance Futures derivatives in parallel
                 val useExistingAnalysis = resolvedSymbol.equals(_analysisAssetSymbol.value, ignoreCase = true) &&
                     _technicalAnalysis.value != null &&
                     _smcAnalysis.value != null &&
                     _analysisCandles.value.isNotEmpty()
 
-                val candles = if (useExistingAnalysis) {
-                    _analysisCandles.value
-                } else {
-                    try {
-                        repository.getCandles(resolvedSymbol, tf, 160)
-                    } catch (_: Exception) {
-                        emptyList()
+                val candlesDeferred = async {
+                    if (useExistingAnalysis) {
+                        _analysisCandles.value
+                    } else {
+                        kotlinx.coroutines.withTimeoutOrNull(5_000L) {
+                            try {
+                                repository.getCandles(resolvedSymbol, tf, 160)
+                            } catch (ce: kotlinx.coroutines.CancellationException) {
+                                throw ce
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                        } ?: emptyList()
                     }
                 }
+                val derivativesDeferred = async {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000L) {
+                        try {
+                            repository.fetchDerivativesForAsset(resolvedSymbol)
+                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                }
+
+                val candles = candlesDeferred.await()
 
                 val taResult = if (useExistingAnalysis) {
                     _technicalAnalysis.value
@@ -794,10 +888,14 @@ class TradingViewModel(
                 val smcResult = if (useExistingAnalysis) {
                     _smcAnalysis.value
                 } else if (candles.size >= 15) {
-                    try {
-                        repository.calculateSmcAnalysis(resolvedSymbol, resolvedName, tf)
-                    } catch (_: Exception) {
-                        null
+                    kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                        try {
+                            repository.calculateSmcAnalysis(resolvedSymbol, resolvedName, tf)
+                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
+                            null
+                        }
                     }
                 } else null
 
@@ -813,7 +911,7 @@ class TradingViewModel(
                     it.baseAsset.equals(resolvedSymbol, ignoreCase = true)
                 } ?: futuresScannerRepo.scannerState.value.activeSignals.firstOrNull()
 
-                val derivativesSnapshot = repository.fetchDerivativesForAsset(resolvedSymbol)
+                val derivativesSnapshot = derivativesDeferred.await()
 
                 val contextSnapshot = com.example.data.ai.MarketContextBuilder.buildSnapshot(
                     asset = activeAsset,
@@ -832,7 +930,8 @@ class TradingViewModel(
                     allAiSignals = _aiSignalsList.value.ifEmpty { repository.aiSignals.value },
                     derivatives = derivativesSnapshot,
                     isLiveNewsFeed = repository.financialNewsService.lastFetchWasLive,
-                    newsLastFetchedFormatted = repository.financialNewsService.lastFetchTimeFormatted
+                    newsLastFetchedFormatted = repository.financialNewsService.lastFetchTimeFormatted,
+                    hybridState = repository.hybridMarketState.value
                 )
 
                 var finalizedList = baseList
@@ -840,7 +939,8 @@ class TradingViewModel(
                     userPrompt = query,
                     contextSnapshot = contextSnapshot,
                     languageMode = appSettingsRepo.languageMode.value,
-                    recentHistory = baseList.takeLast(18)
+                    recentHistory = baseList.takeLast(18),
+                    selectedProvider = _selectedAiProvider.value
                 ).collect { event ->
                     when (event) {
                         is com.example.data.ai.NexusAiStreamResult.Chunk -> {
@@ -853,6 +953,14 @@ class TradingViewModel(
                             _aiMessages.value = finalizedList
                             nexusAiRepo.saveMessages(conversationId, finalizedList)
                             _lastAiError.value = event.onlineErrorReason
+                            _lastAiErrorState.value = null
+                        }
+                        is com.example.data.ai.NexusAiStreamResult.Error -> {
+                            // Never hide online AI runtime errors behind silent fallback.
+                            nexusAiRepo.saveMessages(conversationId, baseList)
+                            _lastAiError.value = event.errorMessage
+                            _lastAiErrorState.value = event
+                            _learningUpdate.value++
                         }
                     }
                 }
@@ -860,20 +968,20 @@ class TradingViewModel(
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("TradingViewModel", "Error in executeAiTurn", e)
-                val reason = e.localizedMessage ?: "Unexpected error"
-                val errorMsg = com.example.data.ai.NexusChatMessage(
-                    conversationId = conversationId,
-                    sender = com.example.data.ai.MessageSender.ASSISTANT,
-                    text = "Unable to complete online AI analysis ($reason). Tap Retry to try again.",
-                    isOfflineEngine = true,
-                    isErrorFallback = true,
-                    errorReason = reason,
-                    originalQueryForRetry = query
+                val reason = e.localizedMessage ?: "Unexpected runtime error"
+                val fallbackSnap = com.example.data.ai.MarketContextBuilder.buildSnapshot(
+                    asset = repository.assets.value.firstOrNull { it.id == "BTC" },
+                    candles = emptyList(),
+                    hybridState = repository.hybridMarketState.value
                 )
-                val finalized = baseList + errorMsg
-                _aiMessages.value = finalized
-                nexusAiRepo.saveMessages(conversationId, finalized)
                 _lastAiError.value = reason
+                _lastAiErrorState.value = com.example.data.ai.NexusAiStreamResult.Error(
+                    provider = _selectedAiProvider.value,
+                    errorMessage = reason,
+                    failedQuery = query,
+                    contextSnapshot = fallbackSnap
+                )
+                _learningUpdate.value++
             } finally {
                 _isAiLoading.value = false
             }
@@ -904,6 +1012,7 @@ class TradingViewModel(
         _currentAiConversationId.value = newId
         _aiMessages.value = emptyList()
         _lastAiError.value = null
+        _lastAiErrorState.value = null
         lastDiscussedAiAssetId = null
         nexusAiRepo.saveConversations(updatedConvs)
     }
@@ -912,6 +1021,7 @@ class TradingViewModel(
         val currentId = _currentAiConversationId.value
         _aiMessages.value = emptyList()
         _lastAiError.value = null
+        _lastAiErrorState.value = null
         lastDiscussedAiAssetId = null
         nexusAiRepo.saveMessages(currentId, emptyList())
         _userMessage.value = "Chat conversation cleared"
@@ -927,12 +1037,14 @@ class TradingViewModel(
         _currentAiConversationId.value = nextId
         _aiMessages.value = nexusAiRepo.loadMessages(nextId)
         _lastAiError.value = null
+        _lastAiErrorState.value = null
     }
 
     fun selectAiConversation(id: String) {
         _currentAiConversationId.value = id
         _aiMessages.value = nexusAiRepo.loadMessages(id)
         _lastAiError.value = null
+        _lastAiErrorState.value = null
     }
 
     fun attachCurrentMarketToAi() {

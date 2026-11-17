@@ -362,7 +362,7 @@ class NexusAiUpgradeTest {
     }
 
     @Test
-    fun testQuotaExhaustionAndNetworkErrorsSurfaceRetryMetadata() = runBlocking {
+    fun testQuotaExhaustionAndNetworkErrorsSurfaceExplicitErrorWithoutSilentFallback() = runBlocking {
         val quotaClient = object : GenerativeAiClient {
             override fun isConfigured(): Boolean = true
             override fun streamChat(
@@ -388,54 +388,69 @@ class NexusAiUpgradeTest {
         val ctx = buildRichContext(isLive = false)
 
         val quotaRepo = NexusAiRepository(context = context, aiClient = quotaClient)
-        var quotaEvent: NexusAiStreamResult.Completed? = null
+        val quotaEvents = mutableListOf<NexusAiStreamResult>()
         quotaRepo.generateResponseStream("Is this a good time to buy?", ctx, LearningLanguageMode.ENGLISH).collect {
-            if (it is NexusAiStreamResult.Completed) quotaEvent = it
+            quotaEvents.add(it)
         }
-        assertTrue(quotaEvent!!.message.isOfflineEngine)
-        assertTrue(quotaEvent!!.message.isErrorFallback)
-        assertEquals("Is this a good time to buy?", quotaEvent!!.message.originalQueryForRetry)
-        assertTrue(quotaEvent!!.onlineErrorReason!!.contains("quota", ignoreCase = true))
+        val quotaErr = quotaEvents.filterIsInstance<NexusAiStreamResult.Error>().singleOrNull()
+        assertNotNull("Expected transparent Error event without silent fallback", quotaErr)
+        assertEquals(0, quotaEvents.filterIsInstance<NexusAiStreamResult.Completed>().size)
+        assertEquals("Is this a good time to buy?", quotaErr!!.failedQuery)
+        assertTrue(quotaErr.isQuotaOrPaymentDisabled)
+        assertTrue(quotaErr.errorMessage.contains("quota", ignoreCase = true))
         assertTrue(ctx.toPromptContext(LearningLanguageMode.ENGLISH).contains("UNAVAILABLE"))
 
+        // Explicit user-triggered offline fallback works cleanly only when explicitly invoked
+        val explicitOffline = quotaRepo.runOfflineRuleBasedAnalysis(
+            userPrompt = quotaErr.failedQuery,
+            contextSnapshot = quotaErr.contextSnapshot,
+            languageMode = LearningLanguageMode.ENGLISH,
+            unavailableReason = quotaErr.errorMessage
+        )
+        assertTrue(explicitOffline.isOfflineEngine)
+        assertTrue(explicitOffline.isErrorFallback)
+        assertEquals("Is this a good time to buy?", explicitOffline.originalQueryForRetry)
+
         val offlineRepo = NexusAiRepository(context = context, aiClient = offlineClient)
-        var offlineEvent: NexusAiStreamResult.Completed? = null
+        var networkErr: NexusAiStreamResult.Error? = null
         offlineRepo.generateResponseStream("Explain funding rates", ctx, LearningLanguageMode.ENGLISH).collect {
-            if (it is NexusAiStreamResult.Completed) offlineEvent = it
+            if (it is NexusAiStreamResult.Error) networkErr = it
         }
-        assertTrue(offlineEvent!!.onlineErrorReason!!.contains("internet", ignoreCase = true))
+        assertNotNull(networkErr)
+        assertTrue(networkErr!!.errorMessage.contains("internet", ignoreCase = true))
     }
 
     @Test
-    fun testNexusAiScreen_ErrorBannerAndRetryButtonTriggerCallback() {
-        val retriedIds = mutableListOf<String>()
-        val fallbackMsg = NexusChatMessage(
-            id = "msg_fallback_1",
-            conversationId = "default_session",
-            sender = MessageSender.ASSISTANT,
-            text = "⚠️ [LIMITED OFFLINE RULE-BASED ANALYSIS — Not Conversational AI]\nOnline AI status: Quota reached",
-            isOfflineEngine = true,
-            isErrorFallback = true,
-            errorReason = "Free-tier Gemini AI quota reached.",
-            originalQueryForRetry = "Why is BTC falling?",
-            dataTimestampBadge = "LIVE • 00:30:00 UTC"
-        )
+    fun testNexusAiScreen_ErrorBannerRetrySwitchAndExplicitOfflineButtons() {
+        var directRetryCount = 0
+        var offlineTriggered = false
+        val switchedProviders = mutableListOf<com.example.data.ai.AiProviderType>()
 
         composeTestRule.setContent {
             NexusTradingTheme {
                 NexusAiScreen(
-                    messages = listOf(fallbackMsg),
+                    messages = listOf(
+                        NexusChatMessage(
+                            id = "msg_user_1",
+                            conversationId = "default_session",
+                            sender = MessageSender.USER,
+                            text = "Why is BTC falling?"
+                        )
+                    ),
                     conversations = listOf(NexusConversation(id = "default_session", title = "Market Analysis")),
                     currentConversationId = "default_session",
                     isLoading = false,
                     isOnlineAiAvailable = true,
-                    lastAiError = "Free-tier Gemini AI quota reached.",
+                    lastAiError = "Firebase App Check attestation rejected (HTTP 403).",
                     dataFreshnessLabel = "LIVE • 00:30:00 UTC",
                     currentAssetSymbol = "BTC",
                     currentAssetPrice = 88450.0,
                     languageMode = LearningLanguageMode.ENGLISH,
+                    selectedAiProvider = com.example.data.ai.AiProviderType.GEMINI_FIREBASE,
                     onSendMessage = {},
-                    onRetryMessage = { id -> retriedIds.add(id) },
+                    onRetryLastFailedQuery = { directRetryCount++ },
+                    onRunOfflineFallback = { offlineTriggered = true },
+                    onSelectAiProvider = { switchedProviders.add(it) },
                     onDismissError = {},
                     onNewChat = {},
                     onClearChat = {},
@@ -449,10 +464,14 @@ class NexusAiUpgradeTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("ai_error_banner").assertIsDisplayed()
         composeTestRule.onNodeWithTag("ai_banner_retry_button").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("ai_retry_button").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Limited Offline Fallback Active").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("ai_retry_button").performClick()
+        composeTestRule.onNodeWithTag("ai_switch_provider_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("ai_explicit_offline_button").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Online AI Runtime Error • Retry or Switch").assertIsDisplayed()
         composeTestRule.onNodeWithTag("ai_banner_retry_button").performClick()
-        assertEquals(listOf("msg_fallback_1", "msg_fallback_1"), retriedIds)
+        composeTestRule.onNodeWithTag("ai_switch_provider_button").performClick()
+        composeTestRule.onNodeWithTag("ai_explicit_offline_button").performClick()
+        assertEquals(1, directRetryCount)
+        assertTrue(offlineTriggered)
+        assertEquals(listOf(com.example.data.ai.AiProviderType.DEEPSEEK), switchedProviders)
     }
 }

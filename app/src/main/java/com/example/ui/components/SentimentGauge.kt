@@ -46,6 +46,8 @@ fun SentimentGauge(
     sentimentLabel: String,
     bullishPercent: Int,
     volatilityState: String,
+    hasLiveSentiment: Boolean = sentimentLabel != "Unavailable" && fearAndGreedIndex > 0,
+    sourceLabel: String = "Alternative.me F&G",
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -73,7 +75,7 @@ fun SentimentGauge(
                     )
                 )
                 Text(
-                    text = "Volatility: $volatilityState",
+                    text = "Breadth: $volatilityState",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = TextSecondary,
                         fontSize = 11.sp
@@ -109,26 +111,27 @@ fun SentimentGauge(
                             style = Stroke(width = stroke, cap = StrokeCap.Round)
                         )
 
-                        // Colored gradient sweep
-                        val normalized = (fearAndGreedIndex.coerceIn(0, 100) / 100f) * 240f
-                        drawArc(
-                            brush = Brush.sweepGradient(
-                                0.0f to BearishRed,
-                                0.5f to NexusGold,
-                                1.0f to BullishGreen
-                            ),
-                            startAngle = 150f,
-                            sweepAngle = normalized,
-                            useCenter = false,
-                            topLeft = arcOffset,
-                            size = Size(arcSize, arcSize),
-                            style = Stroke(width = stroke, cap = StrokeCap.Round)
-                        )
+                        if (hasLiveSentiment) {
+                            val normalized = (fearAndGreedIndex.coerceIn(0, 100) / 100f) * 240f
+                            drawArc(
+                                brush = Brush.sweepGradient(
+                                    0.0f to BearishRed,
+                                    0.5f to NexusGold,
+                                    1.0f to BullishGreen
+                                ),
+                                startAngle = 150f,
+                                sweepAngle = normalized,
+                                useCenter = false,
+                                topLeft = arcOffset,
+                                size = Size(arcSize, arcSize),
+                                style = Stroke(width = stroke, cap = StrokeCap.Round)
+                            )
+                        }
                     }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "$fearAndGreedIndex",
+                            text = if (hasLiveSentiment) "$fearAndGreedIndex" else "--",
                             style = MaterialTheme.typography.headlineMedium.copy(
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold,
@@ -138,9 +141,14 @@ fun SentimentGauge(
                         Text(
                             text = sentimentLabel.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (fearAndGreedIndex >= 55) BullishGreen else if (fearAndGreedIndex <= 45) BearishRed else NexusGold,
+                                color = when {
+                                    !hasLiveSentiment -> TextMuted
+                                    fearAndGreedIndex >= 55 -> BullishGreen
+                                    fearAndGreedIndex <= 45 -> BearishRed
+                                    else -> NexusGold
+                                },
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 10.sp
+                                fontSize = 9.sp
                             )
                         )
                     }
@@ -152,19 +160,20 @@ fun SentimentGauge(
                         .weight(1f)
                         .padding(start = 20.dp)
                 ) {
+                    val safeBullPct = bullishPercent.coerceIn(0, 100)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Bulls: $bullishPercent%",
+                            text = if (hasLiveSentiment || safeBullPct > 0) "Bulls: $safeBullPct%" else "Bulls: --",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = BullishGreen,
                                 fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
-                            text = "Bears: ${100 - bullishPercent}%",
+                            text = if (hasLiveSentiment || safeBullPct > 0) "Bears: ${100 - safeBullPct}%" else "Bears: --",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = BearishRed,
                                 fontWeight = FontWeight.Bold
@@ -175,12 +184,12 @@ fun SentimentGauge(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     LinearProgressIndicator(
-                        progress = { bullishPercent / 100f },
+                        progress = { if (hasLiveSentiment || safeBullPct > 0) safeBullPct / 100f else 0.5f },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp),
                         color = BullishGreen,
-                        trackColor = BearishRed
+                        trackColor = if (hasLiveSentiment || safeBullPct > 0) BearishRed else Color(0xFF1B2A4A)
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -190,12 +199,12 @@ fun SentimentGauge(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Fear & Greed Index",
+                            text = "Alternative.me F&G",
                             style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 11.sp)
                         )
                         Text(
-                            text = "Live Model Consensus",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+                            text = sourceLabel,
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp)
                         )
                     }
                 }

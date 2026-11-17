@@ -69,6 +69,12 @@ class TradingRepository(
     val financialNewsService = com.example.data.news.FinancialNewsService()
     val notificationManager = com.example.util.NexusNotificationManager()
     val futuresApiClient = com.example.data.remote.BinanceFuturesApiClient()
+    val hybridAggregator = com.example.data.providers.HybridMarketAggregator(
+        gdeltNewsProvider = com.example.data.providers.GdeltNewsProvider()
+    )
+
+    private val _hybridMarketState = MutableStateFlow(com.example.data.providers.UnifiedHybridMarketState())
+    val hybridMarketState: StateFlow<com.example.data.providers.UnifiedHybridMarketState> = _hybridMarketState.asStateFlow()
 
     suspend fun fetchDerivativesForAsset(assetId: String): com.example.data.remote.BinanceFuturesApiClient.DerivativesSnapshot? {
         val binanceSymbol = assetToBinanceSymbol(assetId.uppercase())
@@ -76,7 +82,20 @@ class TradingRepository(
             return null
         }
         return try {
-            futuresApiClient.fetchDerivativesSnapshot(binanceSymbol)
+            val outcome = hybridAggregator.binanceFuturesProvider.fetchDerivativesForSymbol(binanceSymbol)
+            val q = outcome.data
+            if (q != null) {
+                com.example.data.remote.BinanceFuturesApiClient.DerivativesSnapshot(
+                    symbol = q.symbol,
+                    fundingRatePercent = q.fundingRatePercent,
+                    openInterestContracts = q.openInterestContracts,
+                    longShortAccountRatio = q.longShortRatio,
+                    fetchedAtMillis = q.fetchedAtMillis,
+                    source = "${q.exchange} (${q.marketType.label})"
+                )
+            } else {
+                futuresApiClient.fetchDerivativesSnapshot(binanceSymbol)
+            }
         } catch (_: Exception) {
             null
         }
@@ -185,6 +204,8 @@ class TradingRepository(
         val now = System.currentTimeMillis()
         val timeStr = formatTimestamp(now)
         val updateMap = updates.associateBy { it.symbol }
+        val wsLabel = webSocketManager.activeStreamLabel.value
+        val instrumentTag = if (webSocketManager.isFuturesStream.value) "USDT-M Perpetual Futures" else "Spot Market"
 
         _assets.value = _assets.value.map { asset ->
             val binanceSymbol = assetToBinanceSymbol(asset.id)
@@ -201,8 +222,8 @@ class TradingRepository(
                     volume24h = formattedVol,
                     connectionStatus = ConnectionStatus.CONNECTED,
                     dataStatus = MarketDataStatus.LIVE,
-                    dataSourceName = "Binance WebSocket (Live)",
-                    dataSourceInfo = "Real-time ticker stream • Updated $timeStr",
+                    dataSourceName = "$wsLabel ($instrumentTag)",
+                    dataSourceInfo = "$instrumentTag • Real-time ticker stream • Updated $timeStr",
                     lastUpdated = now,
                     lastUpdatedFormatted = timeStr,
                     sparklinePoints = if (asset.sparklinePoints.isNotEmpty()) {
@@ -225,22 +246,24 @@ class TradingRepository(
         _isRefreshing.value = true
         withContext(Dispatchers.IO) {
             try {
-                // 1. Fetch Binance REST Tickers for all supported crypto symbols
+                // 1. Primary non-blocking crypto fetch + parallel optional hybrid sources
                 fetchCryptoRestTickers()
 
-                // 2. Fetch Commodities (Gold, Silver, WTI, Brent, Natural Gas)
+                // 2. Refresh full hybrid state (Bybit V5 cross-check, CoinGecko Demo, DefiLlama, Alternative.me F&G, GDELT)
+                val hybrid = hybridAggregator.refreshHybridMarketState(_hybridMarketState.value)
+                _hybridMarketState.value = hybrid
+                applyHybridMacroAndNews(hybrid)
+
+                // 3. Fetch Commodities (Gold, Silver, WTI, Brent, Natural Gas)
                 val commoditiesKey = _apiConfigs.value.firstOrNull { it.id == "commodities_feed" }?.apiKey ?: ""
                 val commodityQuotes = commoditiesService.fetchCommodityQuotes(commoditiesKey)
                 updateCommoditiesState(commodityQuotes)
 
-                // 3. Fetch CoinGecko Global Data
-                fetchCoinGeckoData()
-
             } catch (e: Exception) {
                 Log.w("TradingRepo", "Data refresh error: ${e.message}")
-                // In case of network disconnection or rate limits, mark existing data as STALE
                 _assets.value = cache.markAllAsStale(e.localizedMessage ?: "Network error")
             } finally {
+                _lastMarketDataUpdateMillis.value = System.currentTimeMillis()
                 updateOverviewCounts()
                 _isRefreshing.value = false
             }
@@ -266,6 +289,18 @@ class TradingRepository(
     )
 
     private suspend fun fetchCryptoRestTickers() {
+        // Tier 1 (Primary): Binance USDT-M Futures Public REST API (fapi.binance.com)
+        try {
+            val futuresOutcome = hybridAggregator.refreshPrimaryFuturesOnly()
+            val futuresQuotes = futuresOutcome.data
+            if (!futuresQuotes.isNullOrEmpty()) {
+                applyNormalizedFuturesQuotes(futuresQuotes, futuresOutcome.metadata)
+                return
+            }
+        } catch (e: Exception) {
+            Log.w("TradingRepo", "Binance USDT-M Futures unavailable (${e.message}). Trying Spot fallback.")
+        }
+
         val symbolsList = listOf(
             "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
             "DOGEUSDT", "ADAUSDT", "LINKUSDT", "AVAXUSDT", "TRXUSDT",
@@ -273,18 +308,32 @@ class TradingRepository(
         )
         val jsonSymbols = "[\"" + symbolsList.joinToString("\",\"") + "\"]"
 
-        // Tier 1 & 2: Binance Global with automatic failover to Binance US on HTTP 451
+        // Tier 2 (Explicitly Labeled Spot Fallback): Binance Spot / Binance.US
         try {
             val tickers = binanceClient.get24hrTickers(jsonSymbols)
             if (tickers.isNotEmpty()) {
-                applyBinanceTickers(tickers, binanceClient.activeSourceLabel)
+                applyBinanceTickers(tickers, "${binanceClient.activeSourceLabel} (Spot Fallback)")
                 return
             }
         } catch (e: Exception) {
-            Log.w("TradingRepo", "Binance batch tickers unavailable (${e.message}). Switching to CoinGecko.")
+            Log.w("TradingRepo", "Binance Spot tickers unavailable (${e.message}). Trying Bybit V5 Linear / CoinGecko.")
         }
 
-        // Tier 3: CoinGecko simple price quotes (no geo-restrictions)
+        // Tier 3 (Explicitly Labeled Bybit V5 Secondary Linear Futures)
+        try {
+            val bybitOutcome = hybridAggregator.bybitProvider.fetchLinearFuturesQuotes(
+                com.example.data.providers.BinanceFuturesPrimaryProvider.DEFAULT_FUTURES_SYMBOLS.toSet()
+            )
+            val bybitQuotes = bybitOutcome.data
+            if (!bybitQuotes.isNullOrEmpty()) {
+                applyNormalizedFuturesQuotes(bybitQuotes, bybitOutcome.metadata)
+                return
+            }
+        } catch (e: Exception) {
+            Log.w("TradingRepo", "Bybit V5 Linear fallback failed (${e.message}). Trying CoinGecko Spot.")
+        }
+
+        // Tier 4: CoinGecko simple price quotes (Explicitly labeled Spot)
         try {
             val cgQuotes = coinGeckoService.fetchSimplePrices(cryptoToCoinGeckoMap.values.toList())
             if (cgQuotes.isNotEmpty()) {
@@ -295,8 +344,52 @@ class TradingRepository(
             Log.w("TradingRepo", "CoinGecko fallback failed (${e.message}). Trying Coinbase spot.")
         }
 
-        // Tier 4: Coinbase public spot fallback for major pairs
+        // Tier 5: Coinbase public spot fallback for major pairs
         fetchCoinbaseSpotFallback()
+    }
+
+    private fun applyNormalizedFuturesQuotes(
+        quotes: Map<String, com.example.data.providers.NormalizedMarketQuote>,
+        metadata: com.example.data.providers.ProviderMetadata
+    ) {
+        val now = System.currentTimeMillis()
+        val timeStr = formatTimestamp(now)
+        val isWsActive = webSocketManager.isConnected.value
+
+        _assets.value = _assets.value.map { asset ->
+            val binanceSymbol = assetToBinanceSymbol(asset.id)
+            val quote = quotes[binanceSymbol]
+            if (quote != null) {
+                val volBase = quote.volume24hBase ?: 0.0
+                val status = when {
+                    isWsActive -> MarketDataStatus.LIVE
+                    else -> metadata.dataStatus
+                }
+                val sourceLabel = if (isWsActive) {
+                    "${webSocketManager.activeStreamLabel.value} (${quote.marketType.label})"
+                } else {
+                    "${quote.exchange} (${quote.marketType.label})"
+                }
+                val newAsset = asset.copy(
+                    currentPrice = quote.lastPrice,
+                    change24h = quote.change24hPercent?.let { quote.lastPrice * (it / 100.0) },
+                    change24hPercent = quote.change24hPercent,
+                    high24h = quote.high24h,
+                    low24h = quote.low24h,
+                    volume24h = formatCryptoVolume(volBase, asset.id),
+                    connectionStatus = ConnectionStatus.CONNECTED,
+                    dataStatus = status,
+                    dataSourceName = sourceLabel,
+                    dataSourceInfo = "${quote.marketType.label} • Funding: ${quote.fundingRatePercent?.let { String.format(Locale.US, "%+.4f%%", it) } ?: "N/A"} • ${metadata.timestampFormatted}",
+                    lastUpdated = quote.fetchedAtMillis,
+                    lastUpdatedFormatted = timeStr,
+                    sparklinePoints = generateSparkline(quote.lastPrice, quote.change24hPercent ?: 0.0)
+                )
+                cache.put(newAsset)
+                checkAlertTriggers(asset.symbol, quote.lastPrice)
+                newAsset
+            } else asset
+        }
     }
 
     private fun applyBinanceTickers(tickers: List<BinanceTicker24hr>, sourceLabel: String) {
@@ -318,7 +411,7 @@ class TradingRepository(
 
                 if (lastPrice != null) {
                     val isWsActive = webSocketManager.isConnected.value
-                    val source = if (isWsActive) "Binance WebSocket (Live)" else sourceLabel
+                    val source = if (isWsActive) "${webSocketManager.activeStreamLabel.value} (${if (webSocketManager.isFuturesStream.value) "USDT-M Perpetual Futures" else "Spot Market"})" else sourceLabel
                     val status = if (isWsActive) MarketDataStatus.LIVE else MarketDataStatus.DELAYED
 
                     val newAsset = asset.copy(
@@ -361,13 +454,13 @@ class TradingRepository(
                     currentPrice = price,
                     change24h = change,
                     change24hPercent = changePct,
-                    high24h = price * (1.0 + (if (changePct > 0) changePct / 100.0 else 0.015)),
-                    low24h = price * (1.0 - (if (changePct < 0) -changePct / 100.0 else 0.015)),
+                    high24h = null,
+                    low24h = null,
                     volume24h = volStr,
                     connectionStatus = ConnectionStatus.CONNECTED,
                     dataStatus = MarketDataStatus.LIVE,
-                    dataSourceName = "CoinGecko Free API",
-                    dataSourceInfo = "CoinGecko Real-Time Feed • 24hr Change",
+                    dataSourceName = "CoinGecko Demo API (Spot Market)",
+                    dataSourceInfo = "Spot Market • CoinGecko Free/Demo Feed • 24hr Change",
                     lastUpdated = now,
                     lastUpdatedFormatted = timeStr,
                     sparklinePoints = generateSparkline(price, changePct)
@@ -418,8 +511,8 @@ class TradingRepository(
                         currentPrice = price,
                         connectionStatus = ConnectionStatus.CONNECTED,
                         dataStatus = MarketDataStatus.LIVE,
-                        dataSourceName = "Coinbase Public API",
-                        dataSourceInfo = "Coinbase Spot • Live Price",
+                        dataSourceName = "Coinbase Public API (Spot Market)",
+                        dataSourceInfo = "Spot Market • Coinbase USD Spot • Live Price",
                         lastUpdated = now,
                         lastUpdatedFormatted = timeStr,
                         sparklinePoints = generateSparkline(price, 0.5)
@@ -472,14 +565,43 @@ class TradingRepository(
         }
     }
 
+    private fun applyHybridMacroAndNews(hybrid: com.example.data.providers.UnifiedHybridMarketState) {
+        val cg = hybrid.coinGeckoGlobal
+        val llama = hybrid.defiSnapshot
+        val fng = hybrid.fearGreed
+        val fngStatus = hybrid.providerStatuses[com.example.data.providers.AlternativeMeFearGreedProvider.PROVIDER_ID]
+
+        val activeProviders = hybrid.providerStatuses.values.count {
+            it.dataStatus == MarketDataStatus.LIVE || it.dataStatus == MarketDataStatus.STALE
+        }
+
+        _marketOverview.value = _marketOverview.value.copy(
+            fearAndGreedIndex = fng?.value ?: _marketOverview.value.fearAndGreedIndex,
+            sentimentLabel = fng?.classification ?: _marketOverview.value.sentimentLabel,
+            hasLiveSentiment = fng != null,
+            sentimentTimestamp = fng?.metadata?.timestampFormatted ?: fngStatus?.errorMessage ?: "Unavailable",
+            totalCryptoMarketCap = cg?.totalMarketCapFormatted ?: _marketOverview.value.totalCryptoMarketCap,
+            cryptoVolume24h = cg?.totalVolume24hFormatted ?: _marketOverview.value.cryptoVolume24h,
+            btcDominance = cg?.btcDominanceFormatted ?: _marketOverview.value.btcDominance,
+            defiTvlFormatted = llama?.totalTvlFormatted ?: _marketOverview.value.defiTvlFormatted,
+            stablecoinSupplyFormatted = llama?.totalStablecoinFormatted ?: _marketOverview.value.stablecoinSupplyFormatted,
+            marketStatus = if (hybrid.primaryFuturesQuotes.isNotEmpty()) "USDT-M Futures Live" else "Syncing Public Feeds",
+            dataProviderSummary = "Active Sources: $activeProviders/6 • Binance Futures • Bybit V5 • CoinGecko • DefiLlama"
+        )
+
+        if (hybrid.filteredNews.isNotEmpty()) {
+            _news.value = hybrid.filteredNews.map { it.article }
+        }
+    }
+
     private suspend fun fetchCoinGeckoData() {
-        val global = coinGeckoService.getGlobalMarketData()
+        val outcome = hybridAggregator.coinGeckoProvider.fetchGlobalAndTopRankings()
+        val global = outcome.data
         if (global != null) {
             _marketOverview.value = _marketOverview.value.copy(
-                totalCryptoMarketCap = global.totalMarketCapUsd,
-                cryptoVolume24h = global.totalVolume24hUsd,
-                btcDominance = global.btcDominance,
-                dataProviderSummary = "Binance WebSocket (Active) • CoinGecko API • Commodities Feed"
+                totalCryptoMarketCap = global.totalMarketCapFormatted,
+                cryptoVolume24h = global.totalVolume24hFormatted,
+                btcDominance = global.btcDominanceFormatted
             )
         }
     }
@@ -551,9 +673,25 @@ class TradingRepository(
             it.dataStatus == MarketDataStatus.LIVE || it.dataStatus == MarketDataStatus.DELAYED
         }
         val totalCount = _assets.value.size
+        val pricedCrypto = _assets.value.filter { it.category == AssetCategory.CRYPTO && it.currentPrice != null }
+        val bullishPct = if (pricedCrypto.isNotEmpty()) {
+            val green = pricedCrypto.count { (it.change24hPercent ?: 0.0) >= 0.0 }
+            ((green * 100.0) / pricedCrypto.size).toInt().coerceIn(0, 100)
+        } else {
+            0
+        }
+        val breadthText = if (pricedCrypto.isNotEmpty()) {
+            val green = pricedCrypto.count { (it.change24hPercent ?: 0.0) >= 0.0 }
+            "$green/${pricedCrypto.size} Positive (24h)"
+        } else {
+            "Unavailable"
+        }
+
         _marketOverview.value = _marketOverview.value.copy(
             connectedFeedsCount = liveOrDelayedCount,
             totalFeedsCount = totalCount,
+            bullishAssetsPercent = bullishPct,
+            volatilityState = breadthText,
             activeSignalsCount = _signals.value.count { it.status == SignalStatus.ACTIVE }
         )
     }
@@ -1179,39 +1317,87 @@ class TradingRepository(
         fun initialApiConfigs(): List<ApiFeedConfig> = listOf(
             ApiFeedConfig(
                 id = "binance_ws",
-                providerName = "Binance WebSocket Live Stream",
-                assetCovered = "BTC, ETH, BNB, SOL, XRP, DOGE, ADA, LINK, AVAX, SUI (15+ pairs)",
+                providerName = "Binance USDT-M Futures WebSocket",
+                assetCovered = "BTC, ETH, BNB, SOL, XRP, DOGE, ADA, LINK, AVAX, SUI Perpetuals",
                 apiKey = "Public (No Key Required)",
                 isConnected = true,
-                endpointUrl = "wss://stream.binance.com:9443/ws/!miniTicker@arr",
+                endpointUrl = "wss://fstream.binance.com/ws/!miniTicker@arr",
                 lastPing = "Active",
                 requiresApiKey = false,
-                setupDocumentationUrl = "https://binance-docs.github.io/apidocs/spot/en/#all-market-mini-tickers-stream",
-                instructions = "Public WebSocket stream is active automatically with zero configuration."
+                setupDocumentationUrl = "https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams",
+                instructions = "Primary USDT-M Perpetual Futures live stream (read-only, zero trading keys)."
             ),
             ApiFeedConfig(
                 id = "binance_public",
-                providerName = "Binance Public REST API",
-                assetCovered = "24hr Tickers & Historical Candles",
+                providerName = "Binance USDT-M Futures REST (Primary)",
+                assetCovered = "Perpetual Tickers, Mark Price, Funding Rate, OI & L/S Ratio",
                 apiKey = "Public (No Key Required)",
                 isConnected = true,
-                endpointUrl = "https://api.binance.com/api/v3/ticker/24hr",
+                endpointUrl = "https://fapi.binance.com/fapi/v1/ticker/24hr",
                 lastPing = "Active",
                 requiresApiKey = false,
-                setupDocumentationUrl = "https://binance-docs.github.io/apidocs/spot/en/",
-                instructions = "Public REST backup endpoints for polling and candles."
+                setupDocumentationUrl = "https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api",
+                instructions = "Primary public REST market feed for futures quotes, candles, and derivatives."
+            ),
+            ApiFeedConfig(
+                id = "bybit_v5_public",
+                providerName = "Bybit V5 Public Cross-Exchange",
+                assetCovered = "Secondary Linear Futures & Spot Cross-Check",
+                apiKey = "Public (No Key Required)",
+                isConnected = true,
+                endpointUrl = "https://api.bybit.com/v5/market/tickers?category=linear",
+                lastPing = "Active",
+                requiresApiKey = false,
+                setupDocumentationUrl = "https://bybit-exchange.github.io/docs/v5/market/tickers",
+                instructions = "Cross-exchange price & funding consistency check (never mixes Spot & Futures)."
             ),
             ApiFeedConfig(
                 id = "coingecko_public",
-                providerName = "CoinGecko Free API",
-                assetCovered = "Global Market Cap, 24h Vol & Dominance",
-                apiKey = "Public (No Key Required)",
+                providerName = "CoinGecko v3 Demo / Public API",
+                assetCovered = "Global Market Cap, Dominance, Rankings & 7d History",
+                apiKey = "Public (Optional Demo Key)",
                 isConnected = true,
                 endpointUrl = "https://api.coingecko.com/api/v3/global",
                 lastPing = "Active",
                 requiresApiKey = false,
-                setupDocumentationUrl = "https://www.coingecko.com/en/api",
-                instructions = "Provides macro market data subject to standard public tier rate limits."
+                setupDocumentationUrl = "https://docs.coingecko.com/reference/introduction",
+                instructions = "Optional CoinGecko Demo API key can be configured via AI Studio Secrets."
+            ),
+            ApiFeedConfig(
+                id = "defillama_public",
+                providerName = "DefiLlama Public API",
+                assetCovered = "Multi-Chain DeFi TVL & Stablecoin Circulating Supply",
+                apiKey = "Public (No Key Required)",
+                isConnected = true,
+                endpointUrl = "https://api.llama.fi/v2/chains",
+                lastPing = "Active",
+                requiresApiKey = false,
+                setupDocumentationUrl = "https://defillama.com/docs/api",
+                instructions = "Open on-chain TVL and stablecoin liquidity data with zero billing."
+            ),
+            ApiFeedConfig(
+                id = "alternativeme_fng",
+                providerName = "Alternative.me Fear & Greed API",
+                assetCovered = "Daily Crypto Market Sentiment Index (0-100)",
+                apiKey = "Public (No Key Required)",
+                isConnected = true,
+                endpointUrl = "https://api.alternative.me/fng/?limit=7",
+                lastPing = "Active",
+                requiresApiKey = false,
+                setupDocumentationUrl = "https://alternative.me/crypto/fear-and-greed-index/",
+                instructions = "Public Fear & Greed sentiment endpoint."
+            ),
+            ApiFeedConfig(
+                id = "gdelt_news_wire",
+                providerName = "GDELT Project v2 Financial Wire",
+                assetCovered = "Filtered Crypto & Macroeconomic Headlines",
+                apiKey = "Public (No Key Required)",
+                isConnected = true,
+                endpointUrl = "https://api.gdeltproject.org/api/v2/doc/doc",
+                lastPing = "Active",
+                requiresApiKey = false,
+                setupDocumentationUrl = "https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/",
+                instructions = "Public news wire filtered for relevance, recency & domain reliability."
             ),
             ApiFeedConfig(
                 id = "commodities_feed",
@@ -1223,7 +1409,7 @@ class TradingRepository(
                 lastPing = "Unconnected",
                 requiresApiKey = true,
                 setupDocumentationUrl = "https://twelvedata.com/pricing",
-                instructions = "To connect live commodity spot prices, register for a free API key at twelvedata.com, copy your API key, and paste it here."
+                instructions = "To connect live commodity spot prices, register for a free API key at twelvedata.com and paste it here."
             )
         )
     }
