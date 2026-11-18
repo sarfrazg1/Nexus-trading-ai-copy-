@@ -46,6 +46,9 @@ import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -1444,14 +1447,40 @@ class TradingRepository(
         TechnicalIndicatorsEngine.analyze(symbol, assetName, timeframe, candles)
     }
 
+    private fun normalizeAssetLookupId(symbol: String): String {
+        return when (symbol.uppercase(Locale.US).trim()) {
+            "XAUUSD", "GOLD", "XAU/USD" -> "XAU"
+            "XAGUSD", "SILVER", "XAG/USD" -> "XAG"
+            "OIL_WTI", "OIL", "USOIL", "WTI/USD" -> "WTI"
+            "UKOIL", "BRENT/USD" -> "BRENT"
+            else -> symbol.uppercase(Locale.US).trim().removeSuffix("USDT").removeSuffix("/USDT").removeSuffix("/USD")
+        }
+    }
+
+    private fun findAssetBySymbol(symbol: String): MarketAsset? {
+        val canonical = normalizeAssetLookupId(symbol)
+        return _assets.value.firstOrNull {
+            it.id.equals(canonical, ignoreCase = true) ||
+                it.symbol.equals(symbol, ignoreCase = true) ||
+                it.id.equals(symbol, ignoreCase = true)
+        }
+    }
+
     suspend fun calculateSmcAnalysis(
         symbol: String,
         assetName: String,
         timeframe: CandleTimeframe
     ): SmcAnalysisResult = withContext(Dispatchers.Default) {
-        val candles = candleService.fetchCandles(symbol, timeframe, 160)
+        val candles = getCandles(symbol, timeframe, 250)
+        calculateSmcAnalysisForCandles(symbol, assetName, timeframe, candles)
+    }
 
-        // Multi-timeframe snapshots for key timeframes: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w
+    private suspend fun calculateSmcAnalysisForCandles(
+        symbol: String,
+        assetName: String,
+        timeframe: CandleTimeframe,
+        primaryCandles: List<Candle>
+    ): SmcAnalysisResult = coroutineScope {
         val mtfTimeframes = listOf(
             CandleTimeframe.W1,
             CandleTimeframe.D1,
@@ -1462,46 +1491,67 @@ class TradingRepository(
             CandleTimeframe.M5,
             CandleTimeframe.M1
         )
-        val snapshots = mutableListOf<TimeframeSmcSnapshot>()
-        for (tf in mtfTimeframes) {
-            val tfCandles = if (tf == timeframe) candles else candleService.fetchCandles(symbol, tf, 50)
-            if (tfCandles.size >= 15) {
-                val tempResult = SmcCalculationEngine.analyze(symbol, assetName, tf, tfCandles)
-                val isBullish = tempResult.marketStructure.trendState == MarketTrendState.BULLISH_UPTREND ||
+        val snapshotDeferreds = mtfTimeframes.map { tf ->
+            async(Dispatchers.IO) {
+                val tfCandles = if (tf == timeframe) primaryCandles else getCandles(symbol, tf, 100)
+                if (tfCandles.size >= 20) {
+                    val tempResult = SmcCalculationEngine.analyze(symbol, assetName, tf, tfCandles)
+                    val isBullish = tempResult.marketStructure.trendState == MarketTrendState.BULLISH_UPTREND ||
                         tempResult.marketStructure.isBullishBOSPresent ||
                         tempResult.marketStructure.isBullishCHoCHPresent
-                snapshots.add(
                     TimeframeSmcSnapshot(
                         timeframe = tf,
                         trend = tempResult.marketStructure.trendState,
                         lastBreakType = tempResult.marketStructure.latestBreak?.type,
                         unmitigatedOBCount = tempResult.orderBlocks.count { it.status == OrderBlockStatus.UNMITIGATED },
                         unfilledFvgCount = tempResult.fairValueGaps.count { it.status == FvgStatus.UNFILLED },
-                        nearestSupport = tempResult.priceZones.firstOrNull { it.type == PriceZoneType.SUPPORT || it.type == PriceZoneType.DEMAND }?.centralPrice,
-                        nearestResistance = tempResult.priceZones.firstOrNull { it.type == PriceZoneType.RESISTANCE || it.type == PriceZoneType.SUPPLY }?.centralPrice,
+                        nearestSupport = tempResult.priceZones.firstOrNull {
+                            it.type == PriceZoneType.SUPPORT || it.type == PriceZoneType.DEMAND
+                        }?.centralPrice,
+                        nearestResistance = tempResult.priceZones.firstOrNull {
+                            it.type == PriceZoneType.RESISTANCE || it.type == PriceZoneType.SUPPLY
+                        }?.centralPrice,
                         isBullishBias = isBullish
                     )
-                )
+                } else null
             }
         }
-
-        SmcCalculationEngine.analyze(symbol, assetName, timeframe, candles, snapshots)
+        val snapshots = snapshotDeferreds.awaitAll().filterNotNull()
+        SmcCalculationEngine.analyze(symbol, assetName, timeframe, primaryCandles, snapshots)
     }
 
     suspend fun calculateAiSignal(
         symbol: String,
         assetName: String,
         timeframe: CandleTimeframe = CandleTimeframe.H1
-    ): AiTradingSignal = withContext(Dispatchers.Default) {
-        val asset = _assets.value.firstOrNull { it.symbol.equals(symbol, ignoreCase = true) || it.id.equals(symbol, ignoreCase = true) }
-        val currentPrice = asset?.currentPrice ?: 0.0
+    ): AiTradingSignal = withContext(Dispatchers.IO) {
+        var asset = findAssetBySymbol(symbol)
+        if (asset == null || asset.currentPrice == null || asset.currentPrice <= 0.0 || asset.dataStatus == MarketDataStatus.UNAVAILABLE) {
+            val canonical = normalizeAssetLookupId(symbol)
+            if (canonical in listOf("XAU", "XAG", "WTI", "BRENT", "NATGAS")) {
+                val commoditiesKey = _apiConfigs.value.firstOrNull { it.id == "commodities_feed" }?.apiKey ?: ""
+                runCatching {
+                    val quotes = commoditiesService.fetchCommodityQuotes(commoditiesKey)
+                    updateCommoditiesState(quotes)
+                }
+            } else {
+                runCatching { fetchCryptoRestTickers() }
+            }
+            asset = findAssetBySymbol(symbol)
+        }
+
+        val currentPrice = asset?.currentPrice
         val dataStatus = asset?.dataStatus ?: MarketDataStatus.UNAVAILABLE
         val dataSourceName = asset?.dataSourceName ?: "Binance Public REST"
         val lastUpdated = asset?.lastUpdated
 
-        val candles = candleService.fetchCandles(symbol, timeframe, 160)
-        val ta = if (candles.size >= 15) TechnicalIndicatorsEngine.analyze(symbol, assetName, timeframe, candles) else null
-        val smc = if (candles.size >= 15) calculateSmcAnalysis(symbol, assetName, timeframe) else null
+        val candles = getCandles(symbol, timeframe, 250)
+        val ta = if (candles.size >= 30) {
+            TechnicalIndicatorsEngine.analyze(symbol, assetName, timeframe, candles)
+        } else null
+        val smc = if (candles.size >= 30) {
+            calculateSmcAnalysisForCandles(symbol, assetName, timeframe, candles)
+        } else null
 
         AiTradingSignalEngine.generateSignal(
             symbol = symbol,
@@ -1530,14 +1580,17 @@ class TradingRepository(
             Pair("LINK", "Chainlink")
         )
 
-        val results = mutableListOf<AiTradingSignal>()
-        for ((sym, name) in symbolsToScan) {
-            try {
-                val sig = calculateAiSignal(sym, name, CandleTimeframe.H1)
-                results.add(sig)
-            } catch (e: Exception) {
-                Log.w("TradingRepo", "Failed to generate AI signal for $sym: ${e.message}")
-            }
+        val results = coroutineScope {
+            symbolsToScan.map { (sym, name) ->
+                async {
+                    try {
+                        calculateAiSignal(sym, name, CandleTimeframe.H1)
+                    } catch (e: Exception) {
+                        Log.w("TradingRepo", "Failed to generate AI signal for $sym: ${e.message}")
+                        null
+                    }
+                }
+            }.awaitAll().filterNotNull()
         }
 
         if (results.isNotEmpty()) {

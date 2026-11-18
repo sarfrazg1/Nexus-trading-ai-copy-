@@ -178,4 +178,165 @@ class AiTradingSignalEngineTest {
             assertTrue("Glossary item $term must have a pro trading tip", item.tradingTipRomanUrdu.isNotBlank())
         }
     }
+
+    @Test
+    fun testAlignedBullishTrendGeneratesLongSignal() = runBlocking {
+        val candles = buildPullbackTrendingCandles(count = 240, bullish = true)
+        val mtfBullish = listOf(
+            CandleTimeframe.M15, CandleTimeframe.M30, CandleTimeframe.H1,
+            CandleTimeframe.H4, CandleTimeframe.D1, CandleTimeframe.W1
+        ).map { tf ->
+            com.example.data.smc.TimeframeSmcSnapshot(
+                timeframe = tf,
+                trend = com.example.data.smc.MarketTrendState.BULLISH_UPTREND,
+                lastBreakType = com.example.data.smc.MarketStructureBreakType.BOS_BULLISH,
+                unmitigatedOBCount = 1,
+                unfilledFvgCount = 1,
+                nearestSupport = candles.last().close * 0.985,
+                nearestResistance = candles.last().close * 1.04,
+                isBullishBias = true
+            )
+        }
+
+        val signal = AiTradingSignalEngine.generateSignal(
+            symbol = "BTC",
+            assetName = "Bitcoin",
+            currentPrice = candles.last().close,
+            dataStatus = MarketDataStatus.LIVE,
+            dataSourceName = "Binance Futures (LIVE)",
+            lastUpdatedTime = System.currentTimeMillis(),
+            primaryTimeframe = CandleTimeframe.H1,
+            candles = candles,
+            technicalAnalysis = null,
+            smcAnalysis = null,
+            mtfSnapshots = mtfBullish
+        )
+
+        assertEquals("Aligned bullish trend + MTF should produce LONG", SignalDecision.LONG, signal.decision)
+        val plan = signal.riskPlan
+        assertNotNull(plan)
+        assertTrue(plan!!.stopLoss < plan.entryPrice)
+        assertTrue(plan.takeProfit1 > plan.entryPrice)
+        assertTrue(plan.takeProfit2 > plan.takeProfit1)
+        assertTrue(plan.takeProfit3 > plan.takeProfit2)
+        assertTrue(plan.riskRewardRatio >= 1.5)
+        assertTrue(signal.confidence.totalScore >= 60)
+    }
+
+    @Test
+    fun testAlignedBearishTrendGeneratesShortSignal() = runBlocking {
+        val candles = buildPullbackTrendingCandles(count = 240, bullish = false)
+        val mtfBearish = listOf(
+            CandleTimeframe.M15, CandleTimeframe.M30, CandleTimeframe.H1,
+            CandleTimeframe.H4, CandleTimeframe.D1, CandleTimeframe.W1
+        ).map { tf ->
+            com.example.data.smc.TimeframeSmcSnapshot(
+                timeframe = tf,
+                trend = com.example.data.smc.MarketTrendState.BEARISH_DOWNTREND,
+                lastBreakType = com.example.data.smc.MarketStructureBreakType.BOS_BEARISH,
+                unmitigatedOBCount = 1,
+                unfilledFvgCount = 1,
+                nearestSupport = candles.last().close * 0.96,
+                nearestResistance = candles.last().close * 1.015,
+                isBullishBias = false
+            )
+        }
+
+        val signal = AiTradingSignalEngine.generateSignal(
+            symbol = "ETH",
+            assetName = "Ethereum",
+            currentPrice = candles.last().close,
+            dataStatus = MarketDataStatus.LIVE,
+            dataSourceName = "Binance Futures (LIVE)",
+            lastUpdatedTime = System.currentTimeMillis(),
+            primaryTimeframe = CandleTimeframe.H1,
+            candles = candles,
+            technicalAnalysis = null,
+            smcAnalysis = null,
+            mtfSnapshots = mtfBearish
+        )
+
+        assertEquals("Aligned bearish trend + MTF should produce SHORT", SignalDecision.SHORT, signal.decision)
+        val plan = signal.riskPlan
+        assertNotNull(plan)
+        assertTrue(plan!!.stopLoss > plan.entryPrice)
+        assertTrue(plan.takeProfit1 < plan.entryPrice)
+        assertTrue(plan.takeProfit2 < plan.takeProfit1)
+        assertTrue(plan.takeProfit3 < plan.takeProfit2)
+        assertTrue(plan.riskRewardRatio >= 1.5)
+    }
+
+    @Test
+    fun testChoppySidewaysMarketStillReturnsNoTrade() = runBlocking {
+        val baseTime = 1700000000000L
+        val choppyCandles = (0 until 120).map { i ->
+            val swing = if (i % 2 == 0) 80.0 else -80.0
+            val open = 50000.0 + swing * 0.5
+            val close = 50000.0 - swing * 0.5
+            Candle(
+                openTime = baseTime + i * 3600000L,
+                open = open,
+                high = maxOf(open, close) + 35.0,
+                low = minOf(open, close) - 35.0,
+                close = close,
+                volume = 1000.0,
+                takerBuyBaseVolume = 500.0
+            )
+        }
+
+        val signal = AiTradingSignalEngine.generateSignal(
+            symbol = "SOL",
+            assetName = "Solana",
+            currentPrice = choppyCandles.last().close,
+            dataStatus = MarketDataStatus.LIVE,
+            dataSourceName = "Binance",
+            lastUpdatedTime = System.currentTimeMillis(),
+            primaryTimeframe = CandleTimeframe.H1,
+            candles = choppyCandles,
+            technicalAnalysis = null,
+            smcAnalysis = null
+        )
+
+        assertEquals(SignalDecision.NO_TRADE, signal.decision)
+        assertEquals("CONFLICTING_INDICATORS", signal.noTradeReason?.code)
+        assertNull(signal.riskPlan)
+    }
+
+    private fun buildPullbackTrendingCandles(count: Int, bullish: Boolean): List<Candle> {
+        val baseTime = 1700000000000L
+        val list = mutableListOf<Candle>()
+        var price = if (bullish) 40000.0 else 80000.0
+        for (i in 0 until count) {
+            val isPullback = (i % 9) in 6..7
+            val step = when {
+                bullish && !isPullback -> 260.0
+                bullish && isPullback -> -110.0
+                !bullish && !isPullback -> -260.0
+                else -> 110.0
+            }
+            val open = price
+            val close = (open + step).coerceAtLeast(1000.0)
+            val high = maxOf(open, close) + 90.0
+            val low = minOf(open, close) - 90.0
+            val vol = if (isPullback) 1400.0 else 3200.0
+            val buyRatio = if (bullish) {
+                if (isPullback) 0.48 else 0.72
+            } else {
+                if (isPullback) 0.52 else 0.28
+            }
+            list.add(
+                Candle(
+                    openTime = baseTime + i * 3600000L,
+                    open = open,
+                    high = high,
+                    low = low,
+                    close = close,
+                    volume = vol,
+                    takerBuyBaseVolume = vol * buyRatio
+                )
+            )
+            price = close
+        }
+        return list
+    }
 }

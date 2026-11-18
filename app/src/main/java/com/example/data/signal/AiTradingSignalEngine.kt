@@ -134,48 +134,80 @@ object AiTradingSignalEngine {
         val conflicts = mutableListOf<String>()
 
         // --- Factor 1: Trend Direction (Max 20 pts) ---
-        var trendPts = 0
+        val trendPts: Int
         val trendStance: String
         val trendSummary: String
 
         val emaSet = ta.trend.emaSet
-        val emaBullishCount = listOfNotNull(
-            emaSet.ema9?.let { currentPrice > it },
-            emaSet.ema20?.let { currentPrice > it },
-            emaSet.ema50?.let { currentPrice > it },
-            emaSet.ema100?.let { currentPrice > it },
-            emaSet.ema200?.let { currentPrice > it }
-        ).count { it }
-
-        val emaTotalCount = listOfNotNull(emaSet.ema9, emaSet.ema20, emaSet.ema50, emaSet.ema100, emaSet.ema200).size
+        val emaValues = listOfNotNull(emaSet.ema9, emaSet.ema20, emaSet.ema50, emaSet.ema100, emaSet.ema200)
+        val emaBullishCount = emaValues.count { currentPrice > it }
+        val emaBearishCount = emaValues.count { currentPrice < it }
+        val emaTotalCount = emaValues.size
         val supertrend = ta.trend.supertrend
         val adx = ta.trend.adx
         val isAdxTrending = adx != null && adx.adx >= 20.0
 
-        if (emaTotalCount > 0 && emaBullishCount >= (emaTotalCount * 0.7) && supertrend?.isBullish == true) {
-            trendPts = 18 + (if (isAdxTrending) 2 else 0)
+        var bullTrendPts = 0
+        var bearTrendPts = 0
+        if (emaTotalCount > 0) {
+            val bullRatio = emaBullishCount.toDouble() / emaTotalCount
+            val bearRatio = emaBearishCount.toDouble() / emaTotalCount
+            when {
+                bullRatio >= 0.8 -> bullTrendPts += 10
+                bullRatio >= 0.6 -> bullTrendPts += 7
+                bullRatio > 0.5 -> bullTrendPts += 4
+            }
+            when {
+                bearRatio >= 0.8 -> bearTrendPts += 10
+                bearRatio >= 0.6 -> bearTrendPts += 7
+                bearRatio > 0.5 -> bearTrendPts += 4
+            }
+        }
+        if (emaSet.ema9 != null && emaSet.ema20 != null && emaSet.ema50 != null) {
+            if (emaSet.ema9 > emaSet.ema20 && emaSet.ema20 > emaSet.ema50) bullTrendPts += 3
+            else if (emaSet.ema9 < emaSet.ema20 && emaSet.ema20 < emaSet.ema50) bearTrendPts += 3
+        }
+        if (supertrend?.isBullish == true) bullTrendPts += 5
+        else if (supertrend?.isBullish == false) bearTrendPts += 5
+
+        if (isAdxTrending) {
+            if (bullTrendPts > bearTrendPts) bullTrendPts += 2
+            else if (bearTrendPts > bullTrendPts) bearTrendPts += 2
+        }
+        bullTrendPts = bullTrendPts.coerceAtMost(20)
+        bearTrendPts = bearTrendPts.coerceAtMost(20)
+
+        if (bullTrendPts >= 12 && bullTrendPts - bearTrendPts >= 5) {
+            trendPts = bullTrendPts
             bullishPoints += trendPts
             trendStance = "BULLISH"
-            trendSummary = "Price above $emaBullishCount/$emaTotalCount EMAs with Bullish Supertrend (${String.format(Locale.US, "$%.2f", supertrend.value)})"
+            trendSummary = "Price above $emaBullishCount/$emaTotalCount EMAs" +
+                (supertrend?.let { " • Supertrend ${if (it.isBullish) "Bullish" else "Flip"} (${formatPrice(it.value)})" } ?: "")
             supportingIndicators.add("EMA Stack Bullish ($emaBullishCount/$emaTotalCount above)")
-            supportingIndicators.add("Supertrend Bullish (${String.format(Locale.US, "$%.2f", supertrend.value)})")
-        } else if (emaTotalCount > 0 && emaBullishCount <= (emaTotalCount * 0.3) && supertrend?.isBullish == false) {
-            trendPts = 18 + (if (isAdxTrending) 2 else 0)
+            if (supertrend?.isBullish == true) {
+                supportingIndicators.add("Supertrend Bullish (${formatPrice(supertrend.value)})")
+            }
+        } else if (bearTrendPts >= 12 && bearTrendPts - bullTrendPts >= 5) {
+            trendPts = bearTrendPts
             bearishPoints += trendPts
             trendStance = "BEARISH"
-            trendSummary = "Price below ${emaTotalCount - emaBullishCount}/$emaTotalCount EMAs with Bearish Supertrend (${String.format(Locale.US, "$%.2f", supertrend.value)})"
-            supportingIndicators.add("EMA Stack Bearish (${emaTotalCount - emaBullishCount}/$emaTotalCount below)")
-            supportingIndicators.add("Supertrend Bearish (${String.format(Locale.US, "$%.2f", supertrend.value)})")
+            trendSummary = "Price below $emaBearishCount/$emaTotalCount EMAs" +
+                (supertrend?.let { " • Supertrend ${if (!it.isBullish) "Bearish" else "Flip"} (${formatPrice(it.value)})" } ?: "")
+            supportingIndicators.add("EMA Stack Bearish ($emaBearishCount/$emaTotalCount below)")
+            if (supertrend?.isBullish == false) {
+                supportingIndicators.add("Supertrend Bearish (${formatPrice(supertrend.value)})")
+            }
         } else {
-            trendPts = 8
+            trendPts = max(bullTrendPts, bearTrendPts).coerceIn(5, 10)
+            if (bullTrendPts > bearTrendPts) bullishPoints += 5 else if (bearTrendPts > bullTrendPts) bearishPoints += 5
             trendStance = "CONFLICTING"
-            trendSummary = "Mixed EMA alignment ($emaBullishCount/$emaTotalCount above) with chop near moving averages"
-            conflicts.add("Trend Direction: Moving averages are intertwined without clear directional tilt")
+            trendSummary = "Mixed EMA alignment ($emaBullishCount/$emaTotalCount above) near moving averages"
+            conflicts.add("Trend Direction: Moving averages and Supertrend lack a clear directional tilt")
         }
         factorReasons.add(SignalFactorReason("Trend Direction", 20, trendPts, trendStance, trendSummary))
 
         // --- Factor 2: Momentum (Max 15 pts) ---
-        var momPts = 0
+        val momPts: Int
         val momStance: String
         val momSummary: String
 
@@ -187,53 +219,64 @@ object AiTradingSignalEngine {
         var bearMomPoints = 0
 
         if (rsi14 != null) {
-            val rVal = rsi14
-            if (rVal in 42.0..66.0) bullMomPoints += 4
-            else if (rVal in 34.0..58.0) bearMomPoints += 4
-            else if (rVal < 30.0) bullMomPoints += 5 // Oversold bounce potential
-            else if (rVal > 70.0) bearMomPoints += 5 // Overbought rejection potential
+            when {
+                rsi14 in 50.0..68.0 -> bullMomPoints += 5
+                rsi14 in 68.01..78.0 -> bullMomPoints += 4
+                rsi14 < 30.0 -> bullMomPoints += 3 // Oversold bounce watch
+            }
+            when {
+                rsi14 in 32.0..49.99 -> bearMomPoints += 5
+                rsi14 in 22.0..31.99 -> bearMomPoints += 4
+                rsi14 > 78.0 -> bearMomPoints += 3 // Overbought exhaustion watch
+            }
         }
 
         if (macd != null) {
-            val isBullishCross = macd.histogram > 0 && macd.macdLine > macd.signalLine
-            if (isBullishCross && macd.histogram > 0) {
+            if (macd.histogram > 0 && macd.macdLine > macd.signalLine) {
                 bullMomPoints += 6
                 supportingIndicators.add("MACD Bullish Momentum (Histogram: +${String.format(Locale.US, "%.2f", macd.histogram)})")
-            } else if (!isBullishCross && macd.histogram < 0) {
+            } else if (macd.histogram > 0 || macd.macdLine > macd.signalLine) {
+                bullMomPoints += 4
+            } else if (macd.histogram < 0 && macd.macdLine < macd.signalLine) {
                 bearMomPoints += 6
                 supportingIndicators.add("MACD Bearish Momentum (Histogram: ${String.format(Locale.US, "%.2f", macd.histogram)})")
+            } else if (macd.histogram < 0 || macd.macdLine < macd.signalLine) {
+                bearMomPoints += 4
             }
         }
 
         if (stoch != null) {
-            if (stoch.k > stoch.d && stoch.k < 80.0) bullMomPoints += 4
-            else if (stoch.k < stoch.d && stoch.k > 20.0) bearMomPoints += 4
+            if (stoch.k > stoch.d && stoch.k < 88.0) bullMomPoints += 4
+            else if (stoch.k >= 60.0 && stoch.k > stoch.d * 0.98) bullMomPoints += 2
+
+            if (stoch.k < stoch.d && stoch.k > 12.0) bearMomPoints += 4
+            else if (stoch.k <= 40.0 && stoch.k < stoch.d * 1.02) bearMomPoints += 2
         }
 
         val rsiText = if (rsi14 != null) String.format(Locale.US, "%.1f", rsi14) else "N/A"
 
-        if (bullMomPoints >= 9 && bullMomPoints > bearMomPoints) {
+        if (bullMomPoints >= 7 && bullMomPoints - bearMomPoints >= 3) {
             momPts = min(15, bullMomPoints)
             bullishPoints += momPts
             momStance = "BULLISH"
             momSummary = "RSI ($rsiText) + MACD positive acceleration"
-        } else if (bearMomPoints >= 9 && bearMomPoints > bullMomPoints) {
+        } else if (bearMomPoints >= 7 && bearMomPoints - bullMomPoints >= 3) {
             momPts = min(15, bearMomPoints)
             bearishPoints += momPts
             momStance = "BEARISH"
             momSummary = "RSI ($rsiText) + MACD negative acceleration"
         } else {
-            momPts = 6
+            momPts = 5
             momStance = "NEUTRAL"
-            momSummary = "Momentum oscillators are hovering near equilibrium ($rsiText)"
+            momSummary = "Momentum oscillators near equilibrium (RSI: $rsiText)"
             if (abs(bullMomPoints - bearMomPoints) <= 2) {
-                conflicts.add("Momentum: RSI and MACD do not show a decisive expansion bias")
+                conflicts.add("Momentum: RSI and MACD do not show decisive expansion bias")
             }
         }
         factorReasons.add(SignalFactorReason("Momentum", 15, momPts, momStance, momSummary))
 
         // --- Factor 3: Volume & Participation (Max 15 pts) ---
-        var volPts = 0
+        val volPts: Int
         val volStance: String
         val volSummary: String
 
@@ -241,27 +284,43 @@ object AiTradingSignalEngine {
         val volDelta = ta.volume.volumeDelta
         val cmf = ta.volume.cmf
 
-        if (rvol >= 1.15 && volDelta != null && volDelta.delta > 0 && (cmf ?: 0.0) >= 0.0) {
-            volPts = 14
+        var bullVolPts = 0
+        var bearVolPts = 0
+
+        if (volDelta != null) {
+            if (volDelta.delta > 0) bullVolPts += if (rvol >= 1.15) 7 else 5
+            else if (volDelta.delta < 0) bearVolPts += if (rvol >= 1.15) 7 else 5
+        }
+        if (cmf != null) {
+            if (cmf >= 0.05) bullVolPts += 5
+            else if (cmf > 0.0) bullVolPts += 3
+            else if (cmf <= -0.05) bearVolPts += 5
+            else if (cmf < 0.0) bearVolPts += 3
+        }
+        if (ta.volume.obv?.stance == IndicatorStance.BULLISH) bullVolPts += 4
+        else if (ta.volume.obv?.stance == IndicatorStance.BEARISH) bearVolPts += 4
+
+        if (bullVolPts >= 7 && bullVolPts - bearVolPts >= 3) {
+            volPts = min(15, bullVolPts)
             bullishPoints += volPts
             volStance = "BULLISH"
-            volSummary = "Elevated buying participation (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x, Net Buy Delta: +${String.format(Locale.US, "%.1f", volDelta.delta)})"
-            supportingIndicators.add("RVOL ${String.format(Locale.US, "%.2f", rvol)}x (Institutional Buy Volume)")
-        } else if (rvol >= 1.15 && volDelta != null && volDelta.delta < 0 && (cmf ?: 0.0) <= 0.0) {
-            volPts = 14
+            volSummary = "Net buying flow (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x, CMF: ${cmf?.let { String.format(Locale.US, "%.2f", it) } ?: "N/A"})"
+            supportingIndicators.add("Buy Volume Confluence (RVOL ${String.format(Locale.US, "%.2f", rvol)}x)")
+        } else if (bearVolPts >= 7 && bearVolPts - bullVolPts >= 3) {
+            volPts = min(15, bearVolPts)
             bearishPoints += volPts
             volStance = "BEARISH"
-            volSummary = "Elevated selling participation (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x, Net Sell Delta: ${String.format(Locale.US, "%.1f", volDelta.delta)})"
-            supportingIndicators.add("RVOL ${String.format(Locale.US, "%.2f", rvol)}x (Heavy Selling Pressure)")
+            volSummary = "Net selling flow (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x, CMF: ${cmf?.let { String.format(Locale.US, "%.2f", it) } ?: "N/A"})"
+            supportingIndicators.add("Sell Volume Confluence (RVOL ${String.format(Locale.US, "%.2f", rvol)}x)")
         } else {
-            volPts = 7
+            volPts = 6
             volStance = "NEUTRAL"
-            volSummary = "Average volume (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x) without dominant delta divergence"
+            volSummary = "Balanced volume (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x) without dominant delta divergence"
         }
         factorReasons.add(SignalFactorReason("Volume & Participation", 15, volPts, volStance, volSummary))
 
         // --- Factor 4: Market Structure (SMC) (Max 20 pts) ---
-        var structPts = 0
+        val structPts: Int
         val structStance: String
         val structSummary: String
 
@@ -271,44 +330,63 @@ object AiTradingSignalEngine {
         val hasBullishBreak = ms.isBullishBOSPresent || ms.isBullishCHoCHPresent
         val hasBearishBreak = ms.isBearishBOSPresent || ms.isBearishCHoCHPresent
 
-        // Check active order blocks near price
         val unmitigatedBullishOB = smc.orderBlocks.firstOrNull {
-            it.type == OrderBlockType.BULLISH && it.status == OrderBlockStatus.UNMITIGATED && currentPrice >= (it.bottomPrice * 0.985) && currentPrice <= (it.topPrice * 1.025)
+            it.type == OrderBlockType.BULLISH && it.status == OrderBlockStatus.UNMITIGATED && currentPrice >= (it.bottomPrice * 0.985) && currentPrice <= (it.topPrice * 1.03)
         }
         val unmitigatedBearishOB = smc.orderBlocks.firstOrNull {
-            it.type == OrderBlockType.BEARISH && it.status == OrderBlockStatus.UNMITIGATED && currentPrice <= (it.topPrice * 1.015) && currentPrice >= (it.bottomPrice * 0.975)
+            it.type == OrderBlockType.BEARISH && it.status == OrderBlockStatus.UNMITIGATED && currentPrice <= (it.topPrice * 1.015) && currentPrice >= (it.bottomPrice * 0.97)
         }
 
-        if (isBullishStructure || (hasBullishBreak && unmitigatedBullishOB != null)) {
-            structPts = 18
+        // Price-action displacement fallback when candles form a steady trend without 5-bar fractal pivots
+        val recentSegment = candles.takeLast(min(24, candles.size))
+        val firstThirdAvg = recentSegment.take(max(1, recentSegment.size / 3)).map { it.close }.average()
+        val lastThirdAvg = recentSegment.takeLast(max(1, recentSegment.size / 3)).map { it.close }.average()
+        val displacementPct = if (firstThirdAvg > 0.0) ((lastThirdAvg - firstThirdAvg) / firstThirdAvg) * 100.0 else 0.0
+        val sustainedBullishDisplacement = !isBearishStructure && !hasBearishBreak && displacementPct >= 1.2 && currentPrice >= lastThirdAvg
+        val sustainedBearishDisplacement = !isBullishStructure && !hasBullishBreak && displacementPct <= -1.2 && currentPrice <= lastThirdAvg
+
+        if (isBullishStructure || (hasBullishBreak && (unmitigatedBullishOB != null || !isBearishStructure))) {
+            structPts = if (unmitigatedBullishOB != null) 20 else 18
             bullishPoints += structPts
             structStance = "BULLISH"
             val breakLabel = if (ms.isBullishCHoCHPresent) "Bullish CHoCH" else "Bullish BOS"
-            structSummary = "$breakLabel confirmed with Higher Highs/Lows" + (if (unmitigatedBullishOB != null) " + Active Demand OB" else "")
+            structSummary = "$breakLabel confirmed with Higher Highs/Lows" + (if (unmitigatedBullishOB != null) " + Demand OB" else "")
             smcConfirmations.add("$breakLabel on ${primaryTimeframe.label}")
             if (unmitigatedBullishOB != null) {
-                smcConfirmations.add("Unmitigated Bullish OB [${String.format(Locale.US, "$%.2f", unmitigatedBullishOB.bottomPrice)} - ${String.format(Locale.US, "$%.2f", unmitigatedBullishOB.topPrice)}]")
+                smcConfirmations.add("Unmitigated Bullish OB [${formatPrice(unmitigatedBullishOB.bottomPrice)} - ${formatPrice(unmitigatedBullishOB.topPrice)}]")
             }
-        } else if (isBearishStructure || (hasBearishBreak && unmitigatedBearishOB != null)) {
-            structPts = 18
+        } else if (isBearishStructure || (hasBearishBreak && (unmitigatedBearishOB != null || !isBullishStructure))) {
+            structPts = if (unmitigatedBearishOB != null) 20 else 18
             bearishPoints += structPts
             structStance = "BEARISH"
             val breakLabel = if (ms.isBearishCHoCHPresent) "Bearish CHoCH" else "Bearish BOS"
-            structSummary = "$breakLabel confirmed with Lower Highs/Lows" + (if (unmitigatedBearishOB != null) " + Active Supply OB" else "")
+            structSummary = "$breakLabel confirmed with Lower Highs/Lows" + (if (unmitigatedBearishOB != null) " + Supply OB" else "")
             smcConfirmations.add("$breakLabel on ${primaryTimeframe.label}")
             if (unmitigatedBearishOB != null) {
-                smcConfirmations.add("Unmitigated Bearish OB [${String.format(Locale.US, "$%.2f", unmitigatedBearishOB.bottomPrice)} - ${String.format(Locale.US, "$%.2f", unmitigatedBearishOB.topPrice)}]")
+                smcConfirmations.add("Unmitigated Bearish OB [${formatPrice(unmitigatedBearishOB.bottomPrice)} - ${formatPrice(unmitigatedBearishOB.topPrice)}]")
             }
+        } else if (sustainedBullishDisplacement) {
+            structPts = 14
+            bullishPoints += structPts
+            structStance = "BULLISH"
+            structSummary = "Steady upward structural displacement (+${String.format(Locale.US, "%.2f", displacementPct)}%)"
+            smcConfirmations.add("Bullish Price-Action Displacement on ${primaryTimeframe.label}")
+        } else if (sustainedBearishDisplacement) {
+            structPts = 14
+            bearishPoints += structPts
+            structStance = "BEARISH"
+            structSummary = "Steady downward structural displacement (${String.format(Locale.US, "%.2f", displacementPct)}%)"
+            smcConfirmations.add("Bearish Price-Action Displacement on ${primaryTimeframe.label}")
         } else {
-            structPts = 7
+            structPts = 6
             structStance = "CONFLICTING"
-            structSummary = "Consolidating market structure without recent BOS or CHoCH"
-            conflicts.add("Market Structure: Trend is ranging or consolidating inside equilibrium")
+            structSummary = "Consolidating market structure without decisive BOS or displacement"
+            conflicts.add("Market Structure: Trend is ranging inside equilibrium")
         }
         factorReasons.add(SignalFactorReason("Market Structure (SMC)", 20, structPts, structStance, structSummary))
 
         // --- Factor 5: Liquidity & Stop Runs (Max 10 pts) ---
-        var liqPts = 0
+        val liqPts: Int
         val liqStance: String
         val liqSummary: String
 
@@ -320,43 +398,43 @@ object AiTradingSignalEngine {
             liqPts = 10
             bullishPoints += liqPts
             liqStance = "BULLISH"
-            liqSummary = "Sell-Side Liquidity (SSL) swept below ${String.format(Locale.US, "$%.2f", recentSweep.sweptLevel)} followed by candle reclamation"
-            smcConfirmations.add("SSL / Equal Lows Liquidity Swept (Institutional Spring)")
+            liqSummary = "Sell-Side Liquidity (SSL) swept below ${formatPrice(recentSweep.sweptLevel)} followed by reclamation"
+            smcConfirmations.add("SSL / Equal Lows Swept (Institutional Spring)")
         } else if (recentSweep != null && (recentSweep.poolType == LiquidityPoolType.BUY_SIDE_LIQUIDITY || recentSweep.poolType == LiquidityPoolType.EQUAL_HIGHS)) {
             liqPts = 10
             bearishPoints += liqPts
             liqStance = "BEARISH"
-            liqSummary = "Buy-Side Liquidity (BSL) swept above ${String.format(Locale.US, "$%.2f", recentSweep.sweptLevel)} followed by candle rejection"
-            smcConfirmations.add("BSL / Equal Highs Liquidity Swept (Institutional Upthrust)")
+            liqSummary = "Buy-Side Liquidity (BSL) swept above ${formatPrice(recentSweep.sweptLevel)} followed by rejection"
+            smcConfirmations.add("BSL / Equal Highs Swept (Institutional Upthrust)")
         } else if (smc.liquidity.potentialStopHuntActive) {
             liqPts = 8
             val sweepHunt = smc.liquidity.recentSweeps.firstOrNull { it.isPotentialStopHunt }
             if (sweepHunt != null && (sweepHunt.poolType == LiquidityPoolType.SELL_SIDE_LIQUIDITY || sweepHunt.poolType == LiquidityPoolType.EQUAL_LOWS)) {
                 bullishPoints += liqPts
                 liqStance = "BULLISH"
-                liqSummary = "Potential Bullish Stop-Hunt detected near ${String.format(Locale.US, "$%.2f", sweepHunt.sweptLevel)}"
+                liqSummary = "Potential Bullish Stop-Hunt near ${formatPrice(sweepHunt.sweptLevel)}"
                 smcConfirmations.add("Potential Stop-Hunt (Discount accumulation)")
             } else {
                 bearishPoints += liqPts
                 liqStance = "BEARISH"
                 val trig = sweepHunt?.sweptLevel ?: currentPrice
-                liqSummary = "Potential Bearish Stop-Hunt detected near ${String.format(Locale.US, "$%.2f", trig)}"
+                liqSummary = "Potential Bearish Stop-Hunt near ${formatPrice(trig)}"
                 smcConfirmations.add("Potential Stop-Hunt (Premium distribution)")
             }
         } else {
             liqPts = 5
             liqStance = "NEUTRAL"
-            liqSummary = "No recent sweep event; resting BSL (${bslPools.size} pools) and SSL (${sslPools.size} pools) intact"
+            liqSummary = "Resting liquidity targets intact (BSL: ${bslPools.size}, SSL: ${sslPools.size})"
         }
         factorReasons.add(SignalFactorReason("Liquidity & Stop Runs", 10, liqPts, liqStance, liqSummary))
 
         // --- Factor 6: Support/Resistance & Fib Golden Pocket (Max 10 pts) ---
-        var srPts = 0
+        val srPts: Int
         val srStance: String
         val srSummary: String
 
         val goldenPocket = smc.fibonacci?.retracementLevels?.firstOrNull { it.isGoldenPocket }
-        val isNearGoldenPocket = goldenPocket != null && abs(currentPrice - goldenPocket.price) / currentPrice <= 0.025
+        val isNearGoldenPocket = goldenPocket != null && abs(currentPrice - goldenPocket.price) / currentPrice <= 0.03
         val nearestSupport = smc.priceZones.firstOrNull { it.type == PriceZoneType.SUPPORT || it.type == PriceZoneType.DEMAND }
         val nearestResistance = smc.priceZones.firstOrNull { it.type == PriceZoneType.RESISTANCE || it.type == PriceZoneType.SUPPLY }
 
@@ -366,59 +444,89 @@ object AiTradingSignalEngine {
         val distToSupport = nearestSupport?.let { abs(currentPrice - it.centralPrice) / currentPrice } ?: 0.1
         val distToResistance = nearestResistance?.let { abs(currentPrice - it.centralPrice) / currentPrice } ?: 0.1
 
-        if (isNearGoldenPocket && goldenPocket != null && (distToSupport < distToResistance || unfilledBullishFvg != null)) {
-            srPts = 9
+        val nearSupportDemand = nearestSupport != null && distToSupport <= 0.025 && (distToSupport <= distToResistance || unfilledBullishFvg != null)
+        val nearResistanceSupply = nearestResistance != null && distToResistance <= 0.025 && (distToResistance < distToSupport || unfilledBearishFvg != null)
+
+        if ((isNearGoldenPocket && (distToSupport <= distToResistance || unfilledBullishFvg != null)) ||
+            (nearSupportDemand && bullishPoints >= bearishPoints)
+        ) {
+            srPts = if (isNearGoldenPocket) 9 else 8
             bullishPoints += srPts
             srStance = "BULLISH"
-            srSummary = "0.618 Fib Golden Pocket confluence (${String.format(Locale.US, "$%.2f", goldenPocket.price)}) + Demand Zone support"
-            smcConfirmations.add("Fibonacci 0.618 Golden Pocket Zone (${String.format(Locale.US, "$%.2f", goldenPocket.price)})")
-            if (unfilledBullishFvg != null) {
-                smcConfirmations.add("Unfilled Bullish FVG [${String.format(Locale.US, "$%.2f", unfilledBullishFvg.bottomPrice)} - ${String.format(Locale.US, "$%.2f", unfilledBullishFvg.topPrice)}]")
+            srSummary = if (isNearGoldenPocket && goldenPocket != null) {
+                "0.618 Fib Golden Pocket confluence (${formatPrice(goldenPocket.price)}) + Demand Support"
+            } else {
+                "Holding Key Demand / Support Zone (${formatPrice(nearestSupport!!.centralPrice)})"
             }
-        } else if (distToResistance < 0.015 && nearestResistance != null && (distToResistance < distToSupport || unfilledBearishFvg != null)) {
-            srPts = 9
+            if (isNearGoldenPocket && goldenPocket != null) {
+                smcConfirmations.add("Fibonacci 0.618 Golden Pocket (${formatPrice(goldenPocket.price)})")
+            }
+            if (unfilledBullishFvg != null) {
+                smcConfirmations.add("Unfilled Bullish FVG [${formatPrice(unfilledBullishFvg.bottomPrice)} - ${formatPrice(unfilledBullishFvg.topPrice)}]")
+            }
+        } else if ((isNearGoldenPocket && distToResistance < distToSupport) ||
+            (nearResistanceSupply && bearishPoints >= bullishPoints)
+        ) {
+            srPts = if (isNearGoldenPocket) 9 else 8
             bearishPoints += srPts
             srStance = "BEARISH"
-            srSummary = "Testing key Supply / Resistance zone (${String.format(Locale.US, "$%.2f", nearestResistance.centralPrice)})"
-            smcConfirmations.add("Supply / Key Resistance Barrier (${String.format(Locale.US, "$%.2f", nearestResistance.centralPrice)})")
-            if (unfilledBearishFvg != null) {
-                smcConfirmations.add("Unfilled Bearish FVG [${String.format(Locale.US, "$%.2f", unfilledBearishFvg.bottomPrice)} - ${String.format(Locale.US, "$%.2f", unfilledBearishFvg.topPrice)}]")
+            srSummary = "Testing Key Supply / Resistance Barrier (${formatPrice(nearestResistance?.centralPrice ?: currentPrice)})"
+            nearestResistance?.let {
+                smcConfirmations.add("Supply / Key Resistance Barrier (${formatPrice(it.centralPrice)})")
             }
+            if (unfilledBearishFvg != null) {
+                smcConfirmations.add("Unfilled Bearish FVG [${formatPrice(unfilledBearishFvg.bottomPrice)} - ${formatPrice(unfilledBearishFvg.topPrice)}]")
+            }
+        } else if (unfilledBullishFvg != null && currentPrice >= unfilledBullishFvg.bottomPrice * 0.99 && bullishPoints > bearishPoints) {
+            srPts = 7
+            bullishPoints += srPts
+            srStance = "BULLISH"
+            srSummary = "Supported above Bullish FVG [${formatPrice(unfilledBullishFvg.bottomPrice)} - ${formatPrice(unfilledBullishFvg.topPrice)}]"
+            smcConfirmations.add("Bullish FVG Support [${formatPrice(unfilledBullishFvg.bottomPrice)} - ${formatPrice(unfilledBullishFvg.topPrice)}]")
+        } else if (unfilledBearishFvg != null && currentPrice <= unfilledBearishFvg.topPrice * 1.01 && bearishPoints > bullishPoints) {
+            srPts = 7
+            bearishPoints += srPts
+            srStance = "BEARISH"
+            srSummary = "Capped below Bearish FVG [${formatPrice(unfilledBearishFvg.bottomPrice)} - ${formatPrice(unfilledBearishFvg.topPrice)}]"
+            smcConfirmations.add("Bearish FVG Resistance [${formatPrice(unfilledBearishFvg.bottomPrice)} - ${formatPrice(unfilledBearishFvg.topPrice)}]")
         } else {
             srPts = 5
             srStance = "NEUTRAL"
-            srSummary = "Price hovering between Support (${nearestSupport?.let { String.format(Locale.US, "$%.2f", it.centralPrice) } ?: "N/A"}) and Resistance (${nearestResistance?.let { String.format(Locale.US, "$%.2f", it.centralPrice) } ?: "N/A"})"
+            srSummary = "Between Support (${nearestSupport?.let { formatPrice(it.centralPrice) } ?: "N/A"}) and Resistance (${nearestResistance?.let { formatPrice(it.centralPrice) } ?: "N/A"})"
         }
         factorReasons.add(SignalFactorReason("Support / Resistance & Fib", 10, srPts, srStance, srSummary))
 
         // --- Factor 7: Multi-Timeframe Confirmation (Max 10 pts) ---
-        var mtfPts = 0
+        val mtfPts: Int
         val mtfStance: String
         val mtfSummary: String
 
+        val evaluatedTfCount = tfConditions.count { it.trendDescription != "Synchronizing" }.coerceAtLeast(1)
         val agreementPercent = if (bullishPoints >= bearishPoints) {
-            (bullishTfCount.toDouble() / totalTfCount * 100).toInt()
+            (bullishTfCount.toDouble() / evaluatedTfCount * 100).toInt().coerceIn(0, 100)
         } else {
-            (bearishTfCount.toDouble() / totalTfCount * 100).toInt()
+            (bearishTfCount.toDouble() / evaluatedTfCount * 100).toInt().coerceIn(0, 100)
         }
 
-        if (bullishTfCount >= (totalTfCount * 0.62) && bullishPoints >= bearishPoints) {
-            mtfPts = 9
+        if (bullishTfCount > bearishTfCount && bullishTfCount >= max(2, (evaluatedTfCount * 0.5).toInt()) && bullishPoints >= bearishPoints) {
+            mtfPts = if (bullishTfCount >= (evaluatedTfCount * 0.7).toInt()) 10 else 8
             bullishPoints += mtfPts
             mtfStance = "BULLISH"
-            mtfSummary = "$bullishTfCount of $totalTfCount timeframes agree Bullish ($agreementPercent% alignment)"
-            supportingIndicators.add("MTF Confluence: $bullishTfCount/$totalTfCount timeframes Bullish")
-        } else if (bearishTfCount >= (totalTfCount * 0.62) && bearishPoints > bullishPoints) {
-            mtfPts = 9
+            mtfSummary = "$bullishTfCount of $evaluatedTfCount synced timeframes agree Bullish ($agreementPercent% alignment)"
+            supportingIndicators.add("MTF Confluence: $bullishTfCount/$evaluatedTfCount timeframes Bullish")
+        } else if (bearishTfCount > bullishTfCount && bearishTfCount >= max(2, (evaluatedTfCount * 0.5).toInt()) && bearishPoints > bullishPoints) {
+            mtfPts = if (bearishTfCount >= (evaluatedTfCount * 0.7).toInt()) 10 else 8
             bearishPoints += mtfPts
             mtfStance = "BEARISH"
-            mtfSummary = "$bearishTfCount of $totalTfCount timeframes agree Bearish ($agreementPercent% alignment)"
-            supportingIndicators.add("MTF Confluence: $bearishTfCount/$totalTfCount timeframes Bearish")
+            mtfSummary = "$bearishTfCount of $evaluatedTfCount synced timeframes agree Bearish ($agreementPercent% alignment)"
+            supportingIndicators.add("MTF Confluence: $bearishTfCount/$evaluatedTfCount timeframes Bearish")
         } else {
             mtfPts = 4
-            mtfStance = "CONFLICTING"
+            mtfStance = if (bullishTfCount == 0 && bearishTfCount == 0) "NEUTRAL" else "CONFLICTING"
             mtfSummary = "Split timeframes: $bullishTfCount Bullish, $bearishTfCount Bearish, $neutralTfCount Neutral"
-            conflicts.add("Multi-Timeframe Conflict: Lower timeframes and higher timeframes do not align")
+            if (bullishTfCount > 0 && bearishTfCount > 0 && abs(bullishTfCount - bearishTfCount) <= 1) {
+                conflicts.add("Multi-Timeframe Conflict: Lower and higher timeframes are evenly divided")
+            }
         }
         factorReasons.add(SignalFactorReason("Multi-Timeframe Confirmation", 10, mtfPts, mtfStance, mtfSummary))
 
@@ -426,13 +534,15 @@ object AiTradingSignalEngine {
         // 4. CONFIDENCE SCORE AGGREGATION & DECISION LOGIC
         // ----------------------------------------------------
         val rawConfidence = max(bullishPoints, bearishPoints).coerceIn(0, 100)
-        val isBullishDominant = bullishPoints > bearishPoints && bullishPoints >= 62
-        val isBearishDominant = bearishPoints > bullishPoints && bearishPoints >= 62
-        val hasSevereConflict = abs(bullishPoints - bearishPoints) < 18 || conflicts.size >= 2
+        val pointEdge = abs(bullishPoints - bearishPoints)
+        val isBullishDominant = bullishPoints > bearishPoints && bullishPoints >= 60 && pointEdge >= 18 && conflicts.size < 3
+        val isBearishDominant = bearishPoints > bullishPoints && bearishPoints >= 60 && pointEdge >= 18 && conflicts.size < 3
+        val hasSevereConflict = pointEdge < 18 || conflicts.size >= 2
 
         val ratingLabel = when {
             rawConfidence >= 80 && !hasSevereConflict -> "High Confluence"
             rawConfidence >= 65 && !hasSevereConflict -> "Moderate Confluence"
+            rawConfidence >= 60 && pointEdge >= 18 -> "Moderate Confluence"
             else -> "Low / Conflicting Confluence"
         }
 
@@ -459,9 +569,14 @@ object AiTradingSignalEngine {
                 primaryTimeframe = primaryTimeframe,
                 code = "CONFLICTING_INDICATORS",
                 headline = "Conflicting Indicators & Lack of Edge",
-                explanation = "Bullish signals ($bullishPoints pts) and Bearish signals ($bearishPoints pts) are canceling each other out. Market has no clear directional edge.",
-                conflictingFactors = conflicts.ifEmpty { listOf("Trend and momentum are not in unified agreement", "Confidence score ($rawConfidence%) is below the minimum 65% actionable threshold") },
-                recommendedAction = "Wait for a confirmed Break of Structure (BOS) or liquidity sweep to resolve the current range.",
+                explanation = "Bullish score ($bullishPoints pts) vs Bearish score ($bearishPoints pts) lacks required confluence (>=60 pts with >=18 pt edge). Market has no clear directional setup.",
+                conflictingFactors = conflicts.ifEmpty {
+                    listOf(
+                        "Directional margin ($pointEdge pts) or total score ($rawConfidence%) is below the actionable threshold",
+                        "Indicators are not in unified multi-factor alignment"
+                    )
+                },
+                recommendedAction = "Wait for a confirmed Break of Structure (BOS), cleaner EMA alignment, or liquidity sweep.",
                 dataSource = dataSourceName,
                 freshness = dataStatus.label,
                 timestamp = now,
@@ -582,11 +697,14 @@ object AiTradingSignalEngine {
         val stopLoss = entryMid - slDist
         val riskPercent = (slDist / entryMid) * 100.0
 
-        // Targets based on R:R and Fib extensions / key zones
+        // Targets based on R:R and ordered Fib extensions strictly above TP1
         val tp1 = entryMid + (slDist * 1.6)
-        val tp2 = fibAnalysis?.extensionLevels?.firstOrNull()?.price
+        val fibExtensions = fibAnalysis?.extensionLevels.orEmpty()
+            .map { it.price }
+            .sorted()
+        val tp2 = fibExtensions.firstOrNull { it > tp1 + (slDist * 0.5) }
             ?: (entryMid + (slDist * 2.8))
-        val tp3 = fibAnalysis?.extensionLevels?.getOrNull(1)?.price
+        val tp3 = fibExtensions.firstOrNull { it > tp2 + (slDist * 0.5) }
             ?: (entryMid + (slDist * 4.2))
 
         val tp1Dist = ((tp1 - entryMid) / entryMid) * 100.0
@@ -762,8 +880,13 @@ object AiTradingSignalEngine {
                         keyLevel = (if (stance == "BULLISH") snap.nearestSupport else snap.nearestResistance)?.let { formatPrice(it) }
                     )
                 } else {
+                    val primaryTrend = smc.marketStructure.trendState
                     val stance = if (tf == CandleTimeframe.W1 || tf == CandleTimeframe.D1) {
-                        if (smc.marketStructure.trendState == MarketTrendState.BULLISH_UPTREND) "BULLISH" else "NEUTRAL"
+                        when (primaryTrend) {
+                            MarketTrendState.BULLISH_UPTREND -> "BULLISH"
+                            MarketTrendState.BEARISH_DOWNTREND -> "BEARISH"
+                            else -> "NEUTRAL"
+                        }
                     } else "NEUTRAL"
                     TimeframeCondition(
                         timeframe = tf,

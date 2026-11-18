@@ -360,10 +360,12 @@ class TradingViewModel(
     )
 
     init {
-        refreshMarketData()
-        loadTechnicalAnalysis("BTC", CandleTimeframe.H1)
-        loadAiSignal("BTC", CandleTimeframe.H1)
-        refreshAllAiSignals()
+        viewModelScope.launch {
+            repository.refreshData()
+            loadTechnicalAnalysis("BTC", CandleTimeframe.H1)
+            loadAiSignal("BTC", CandleTimeframe.H1)
+            refreshAllAiSignals()
+        }
 
         viewModelScope.launch {
             futuresScannerRepo.scannerState.collect {
@@ -382,14 +384,19 @@ class TradingViewModel(
         if (tab == NavigationTab.ANALYSIS && _technicalAnalysis.value == null) {
             loadTechnicalAnalysis(_analysisAssetSymbol.value, _analysisTimeframe.value)
         }
-        if (tab == NavigationTab.AI_SIGNALS && _currentAiSignal.value == null) {
+        if (tab == NavigationTab.AI_SIGNALS && (_currentAiSignal.value == null || _currentAiSignal.value?.noTradeReason?.code == "DATA_UNAVAILABLE")) {
             loadAiSignal(_selectedSignalAssetSymbol.value, _selectedSignalTimeframe.value)
+            if (_aiSignalsList.value.isEmpty()) {
+                refreshAllAiSignals()
+            }
         }
     }
 
     fun refreshMarketData() {
         viewModelScope.launch {
             repository.refreshData()
+            loadAiSignal(_selectedSignalAssetSymbol.value, _selectedSignalTimeframe.value)
+            refreshAllAiSignals()
             _userMessage.value = "Market data updated"
         }
     }

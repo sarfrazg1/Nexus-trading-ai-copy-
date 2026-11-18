@@ -618,9 +618,10 @@ fun HeroSignalCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${signal.dataSource} • ${signal.dataFreshness}",
+                    text = "${signal.dataSource} • ${signal.dataFreshness} • ${signal.formattedTimestamp}",
                     color = TextMuted,
-                    fontSize = 11.sp
+                    fontSize = 10.sp,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {

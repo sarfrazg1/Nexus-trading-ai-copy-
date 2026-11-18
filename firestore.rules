@@ -1,0 +1,286 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedAdminEmail() {
+      return request.auth.token.email_verified == true
+        && request.auth.token.email == 'sarfarazmech00@gmail.com';
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && (isVerifiedAdminEmail()
+          || exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string
+        && id.size() >= 1
+        && id.size() <= 128
+        && !id.matches('.*[/\\\\].*')
+        && id != '.'
+        && id != '..';
+    }
+
+    function isValidActivationCodeId(code) {
+      return code is string
+        && code.size() >= 8
+        && code.size() <= 40
+        && code.matches('^[A-Z0-9-]+$');
+    }
+
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
+    }
+
+    function isRecentServerTimestamp(ts) {
+      return ts is timestamp
+        && ts <= request.time
+        && ts >= request.time - duration.value(10, 'm');
+    }
+
+    function isValidPlan(data) {
+      return (data.planId == 'MONTHLY'
+          && data.planName == 'MONTHLY'
+          && data.pricePkr == 500
+          && data.durationMonths == 1
+          && data.durationDays == 30)
+        || (data.planId == 'GOLDEN_ANNUAL'
+          && data.planName == 'GOLDEN ANNUAL'
+          && data.pricePkr == 4000
+          && data.durationMonths == 12
+          && data.durationDays == 365);
+    }
+
+    function isValidPlanExpiry(planId, expiresAt) {
+      return expiresAt is timestamp
+        && ((planId == 'MONTHLY'
+            && expiresAt >= request.time + duration.value(27, 'd')
+            && expiresAt <= request.time + duration.value(32, 'd'))
+          || (planId == 'GOLDEN_ANNUAL'
+            && expiresAt >= request.time + duration.value(364, 'd')
+            && expiresAt <= request.time + duration.value(367, 'd')));
+    }
+
+    function isValidSupportConfig(data) {
+      return data.keys().hasOnly(['whatsappNumber', 'supportMessage', 'updatedByUid', 'updatedAt'])
+        && data.keys().hasAll(['whatsappNumber', 'updatedByUid', 'updatedAt'])
+        && data.whatsappNumber is string
+        && (data.whatsappNumber.size() == 0
+          || data.whatsappNumber.matches('^\\+?[0-9]{7,15}$'))
+        && (!('supportMessage' in data) || (data.supportMessage is string && data.supportMessage.size() <= 300))
+        && isNonEmptyString(data.updatedByUid, 128)
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminCreateCode(data, code) {
+      return isValidActivationCodeId(code)
+        && data.keys().hasOnly([
+          'code', 'planId', 'planName', 'pricePkr', 'durationMonths', 'durationDays',
+          'status', 'note', 'createdByUid', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasAll([
+          'code', 'planId', 'planName', 'pricePkr', 'durationMonths', 'durationDays',
+          'status', 'createdByUid', 'createdAt', 'updatedAt'
+        ])
+        && data.code == code
+        && isValidPlan(data)
+        && data.status == 'UNUSED'
+        && (!('note' in data) || (data.note is string && data.note.size() <= 160))
+        && data.createdByUid == request.auth.uid
+        && isRecentServerTimestamp(data.createdAt)
+        && data.updatedAt == data.createdAt;
+    }
+
+    function isValidAdminUpdateCode(data, prev, code) {
+      return data.code == code
+        && data.createdByUid == prev.createdByUid
+        && data.createdAt == prev.createdAt
+        && isValidPlan(data)
+        && data.status in ['UNUSED', 'ACTIVATED', 'REVOKED', 'EXPIRED']
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time;
+    }
+
+    function isValidUserRedeemCode(data, prev, code) {
+      return isValidActivationCodeId(code)
+        && prev.status == 'UNUSED'
+        && data.status == 'ACTIVATED'
+        && data.diff(prev).affectedKeys().hasOnly([
+          'status', 'activatedByUid', 'activatedByEmail', 'activatedAt', 'expiresAt', 'updatedAt'
+        ])
+        && data.code == prev.code
+        && data.planId == prev.planId
+        && data.planName == prev.planName
+        && data.pricePkr == prev.pricePkr
+        && data.durationMonths == prev.durationMonths
+        && data.durationDays == prev.durationDays
+        && data.createdByUid == prev.createdByUid
+        && data.createdAt == prev.createdAt
+        && data.activatedByUid == request.auth.uid
+        && (!('activatedByEmail' in data) || (data.activatedByEmail is string && data.activatedByEmail.size() <= 200))
+        && isRecentServerTimestamp(data.activatedAt)
+        && isValidPlanExpiry(data.planId, data.expiresAt)
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.activeCode == code
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.planId == prev.planId
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.expiresAt == data.expiresAt
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.subscriptionStatus == 'ACTIVE'
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountDisabled == false;
+    }
+
+    function isValidUserCreate(data, userId) {
+      return isValidId(userId)
+        && data.keys().hasOnly([
+          'userId', 'email', 'displayName', 'role', 'subscriptionStatus',
+          'accountDisabled', 'lastSeenAt', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasAll([
+          'userId', 'email', 'displayName', 'role', 'subscriptionStatus',
+          'accountDisabled', 'lastSeenAt', 'createdAt', 'updatedAt'
+        ])
+        && data.userId == userId
+        && isNonEmptyString(data.email, 200)
+        && data.displayName is string
+        && data.displayName.size() <= 120
+        && data.role == 'USER'
+        && data.subscriptionStatus == 'NONE'
+        && data.accountDisabled == false
+        && isRecentServerTimestamp(data.lastSeenAt)
+        && isRecentServerTimestamp(data.createdAt)
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time;
+    }
+
+    function isValidUserHeartbeatUpdate(data, prev) {
+      return data.diff(prev).affectedKeys().hasOnly(['email', 'displayName', 'lastSeenAt', 'updatedAt'])
+        && isNonEmptyString(data.email, 200)
+        && data.displayName is string
+        && data.displayName.size() <= 120
+        && isRecentServerTimestamp(data.lastSeenAt)
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time;
+    }
+
+    function isValidUserPlanFields(data) {
+      return (data.planId == 'MONTHLY'
+          && data.planName == 'MONTHLY'
+          && data.pricePkr == 500)
+        || (data.planId == 'GOLDEN_ANNUAL'
+          && data.planName == 'GOLDEN ANNUAL'
+          && data.pricePkr == 4000);
+    }
+
+    function isValidUserActivateUpdate(data, prev, userId) {
+      return prev.accountDisabled != true
+        && data.diff(prev).affectedKeys().hasOnly([
+          'subscriptionStatus', 'planId', 'planName', 'pricePkr',
+          'activeCode', 'activatedAt', 'expiresAt', 'lastSeenAt', 'updatedAt'
+        ])
+        && data.userId == prev.userId
+        && data.role == 'USER'
+        && data.accountDisabled == false
+        && data.subscriptionStatus == 'ACTIVE'
+        && isValidUserPlanFields(data)
+        && isValidActivationCodeId(data.activeCode)
+        && get(/databases/$(database)/documents/activation_codes/$(data.activeCode)).data.status == 'UNUSED'
+        && getAfter(/databases/$(database)/documents/activation_codes/$(data.activeCode)).data.status == 'ACTIVATED'
+        && getAfter(/databases/$(database)/documents/activation_codes/$(data.activeCode)).data.activatedByUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/activation_codes/$(data.activeCode)).data.planId == data.planId
+        && getAfter(/databases/$(database)/documents/activation_codes/$(data.activeCode)).data.expiresAt == data.expiresAt
+        && isRecentServerTimestamp(data.activatedAt)
+        && isValidPlanExpiry(data.planId, data.expiresAt)
+        && isRecentServerTimestamp(data.lastSeenAt)
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time;
+    }
+
+    function isValidUserExpireUpdate(data, prev) {
+      return prev.subscriptionStatus == 'ACTIVE'
+        && prev.expiresAt is timestamp
+        && prev.expiresAt <= request.time
+        && data.diff(prev).affectedKeys().hasOnly(['subscriptionStatus', 'lastSeenAt', 'updatedAt'])
+        && data.subscriptionStatus == 'EXPIRED'
+        && isRecentServerTimestamp(data.lastSeenAt)
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminUserUpdate(data, prev, userId) {
+      return data.userId == userId
+        && data.userId == prev.userId
+        && data.subscriptionStatus in ['NONE', 'ACTIVE', 'EXPIRED', 'REVOKED']
+        && data.accountDisabled is bool
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time;
+    }
+
+    // ===============================================================
+    // Collections
+    // ===============================================================
+
+    match /admins/{uid} {
+      allow read, write: if isAdmin();
+    }
+
+    match /app_config/{docId} {
+      allow get: if docId == 'support' && isSignedIn();
+      allow list: if isAdmin();
+      allow create, update: if docId == 'support' && isAdmin() && isValidSupportConfig(incoming());
+      allow delete: if docId == 'support' && isAdmin();
+    }
+
+    match /activation_codes/{code} {
+      allow get: if isAdmin()
+        || (isSignedIn() && (existing().status == 'UNUSED' || existing().activatedByUid == request.auth.uid));
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidAdminCreateCode(incoming(), code);
+      allow update: if (isAdmin() && isValidAdminUpdateCode(incoming(), existing(), code))
+        || (isSignedIn() && isValidUserRedeemCode(incoming(), existing(), code));
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if (isOwner(userId) && isValidUserCreate(incoming(), userId))
+        || isAdmin();
+      allow update: if (isAdmin() && isValidAdminUserUpdate(incoming(), existing(), userId))
+        || (isOwner(userId)
+          && (isValidUserHeartbeatUpdate(incoming(), existing())
+            || isValidUserActivateUpdate(incoming(), existing(), userId)
+            || isValidUserExpireUpdate(incoming(), existing())));
+      allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // Catch-all Deny
+    // ===============================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

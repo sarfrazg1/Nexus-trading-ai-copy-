@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "AdminAccount": {
+      "title": "AdminAccount",
+      "description": "Explicitly authorized admin UIDs for NEXUS TRADING AI access control.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "addedAt"]
+    },
+    "SupportConfig": {
+      "title": "SupportConfig",
+      "description": "Admin-configurable WhatsApp support contact displayed on the activation screen.",
+      "type": "object",
+      "properties": {
+        "whatsappNumber": { "type": "string" },
+        "supportMessage": { "type": "string" },
+        "updatedByUid": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["whatsappNumber", "updatedByUid", "updatedAt"]
+    },
+    "ActivationCode": {
+      "title": "ActivationCode",
+      "description": "Single-use subscription activation code issued by the admin for MONTHLY or GOLDEN_ANNUAL plan.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "planId": { "type": "string", "enum": ["MONTHLY", "GOLDEN_ANNUAL"] },
+        "planName": { "type": "string", "enum": ["MONTHLY", "GOLDEN ANNUAL"] },
+        "pricePkr": { "type": "integer", "enum": [500, 4000] },
+        "durationMonths": { "type": "integer", "enum": [1, 12] },
+        "durationDays": { "type": "integer", "enum": [30, 365] },
+        "status": { "type": "string", "enum": ["UNUSED", "ACTIVATED", "REVOKED", "EXPIRED"] },
+        "note": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "activatedByUid": { "type": "string" },
+        "activatedByEmail": { "type": "string" },
+        "activatedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "code",
+        "planId",
+        "planName",
+        "pricePkr",
+        "durationMonths",
+        "durationDays",
+        "status",
+        "createdByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserSubscription": {
+      "title": "UserSubscription",
+      "description": "User account and subscription activation record gated at login.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["USER"] },
+        "subscriptionStatus": { "type": "string", "enum": ["NONE", "ACTIVE", "EXPIRED", "REVOKED"] },
+        "accountDisabled": { "type": "boolean" },
+        "planId": { "type": "string", "enum": ["MONTHLY", "GOLDEN_ANNUAL"] },
+        "planName": { "type": "string", "enum": ["MONTHLY", "GOLDEN ANNUAL"] },
+        "pricePkr": { "type": "integer", "enum": [500, 4000] },
+        "activeCode": { "type": "string" },
+        "activatedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "lastSeenAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "email",
+        "displayName",
+        "role",
+        "subscriptionStatus",
+        "accountDisabled",
+        "lastSeenAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminAccount" },
+      "description": "Authorized admin UIDs."
+    },
+    "app_config/support": {
+      "schema": { "$ref": "#/entities/SupportConfig" },
+      "description": "Publicly readable (to signed-in users) WhatsApp support configuration editable only by admin."
+    },
+    "activation_codes/{code}": {
+      "schema": { "$ref": "#/entities/ActivationCode" },
+      "description": "Individual activation codes redeemable once by a signed-in user; managed by admin."
+    },
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/UserSubscription" },
+      "description": "Per-user subscription entitlement record."
+    }
+  }
+}

@@ -9,22 +9,45 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.data.model.ConnectionStatus
 import com.example.data.model.NavigationTab
+import com.example.data.subscription.AccessGateState
+import com.example.data.subscription.GoogleAuthHelper
+import com.example.data.subscription.GoogleSignInOutcome
+import com.example.data.subscription.SubscriptionRepository
 import com.example.ui.components.BottomNavBar
 import com.example.ui.components.NexusTopBar
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,6 +58,9 @@ import com.example.ui.dialogs.AssetDetailDialog
 import com.example.ui.dialogs.EconomicGlossaryDialog
 import com.example.ui.dialogs.NewsDetailDialog
 import com.example.ui.dialogs.RomanUrduGlossaryDialog
+import com.example.ui.screens.ActivationScreen
+import com.example.ui.screens.AdminPanelScreen
+import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.LearningCenterScreen
 import com.example.ui.screens.MarketsScreen
@@ -43,10 +69,16 @@ import com.example.ui.screens.ScannerScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SignalsScreen
 import com.example.ui.screens.TechnicalAnalysisScreen
-import com.example.ui.theme.NavyBackground
+import com.example.ui.theme.NexusTheme
 import com.example.ui.theme.NexusTradingTheme
+import com.example.ui.viewmodel.SubscriptionViewModel
 import com.example.ui.viewmodel.TradingViewModel
 import com.example.util.configureAppCheck
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,10 +86,205 @@ class MainActivity : ComponentActivity() {
         configureAppCheck(this, intent)
         enableEdgeToEdge()
         setContent {
-            val viewModel: TradingViewModel = viewModel()
-            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-            NexusTradingTheme(themeMode = uiState.themeMode) {
-                NexusTradingApp(viewModel = viewModel)
+            val context = LocalContext.current
+            val scope = rememberCoroutineScope()
+            val firebaseAuth = remember { FirebaseAuth.getInstance() }
+            var currentUser by remember { mutableStateOf<FirebaseUser?>(firebaseAuth.currentUser) }
+            var isSigningIn by remember { mutableStateOf(false) }
+            var authError by remember { mutableStateOf<String?>(null) }
+
+            DisposableEffect(firebaseAuth) {
+                val listener = FirebaseAuth.AuthStateListener { auth ->
+                    currentUser = auth.currentUser
+                }
+                firebaseAuth.addAuthStateListener(listener)
+                onDispose { firebaseAuth.removeAuthStateListener(listener) }
+            }
+
+            NexusTradingTheme {
+                val user = currentUser
+                if (user == null) {
+                    AuthScreen(
+                        isSigningIn = isSigningIn,
+                        errorMessage = authError,
+                        onGoogleSignInClick = {
+                            if (!isSigningIn) {
+                                isSigningIn = true
+                                authError = null
+                                scope.launch {
+                                    when (val outcome = GoogleAuthHelper.signInWithGoogle(context)) {
+                                        is GoogleSignInOutcome.Success -> {
+                                            currentUser = outcome.user
+                                            isSigningIn = false
+                                        }
+                                        GoogleSignInOutcome.Cancelled -> {
+                                            isSigningIn = false
+                                        }
+                                        is GoogleSignInOutcome.Failure -> {
+                                            authError = outcome.message
+                                            isSigningIn = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+                } else {
+                    key(user.uid) {
+                        val subRepo = remember(user.uid) { SubscriptionRepository(context.applicationContext) }
+                        val subVm: SubscriptionViewModel = viewModel(
+                            key = "sub_${user.uid}",
+                            factory = SubscriptionViewModel.Factory(user.uid, user, subRepo)
+                        )
+                        val gateState by subVm.gateState.collectAsStateWithLifecycle()
+                        val actionState by subVm.actionState.collectAsStateWithLifecycle()
+                        val adminCodesState by subVm.adminCodesState.collectAsStateWithLifecycle()
+                        val adminUsersState by subVm.adminUsersState.collectAsStateWithLifecycle()
+
+                        val isAdmin = when (val gs = gateState) {
+                            is AccessGateState.Authorized -> gs.isAdmin
+                            is AccessGateState.NeedsActivation -> gs.isAdmin
+                            else -> subRepo.isVerifiedBootstrapAdmin(user)
+                        }
+                        val supportConfig = when (val gs = gateState) {
+                            is AccessGateState.Authorized -> gs.supportConfig
+                            is AccessGateState.NeedsActivation -> gs.supportConfig
+                            else -> com.example.data.subscription.SupportConfig()
+                        }
+                        val serverNowMs = when (val gs = gateState) {
+                            is AccessGateState.Authorized -> gs.serverNowMs
+                            is AccessGateState.NeedsActivation -> gs.serverNowMs
+                            else -> System.currentTimeMillis()
+                        }
+
+                        if (actionState.showAdminPanel && isAdmin) {
+                            AdminPanelScreen(
+                                adminEmail = user.email.orEmpty(),
+                                codesState = adminCodesState,
+                                usersState = adminUsersState,
+                                supportConfig = supportConfig,
+                                actionState = actionState,
+                                serverNowMs = serverNowMs,
+                                onGenerateCode = { plan, note -> subVm.adminGenerateCode(plan, note) },
+                                onRevokeCode = { rec -> subVm.adminRevokeCode(rec) },
+                                onRevokeUserAccess = { u -> subVm.adminRevokeUserAccess(u) },
+                                onToggleUserDisabled = { u, dis -> subVm.adminToggleUserDisabled(u, dis) },
+                                onSaveSupportConfig = { phone, msg -> subVm.adminSaveSupportConfig(phone, msg) },
+                                onClearMessages = { subVm.clearAdminMessages() },
+                                onBackClick = { subVm.closeAdminPanel() }
+                            )
+                        } else {
+                            when (val gs = gateState) {
+                                AccessGateState.Loading -> {
+                                    GateLoadingScreen(email = user.email.orEmpty())
+                                }
+                                is AccessGateState.Error -> {
+                                    GateErrorScreen(
+                                        message = gs.message,
+                                        onRetry = { subVm.initializeSession() },
+                                        onSignOut = {
+                                            scope.launch { GoogleAuthHelper.signOut(context) }
+                                        }
+                                    )
+                                }
+                                is AccessGateState.NeedsActivation -> {
+                                    ActivationScreen(
+                                        state = gs,
+                                        actionState = actionState,
+                                        onSubmitCode = { code -> subVm.redeemActivationCode(code) },
+                                        onRecheckAccess = { subVm.initializeSession() },
+                                        onOpenAdminPanel = { subVm.openAdminPanel() },
+                                        onSignOutClick = {
+                                            scope.launch { GoogleAuthHelper.signOut(context) }
+                                        }
+                                    )
+                                }
+                                is AccessGateState.Authorized -> {
+                                    val tradingViewModel: TradingViewModel = viewModel(key = "trade_${user.uid}")
+                                    val uiState by tradingViewModel.uiState.collectAsStateWithLifecycle()
+                                    NexusTradingTheme(themeMode = uiState.themeMode) {
+                                        NexusTradingApp(
+                                            viewModel = tradingViewModel,
+                                            authorizedState = gs,
+                                            onOpenAdminPanel = { subVm.openAdminPanel() },
+                                            onSignOutClick = {
+                                                scope.launch { GoogleAuthHelper.signOut(context) }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GateLoadingScreen(email: String) {
+    val colors = NexusTheme.colors
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .safeDrawingPadding(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularProgressIndicator(color = colors.gold, modifier = Modifier.size(40.dp))
+            Text(
+                text = "Verifying NEXUS Subscription...",
+                color = colors.textPrimary,
+                fontWeight = FontWeight.Bold
+            )
+            if (email.isNotBlank()) {
+                Text(text = email, color = colors.textMuted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GateErrorScreen(
+    message: String,
+    onRetry: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    val colors = NexusTheme.colors
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .safeDrawingPadding()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Verification Error",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    color = colors.bearishRed,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+            Text(text = message, color = colors.textSecondary)
+            Spacer(modifier = Modifier.height(6.dp))
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.testTag("gate_retry_btn")
+            ) {
+                Text("Retry")
+            }
+            OutlinedButton(onClick = onSignOut) {
+                Text("Sign Out")
             }
         }
     }
@@ -65,7 +292,10 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun NexusTradingApp(
-    viewModel: TradingViewModel = viewModel()
+    viewModel: TradingViewModel = viewModel(),
+    authorizedState: AccessGateState.Authorized? = null,
+    onOpenAdminPanel: () -> Unit = {},
+    onSignOutClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -378,6 +608,11 @@ fun NexusTradingApp(
                         lastMarketRefreshTimestamp = uiState.lastMarketDataRefreshTimestamp
                     )
 
+                    val planLabel = authorizedState?.userRecord?.planName.orEmpty()
+                    val expiryLabel = authorizedState?.userRecord?.expiresAt?.toDate()?.let { date ->
+                        SimpleDateFormat("MMM dd, yyyy", Locale.US).format(date)
+                    }.orEmpty()
+
                     SettingsScreen(
                         settingsState = settingsState,
                         apiConfigs = uiState.apiConfigs,
@@ -393,7 +628,13 @@ fun NexusTradingApp(
                         onClearCacheClick = { viewModel.clearTemporaryCache() },
                         onConfigureFeed = { config -> viewModel.openApiConfigDialog(config) },
                         onRefreshFeeds = { viewModel.refreshMarketData() },
-                        onUrduFontSizeSelect = { size -> viewModel.setUrduFontSize(size) }
+                        onUrduFontSizeSelect = { size -> viewModel.setUrduFontSize(size) },
+                        accountEmail = authorizedState?.email.orEmpty(),
+                        subscriptionPlanLabel = planLabel,
+                        subscriptionExpiryLabel = expiryLabel,
+                        isAdmin = authorizedState?.isAdmin == true,
+                        onOpenAdminPanel = onOpenAdminPanel,
+                        onSignOutClick = onSignOutClick
                     )
                 }
             }

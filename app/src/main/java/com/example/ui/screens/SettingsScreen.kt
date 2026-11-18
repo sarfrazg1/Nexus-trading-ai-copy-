@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Cable
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -104,6 +106,12 @@ fun SettingsScreen(
     onConfigureFeed: (ApiFeedConfig) -> Unit,
     onRefreshFeeds: () -> Unit,
     onUrduFontSizeSelect: (com.example.data.settings.UrduFontSize) -> Unit = {},
+    accountEmail: String = "",
+    subscriptionPlanLabel: String = "",
+    subscriptionExpiryLabel: String = "",
+    isAdmin: Boolean = false,
+    onOpenAdminPanel: () -> Unit = {},
+    onSignOutClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val lang = settingsState.languageMode
@@ -174,6 +182,100 @@ fun SettingsScreen(
                                 fontSize = 10.sp
                             )
                         )
+                    }
+                }
+            }
+        }
+
+        // Account, Subscription & Admin Controls
+        if (accountEmail.isNotBlank()) {
+            item {
+                SettingsSectionHeader(
+                    icon = Icons.Default.Key,
+                    title = "SUBSCRIPTION & ACCOUNT",
+                    goldColor = colors.gold,
+                    textColor = colors.textPrimary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_subscription_card"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.card),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.gold.copy(alpha = 0.45f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = accountEmail,
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        if (subscriptionPlanLabel.isNotBlank()) {
+                            Text(
+                                text = "Active Plan: $subscriptionPlanLabel",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = colors.gold,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                        }
+                        if (subscriptionExpiryLabel.isNotBlank()) {
+                            Text(
+                                text = "Valid Until: $subscriptionExpiryLabel",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = colors.bullishGreen,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (isAdmin) {
+                                Button(
+                                    onClick = onOpenAdminPanel,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = colors.gold,
+                                        contentColor = if (colors.isDark) Color(0xFF070B14) else Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_open_admin_panel_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AdminPanelSettings,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Admin Panel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onSignOutClick,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.bearishRed),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_sign_out_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Sign Out", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }

@@ -34,6 +34,7 @@ class CandleApiService(
         "XAGUSD" to "SI=F",
         "SILVER" to "SI=F",
         "WTI" to "CL=F",
+        "OIL_WTI" to "CL=F",
         "OIL" to "CL=F",
         "BRENT" to "BZ=F",
         "NATGAS" to "NG=F"
