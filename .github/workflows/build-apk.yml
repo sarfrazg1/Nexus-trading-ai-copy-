@@ -66,6 +66,57 @@ jobs:
           fi
           echo "Temporary debug keystore verified."
 
+      - name: Verify Firebase google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ ! -f "app/google-services.json" ]; then
+            if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+              echo "Restoring app/google-services.json from GOOGLE_SERVICES_JSON secret..."
+              python3 - <<'PY'
+          import base64, json, os, sys
+          raw = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
+          if not raw:
+              sys.exit(1)
+          try:
+              json.loads(raw)
+              content = raw
+          except Exception:
+              decoded = base64.b64decode(raw).decode("utf-8")
+              json.loads(decoded)
+              content = decoded
+          with open("app/google-services.json", "w", encoding="utf-8") as f:
+              f.write(content)
+          PY
+            else
+              echo "::error::app/google-services.json is missing. Commit app/google-services.json to the repository or configure the GOOGLE_SERVICES_JSON GitHub Actions secret so the Google Services Gradle plugin can generate default_web_client_id."
+              exit 1
+            fi
+          fi
+          python3 - <<'PY'
+          import json, sys
+          with open("app/google-services.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+          clients = data.get("client", [])
+          target_pkg = "com.aistudio.nexustrading.gdhwsv"
+          matching = [
+              c for c in clients
+              if c.get("client_info", {}).get("android_client_info", {}).get("package_name") == target_pkg
+          ]
+          if not matching:
+              print(f"::error::No Firebase client entry found for {target_pkg} in app/google-services.json", file=sys.stderr)
+              sys.exit(1)
+          has_web_client = any(
+              oauth.get("client_type") == 3 and bool(oauth.get("client_id"))
+              for c in matching
+              for oauth in c.get("oauth_client", [])
+          )
+          if not has_web_client:
+              print(f"::error::No Web OAuth client (client_type == 3) found for {target_pkg} in app/google-services.json; default_web_client_id cannot be generated.", file=sys.stderr)
+              sys.exit(1)
+          print(f"Verified app/google-services.json contains valid Web OAuth client configuration for {target_pkg}.")
+          PY
+
       - name: Build debug APK
         run: |
           gradle :app:assembleDebug --stacktrace --no-daemon
