@@ -44,12 +44,15 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Create temporary debug keystore
+      - name: Restore and verify debug keystore
         run: |
           if [ -f "./debug.keystore" ]; then
-            echo "debug.keystore already exists. Skipping creation."
+            echo "debug.keystore already exists. Using existing keystore."
+          elif [ -f "./debug.keystore.base64" ]; then
+            echo "Restoring debug.keystore from debug.keystore.base64..."
+            base64 -d ./debug.keystore.base64 > ./debug.keystore
           else
-            echo "Creating temporary debug keystore..."
+            echo "::warning::Neither debug.keystore nor debug.keystore.base64 found; generating temporary debug keystore (Google Sign-In SHA-1 will differ from Firebase config)."
             keytool -genkeypair -v \
               -keystore ./debug.keystore \
               -storepass android \
@@ -61,10 +64,11 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
           if [ ! -f "./debug.keystore" ]; then
-            echo "Error: Failed to create ./debug.keystore"
+            echo "Error: Failed to materialize ./debug.keystore"
             exit 1
           fi
-          echo "Temporary debug keystore verified."
+          KEYSTORE_SHA1=$(keytool -list -v -keystore ./debug.keystore -alias androiddebugkey -storepass android -keypass android | awk -F': ' '/^\s*SHA1:/{print $2; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          echo "Debug keystore SHA-1 (normalized): $KEYSTORE_SHA1"
 
       - name: Verify Firebase google-services.json
         env:
@@ -93,8 +97,10 @@ jobs:
               exit 1
             fi
           fi
+          KEYSTORE_SHA1=$(keytool -list -v -keystore ./debug.keystore -alias androiddebugkey -storepass android -keypass android | awk -F': ' '/^\s*SHA1:/{print $2; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          export KEYSTORE_SHA1
           python3 - <<'PY'
-          import json, sys
+          import json, os, sys
           with open("app/google-services.json", "r", encoding="utf-8") as f:
               data = json.load(f)
           clients = data.get("client", [])
@@ -114,7 +120,17 @@ jobs:
           if not has_web_client:
               print(f"::error::No Web OAuth client (client_type == 3) found for {target_pkg} in app/google-services.json; default_web_client_id cannot be generated.", file=sys.stderr)
               sys.exit(1)
-          print(f"Verified app/google-services.json contains valid Web OAuth client configuration for {target_pkg}.")
+          cert_hashes = [
+              (oauth.get("android_info", {}).get("certificate_hash") or "").lower()
+              for c in matching
+              for oauth in c.get("oauth_client", [])
+              if oauth.get("client_type") == 1
+          ]
+          ks_sha1 = os.environ.get("KEYSTORE_SHA1", "").lower()
+          if ks_sha1 and ks_sha1 not in cert_hashes:
+              print(f"::error::Debug keystore SHA-1 ({ks_sha1}) does not match any registered Android OAuth certificate_hash ({cert_hashes}) for {target_pkg}!", file=sys.stderr)
+              sys.exit(1)
+          print(f"Verified app/google-services.json Web OAuth client and matching SHA-1 ({ks_sha1}) for {target_pkg}.")
           PY
 
       - name: Build debug APK

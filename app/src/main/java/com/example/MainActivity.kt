@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -89,6 +90,7 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val scope = rememberCoroutineScope()
             val firebaseAuth = remember { FirebaseAuth.getInstance() }
+            val authSnackbarHostState = remember { SnackbarHostState() }
             var currentUser by remember { mutableStateOf<FirebaseUser?>(firebaseAuth.currentUser) }
             var isSigningIn by remember { mutableStateOf(false) }
             var authError by remember { mutableStateOf<String?>(null) }
@@ -104,31 +106,46 @@ class MainActivity : ComponentActivity() {
             NexusTradingTheme {
                 val user = currentUser
                 if (user == null) {
-                    AuthScreen(
-                        isSigningIn = isSigningIn,
-                        errorMessage = authError,
-                        onGoogleSignInClick = {
-                            if (!isSigningIn) {
-                                isSigningIn = true
-                                authError = null
-                                scope.launch {
-                                    when (val outcome = GoogleAuthHelper.signInWithGoogle(context)) {
-                                        is GoogleSignInOutcome.Success -> {
-                                            currentUser = outcome.user
-                                            isSigningIn = false
-                                        }
-                                        GoogleSignInOutcome.Cancelled -> {
-                                            isSigningIn = false
-                                        }
-                                        is GoogleSignInOutcome.Failure -> {
-                                            authError = outcome.message
-                                            isSigningIn = false
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AuthScreen(
+                            isSigningIn = isSigningIn,
+                            errorMessage = authError,
+                            onGoogleSignInClick = {
+                                if (!isSigningIn) {
+                                    isSigningIn = true
+                                    authError = null
+                                    scope.launch {
+                                        when (val outcome = GoogleAuthHelper.signInWithGoogle(context)) {
+                                            is GoogleSignInOutcome.Success -> {
+                                                currentUser = firebaseAuth.currentUser ?: outcome.user
+                                                authError = null
+                                                isSigningIn = false
+                                            }
+                                            is GoogleSignInOutcome.Cancelled -> {
+                                                authError = outcome.detailMessage
+                                                isSigningIn = false
+                                                Toast.makeText(context, outcome.detailMessage, Toast.LENGTH_LONG).show()
+                                                authSnackbarHostState.showSnackbar(outcome.detailMessage)
+                                            }
+                                            is GoogleSignInOutcome.Failure -> {
+                                                authError = outcome.message
+                                                isSigningIn = false
+                                                Toast.makeText(context, outcome.message, Toast.LENGTH_LONG).show()
+                                                authSnackbarHostState.showSnackbar(outcome.message)
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                    )
+                        )
+                        SnackbarHost(
+                            hostState = authSnackbarHostState,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .safeDrawingPadding()
+                                .padding(12.dp)
+                        )
+                    }
                 } else {
                     key(user.uid) {
                         val subRepo = remember(user.uid) { SubscriptionRepository(context.applicationContext) }
