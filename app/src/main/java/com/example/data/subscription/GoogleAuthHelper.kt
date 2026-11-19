@@ -3,7 +3,10 @@ package com.example.data.subscription
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
+import java.security.MessageDigest
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -77,10 +80,12 @@ object GoogleAuthHelper {
         } catch (e: GetCredentialCancellationException) {
             Log.w(TAG, "Google Sign-In cancelled or dismissed: ${e.message}", e)
             val rawDetail = e.message?.trim().orEmpty()
+            val apkSha1 = getApkSigningSha1(activity)
+            val shaHint = if (apkSha1 != null) " [APK SHA-1: $apkSha1]" else ""
             val detail = if (rawDetail.isNotBlank()) {
-                "Google Sign-In cancelled or failed: $rawDetail"
+                "Google Sign-In cancelled or failed: $rawDetail$shaHint"
             } else {
-                "Google Sign-In was cancelled before completion. If you selected a Gmail account, verify the APK SHA-1 fingerprint matches Firebase."
+                "Google Sign-In was cancelled before completion.$shaHint"
             }
             GoogleSignInOutcome.Cancelled(detail)
         } catch (e: NoCredentialException) {
@@ -126,6 +131,27 @@ object GoogleAuthHelper {
         return authResult.user ?: FirebaseAuth.getInstance().currentUser
             ?: throw IllegalStateException("FirebaseAuth succeeded but returned no current user.")
     }
+
+    @Suppress("DEPRECATION")
+    private fun getApkSigningSha1(context: Context): String? = runCatching {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val info = context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_SIGNING_CERTIFICATES
+            )
+            val signingInfo = info.signingInfo ?: return@runCatching null
+            if (signingInfo.hasMultipleSigners()) signingInfo.apkContentsSigners
+            else signingInfo.signingCertificateHistory
+        } else {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_SIGNATURES
+            ).signatures
+        }
+        val certBytes = signatures?.firstOrNull()?.toByteArray() ?: return@runCatching null
+        val digest = MessageDigest.getInstance("SHA-1").digest(certBytes)
+        digest.joinToString(":") { "%02X".format(it) }
+    }.getOrNull()
 
     suspend fun signOut(context: Context) {
         withContext(NonCancellable) {

@@ -45,15 +45,20 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Prepare debug keystore (non-blocking)
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ -f "./debug.keystore" ]; then
             echo "Using existing ./debug.keystore."
           elif [ -f "./debug.keystore.base64" ]; then
             echo "Restoring ./debug.keystore from ./debug.keystore.base64..."
             base64 -d ./debug.keystore.base64 > ./debug.keystore || rm -f ./debug.keystore
+          elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Restoring ./debug.keystore from DEBUG_KEYSTORE_BASE64 secret..."
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > ./debug.keystore || rm -f ./debug.keystore
           fi
           if [ ! -f "./debug.keystore" ]; then
-            echo "No keystore found or secrets configured; generating temporary debug keystore for debug APK build..."
+            echo "::warning::No debug.keystore or DEBUG_KEYSTORE_BASE64 found; generating temporary debug keystore (its SHA-1 will NOT match Firebase unless added to Firebase Console)."
             keytool -genkeypair -v \
               -keystore ./debug.keystore \
               -storepass android \
@@ -64,6 +69,7 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+          keytool -list -v -keystore ./debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:" || true
 
       - name: Restore google-services.json if provided via secret
         env:
