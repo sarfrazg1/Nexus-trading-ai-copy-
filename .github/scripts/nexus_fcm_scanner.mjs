@@ -111,7 +111,7 @@ function intervalMs(tf) {
 }
 
 async function fetchPairMarketData(symbol) {
-  const binanceHosts = ["https://fapi.binance.com", "https://fapi1.binance.com"];
+  const binanceHosts = ["https://data-api.binance.vision", "https://fapi.binance.com", "https://fapi1.binance.com", "https://fapi.binance.us"];
   for (const host of binanceHosts) {
     try {
       const [k4h, k1h, k15m, prem, ticker] = await Promise.all([
