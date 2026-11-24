@@ -140,13 +140,13 @@ async function fetchPairMarketData(symbol) {
   }
 
   // Fallback to Bybit V5 public linear perpetuals if Binance geo-blocks GitHub runner IPs (HTTP 451)
-  const bybitTicker = await fetchJson(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`);
+  const bybitTicker = await fetchJson(`https://api.bytick.com/v5/market/tickers?category=linear&symbol=${symbol}`);
   const tRow = bybitTicker?.result?.list?.[0];
   if (!tRow) throw new Error(`No public futures ticker available for ${symbol}`);
 
   const fetchBybitKlines = async (tf, limit) => {
     const res = await fetchJson(
-      `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=${intervalToBybit(tf)}&limit=${limit}`
+      `https://api.bytick.com/v5/market/kline?category=linear&symbol=${symbol}&interval=${intervalToBybit(tf)}&limit=${limit}`
     );
     const list = (res?.result?.list || []).slice().reverse();
     const dur = intervalMs(tf);
