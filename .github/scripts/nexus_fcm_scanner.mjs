@@ -71,7 +71,11 @@ function fmtPrice(p) {
 
 async function fetchJson(url) {
   const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      "User-Agent":
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    },
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) {
@@ -82,24 +86,19 @@ async function fetchJson(url) {
   return res.json();
 }
 
-function normalizeBinanceKlines(arr) {
-  return arr.map((k) => ({
-    openTime: Number(k[0]),
-    open: Number(k[1]),
-    high: Number(k[2]),
-    low: Number(k[3]),
-    close: Number(k[4]),
-    volume: Number(k[5]),
-    closeTime: Number(k[6]),
-  }));
+function symbolToOkxInstId(symbol) {
+  if (symbol.endsWith("USDT")) {
+    return `${symbol.slice(0, -4)}-USDT-SWAP`;
+  }
+  return symbol;
 }
 
-function intervalToBybit(tf) {
-  if (tf === "5m") return "5";
-  if (tf === "15m") return "15";
-  if (tf === "1h") return "60";
-  if (tf === "4h") return "240";
-  return "15";
+function intervalToOkxBar(tf) {
+  if (tf === "5m") return "5m";
+  if (tf === "15m") return "15m";
+  if (tf === "1h") return "1H";
+  if (tf === "4h") return "4H";
+  return "15m";
 }
 
 function intervalMs(tf) {
@@ -110,47 +109,20 @@ function intervalMs(tf) {
   return 15 * 60_000;
 }
 
-async function fetchPairMarketData(symbol) {
-  const binanceHosts = ["https://data-api.binance.vision", "https://fapi.binance.com", "https://fapi1.binance.com", "https://fapi.binance.us"];
-  for (const host of binanceHosts) {
-    try {
-      const [k4h, k1h, k15m, prem, ticker] = await Promise.all([
-        fetchJson(`${host}/fapi/v1/klines?symbol=${symbol}&interval=4h&limit=30`),
-        fetchJson(`${host}/fapi/v1/klines?symbol=${symbol}&interval=1h&limit=50`),
-        fetchJson(`${host}/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=50`),
-        fetchJson(`${host}/fapi/v1/premiumIndex?symbol=${symbol}`),
-        fetchJson(`${host}/fapi/v1/ticker/price?symbol=${symbol}`),
-      ]);
-      const fundingPct = Number(prem.lastFundingRate) * 100;
-      const fundingTimeMs = Number(prem.time || Date.now());
-      return {
-        provider: "Binance USDT-M Futures",
-        candles4h: normalizeBinanceKlines(k4h),
-        candles1h: normalizeBinanceKlines(k1h),
-        candles15m: normalizeBinanceKlines(k15m),
-        fundingRatePercent: Number.isFinite(fundingPct) ? fundingPct : null,
-        fundingTimeMs: Number.isFinite(fundingTimeMs) && fundingTimeMs > 0 ? fundingTimeMs : null,
-        currentPrice: Number(ticker.price),
-      };
-    } catch (e) {
-      if (e.status !== 451 && e.status !== 403) {
-        // try next host
-      }
-    }
+async function fetchOkxJson(url) {
+  const json = await fetchJson(url);
+  if (json?.code !== "0") {
+    throw new Error(`OKX API error (${json?.code ?? "unknown"}): ${json?.msg || "Invalid response"}`);
   }
+  return json;
+}
 
-  // Fallback to Bybit V5 public linear perpetuals if Binance geo-blocks GitHub runner IPs (HTTP 451)
-  const bybitTicker = await fetchJson(`https://api.bytick.com/v5/market/tickers?category=linear&symbol=${symbol}`);
-  const tRow = bybitTicker?.result?.list?.[0];
-  if (!tRow) throw new Error(`No public futures ticker available for ${symbol}`);
-
-  const fetchBybitKlines = async (tf, limit) => {
-    const res = await fetchJson(
-      `https://api.bytick.com/v5/market/kline?category=linear&symbol=${symbol}&interval=${intervalToBybit(tf)}&limit=${limit}`
-    );
-    const list = (res?.result?.list || []).slice().reverse();
-    const dur = intervalMs(tf);
-    return list.map((k) => {
+function normalizeOkxCandles(rawRows, tf) {
+  const dur = intervalMs(tf);
+  return (rawRows || [])
+    .slice()
+    .reverse()
+    .map((k) => {
       const ot = Number(k[0]);
       return {
         openTime: ot,
@@ -160,26 +132,40 @@ async function fetchPairMarketData(symbol) {
         close: Number(k[4]),
         volume: Number(k[5]),
         closeTime: ot + dur - 1,
+        confirmed: k[8] === undefined ? true : k[8] === "1",
       };
     });
-  };
+}
 
-  const [c4h, c1h, c15m] = await Promise.all([
-    fetchBybitKlines("4h", 30),
-    fetchBybitKlines("1h", 50),
-    fetchBybitKlines("15m", 50),
+async function fetchPairMarketData(symbol) {
+  const instId = symbolToOkxInstId(symbol);
+  const [c4hRes, c1hRes, c15mRes, fundingRes, tickerRes] = await Promise.all([
+    fetchOkxJson(`https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${intervalToOkxBar("4h")}&limit=30`),
+    fetchOkxJson(`https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${intervalToOkxBar("1h")}&limit=50`),
+    fetchOkxJson(`https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${intervalToOkxBar("15m")}&limit=50`),
+    fetchOkxJson(`https://www.okx.com/api/v5/public/funding-rate?instId=${instId}`),
+    fetchOkxJson(`https://www.okx.com/api/v5/market/ticker?instId=${instId}`),
   ]);
 
-  const rawFunding = tRow.fundingRate !== undefined && tRow.fundingRate !== "" ? Number(tRow.fundingRate) * 100 : NaN;
-  const bybitTime = Number(bybitTicker?.time || Date.now());
+  const tickerRow = tickerRes?.data?.[0];
+  if (!tickerRow) throw new Error(`No OKX ticker data available for ${instId}`);
+
+  const fundingRow = fundingRes?.data?.[0];
+  const rawFunding =
+    fundingRow && fundingRow.fundingRate !== undefined && fundingRow.fundingRate !== ""
+      ? Number(fundingRow.fundingRate) * 100
+      : NaN;
+  const rawFundingTs =
+    fundingRow && fundingRow.ts !== undefined && fundingRow.ts !== "" ? Number(fundingRow.ts) : NaN;
+
   return {
-    provider: "Bybit V5 Linear Perpetual (Binance 451 fallback)",
-    candles4h: c4h,
-    candles1h: c1h,
-    candles15m: c15m,
+    provider: "OKX Public Perpetual SWAP",
+    candles4h: normalizeOkxCandles(c4hRes?.data, "4h"),
+    candles1h: normalizeOkxCandles(c1hRes?.data, "1h"),
+    candles15m: normalizeOkxCandles(c15mRes?.data, "15m"),
     fundingRatePercent: Number.isFinite(rawFunding) ? rawFunding : null,
-    fundingTimeMs: Number.isFinite(bybitTime) && bybitTime > 0 ? bybitTime : null,
-    currentPrice: Number(tRow.lastPrice),
+    fundingTimeMs: Number.isFinite(rawFundingTs) && rawFundingTs > 0 ? rawFundingTs : null,
+    currentPrice: Number(tickerRow.last),
   };
 }
 
@@ -243,9 +229,9 @@ function findSwings(candles) {
 
 function evaluateHighRewardSetup(symbol, data, nowMs) {
   if (!Number.isFinite(data.currentPrice) || data.currentPrice <= 0) return null;
-  const completed15m = data.candles15m.filter((c) => c.closeTime <= nowMs);
-  const completed1h = data.candles1h.filter((c) => c.closeTime <= nowMs);
-  const completed4h = data.candles4h.filter((c) => c.closeTime <= nowMs);
+  const completed15m = data.candles15m.filter((c) => c.confirmed !== false && c.closeTime <= nowMs);
+  const completed1h = data.candles1h.filter((c) => c.confirmed !== false && c.closeTime <= nowMs);
+  const completed4h = data.candles4h.filter((c) => c.confirmed !== false && c.closeTime <= nowMs);
   if (completed15m.length < 20 || completed1h.length < 20) return null;
 
   // Strictly reject missing, stale, or unreliable funding (NEVER assume 0%)
@@ -515,6 +501,7 @@ async function main() {
     } catch (e) {
       console.warn(`[${symbol}] Skipped due to data error: ${e.message}`);
     }
+    await new Promise((r) => setTimeout(r, 150));
   }
 
   if (!opportunities.length) {
