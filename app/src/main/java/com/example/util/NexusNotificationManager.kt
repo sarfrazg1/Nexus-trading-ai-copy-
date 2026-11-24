@@ -136,6 +136,21 @@ class NexusNotificationManager(context: Context? = null) {
     // ==========================================
     // PREFERENCES FOR THE ALERT TYPES & FCM TOKEN
     // ==========================================
+    fun isMasterAlertsEnabled(): Boolean = prefs?.getBoolean(KEY_MASTER_ALERTS, true) ?: true
+    fun setMasterAlertsEnabled(enabled: Boolean) {
+        prefs?.edit()?.putBoolean(KEY_MASTER_ALERTS, enabled)?.apply()
+    }
+
+    fun isSoundAlertsEnabled(): Boolean = prefs?.getBoolean(KEY_SOUND_ALERTS, true) ?: true
+    fun setSoundAlertsEnabled(enabled: Boolean) {
+        prefs?.edit()?.putBoolean(KEY_SOUND_ALERTS, enabled)?.apply()
+    }
+
+    fun isVibrationEnabled(): Boolean = prefs?.getBoolean(KEY_VIBRATION_ALERTS, true) ?: true
+    fun setVibrationEnabled(enabled: Boolean) {
+        prefs?.edit()?.putBoolean(KEY_VIBRATION_ALERTS, enabled)?.apply()
+    }
+
     fun isPriceAlertsEnabled(): Boolean = prefs?.getBoolean(KEY_PRICE_ALERTS, true) ?: true
     fun setPriceAlertsEnabled(enabled: Boolean) {
         prefs?.edit()?.putBoolean(KEY_PRICE_ALERTS, enabled)?.apply()
@@ -173,6 +188,19 @@ class NexusNotificationManager(context: Context? = null) {
     }
 
     fun getFcmToken(): String? = prefs?.getString(KEY_FCM_TOKEN, null)
+
+    fun saveTopicSubscriptionStatus(topics: Set<String>, lastSyncMs: Long, statusNote: String) {
+        prefs?.edit()
+            ?.putStringSet(KEY_FCM_SUBSCRIBED_TOPICS, topics)
+            ?.putLong(KEY_FCM_TOPIC_SYNC_MS, lastSyncMs)
+            ?.putString(KEY_FCM_TOPIC_STATUS_NOTE, statusNote)
+            ?.apply()
+    }
+
+    fun getSubscribedTopics(): Set<String> = prefs?.getStringSet(KEY_FCM_SUBSCRIBED_TOPICS, emptySet()) ?: emptySet()
+
+    fun getTopicSyncStatusNote(): String =
+        prefs?.getString(KEY_FCM_TOPIC_STATUS_NOTE, "Topics not synced yet") ?: "Topics not synced yet"
 
     fun hasDeliveredEvent(eventId: String): Boolean = synchronized(deliveredEventIdsSet) {
         eventId in deliveredEventIdsSet
@@ -382,18 +410,27 @@ class NexusNotificationManager(context: Context? = null) {
         body: String,
         timestampMs: Long = System.currentTimeMillis(),
         source: String = "Trade Monitor",
-        openWorkflow: Boolean = true
+        openWorkflow: Boolean = true,
+        direction: String? = null,
+        expiresAtMs: Long? = null,
+        playSound: Boolean = isSoundAlertsEnabled(),
+        nowMs: Long = System.currentTimeMillis()
     ): Boolean {
         if (eventId.isBlank()) return false
+        if (!isMasterAlertsEnabled()) return false
+        if (expiresAtMs != null && nowMs > expiresAtMs) return false
+        val normalizedDir = direction?.uppercase(java.util.Locale.US)
+        if ((alertType == AlertType.SIGNAL_LONG || normalizedDir == "LONG") && !isLongSignalsEnabled()) return false
+        if ((alertType == AlertType.SIGNAL_SHORT || normalizedDir == "SHORT") && !isShortSignalsEnabled()) return false
         if (hasDeliveredEvent(eventId)) return false
 
         markDeliveredEvent(eventId)
 
         val pktTime = TimeZoneUtils.formatKarachiTimestamp(timestampMs)
-        val safeBody = if (body.contains("Not an Executed Order", ignoreCase = true)) {
-            "$body ($pktTime)"
-        } else {
-            "$body • Alert Only — Not an Executed Order ($pktTime)"
+        val safeBody = when {
+            body.contains("PKT", ignoreCase = false) && body.contains("Not an Executed Order", ignoreCase = true) -> body
+            body.contains("Not an Executed Order", ignoreCase = true) -> "$body ($pktTime)"
+            else -> "$body • Alert Only — Not an Executed Order ($pktTime)"
         }
 
         recordAlertHistory(
@@ -427,21 +464,22 @@ class NexusNotificationManager(context: Context? = null) {
             signalId = signalId,
             openWorkflow = openWorkflow,
             channelId = targetChannel,
-            playSound = true
+            playSound = playSound
         )
         return true
     }
 
     /**
-     * Dispatches a Part 4 NEXUS 1:5 (or >=1:4) High-Reward Opportunity push notification
-     * with configured sound, Asia/Karachi (PKT) timestamp, full financial breakdown,
-     * and persistent eventId deduplication. Never executes live orders.
+     * Dispatches a Part 4/5 NEXUS 1:5 or NEXUS QUALIFIED 1:4 opportunity push notification
+     * with configured sound/vibration, Asia/Karachi (PKT) timestamp, full Gross vs Net R:R
+     * & funding/fee/slippage breakdown, and persistent eventId deduplication. Never executes live orders.
      */
     fun notifyHighRewardOpportunity(
         opportunity: HighRewardOpportunity,
-        playSound: Boolean = true,
+        playSound: Boolean = isSoundAlertsEnabled(),
         source: String = "NEXUS 1:5 Opportunity Detector"
     ): Boolean {
+        if (!isMasterAlertsEnabled()) return false
         if (!opportunity.isQualified || opportunity.status != OpportunityStatus.ACTIVE) return false
         if (opportunity.netRiskRewardRatio < 4.0) return false
         val isLong = opportunity.direction == FuturesDirection.LONG
@@ -458,7 +496,7 @@ class NexusNotificationManager(context: Context? = null) {
         val title = if (isTopOneToFive) {
             "NEXUS 1:5 HIGH REWARD OPPORTUNITY • ${opportunity.symbol} ${opportunity.direction.name}"
         } else {
-            "NEXUS 1:${String.format(java.util.Locale.US, "%.2f", opportunity.netRiskRewardRatio)} Qualified Opportunity • ${opportunity.symbol} ${opportunity.direction.name}"
+            "NEXUS QUALIFIED 1:4 OPPORTUNITY (1:${String.format(java.util.Locale.US, "%.2f", opportunity.netRiskRewardRatio)}) • ${opportunity.symbol} ${opportunity.direction.name}"
         }
 
         val histText = opportunity.historicalTargetHitProbabilityPercent?.let {
@@ -468,8 +506,8 @@ class NexusNotificationManager(context: Context? = null) {
         val body = buildString {
             append("${opportunity.symbol} ${opportunity.direction.name} | Trigger (PKT): ${opportunity.entryTriggerTimestampPkt}\n")
             append("Entry: ${opportunity.entryFormatted} | SL: ${opportunity.stopLossFormatted} | TP: ${opportunity.takeProfitFormatted}\n")
-            append("Net R:R 1:${String.format(java.util.Locale.US, "%.2f", opportunity.netRiskRewardRatio)} ($1 risk -> $${String.format(java.util.Locale.US, "%.2f", opportunity.normalizedNetRewardUsd)} net)\n")
-            append("Est Net +$${String.format(java.util.Locale.US, "%.2f", opportunity.estimatedNetProfitUsdt)} / -$${String.format(java.util.Locale.US, "%.2f", opportunity.estimatedNetLossUsdt)} | +${String.format(java.util.Locale.US, "%.1f", opportunity.estimatedNetRoiPercent)}% ROI @ ${opportunity.leverageAssumed}x\n")
+            append("Net R:R 1:${String.format(java.util.Locale.US, "%.2f", opportunity.netRiskRewardRatio)} (Gross 1:${String.format(java.util.Locale.US, "%.2f", opportunity.grossRiskRewardRatio)}) | $1 risk -> $${String.format(java.util.Locale.US, "%.2f", opportunity.normalizedNetRewardUsd)} net\n")
+            append("Est Net +$${String.format(java.util.Locale.US, "%.2f", opportunity.estimatedNetProfitUsdt)} / -$${String.format(java.util.Locale.US, "%.2f", opportunity.estimatedNetLossUsdt)} (+${String.format(java.util.Locale.US, "%.1f", opportunity.estimatedNetRoiPercent)}% ROI @ ${opportunity.leverageAssumed}x) | Costs: Fees $${String.format(java.util.Locale.US, "%.2f", opportunity.estimatedFeesUsdt)}, Slip $${String.format(java.util.Locale.US, "%.2f", opportunity.estimatedSlippageUsdt)}, Fund ${String.format(java.util.Locale.US, "%+.4f%%", opportunity.fundingRatePercent)} (-$${String.format(java.util.Locale.US, "%.2f", opportunity.estimatedFundingReserveUsdt)})\n")
             append("Conf: ${opportunity.modelConfidencePercent}% | $histText\n")
             append("Why: ${opportunity.qualificationReasons.firstOrNull() ?: "Confirmed MTF + HTF structure"}\n")
             append("Risk: ${opportunity.risksAndInvalidations.firstOrNull() ?: "Breach of SL cancels setup"}\n")
@@ -501,7 +539,7 @@ class NexusNotificationManager(context: Context? = null) {
             signalId = opportunity.id,
             openWorkflow = true,
             channelId = resolvedChannelId,
-            playSound = if (isTopOneToFive) playSound else false
+            playSound = playSound
         )
         return true
     }
@@ -539,7 +577,7 @@ class NexusNotificationManager(context: Context? = null) {
         signalId: String? = null,
         openWorkflow: Boolean = false,
         channelId: String = CHANNEL_ID,
-        playSound: Boolean = true
+        playSound: Boolean = isSoundAlertsEnabled()
     ) {
         // Emit in-app event for immediate UI banner/snackbars
         _inAppEvents.tryEmit(
@@ -554,11 +592,13 @@ class NexusNotificationManager(context: Context? = null) {
         )
 
         val ctx = appContext ?: return
-        val soundUri = if (playSound) {
+        val shouldPlaySound = playSound && isSoundAlertsEnabled()
+        val shouldVibrate = isVibrationEnabled()
+        val soundUri = if (shouldPlaySound) {
             runCatching { RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION) }.getOrNull()
         } else null
 
-        if (playSound && type == AlertType.OPPORTUNITY_1_TO_5 && soundUri != null) {
+        if (shouldPlaySound && type == AlertType.OPPORTUNITY_1_TO_5 && soundUri != null) {
             runCatching {
                 RingtoneManager.getRingtone(ctx, soundUri)?.play()
             }
@@ -606,9 +646,15 @@ class NexusNotificationManager(context: Context? = null) {
                 builder.setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             }
 
-            if (soundUri != null) {
+            if (shouldVibrate) {
+                builder.setVibrate(longArrayOf(0L, 250L, 120L, 250L))
+            } else {
+                builder.setVibrate(longArrayOf(0L))
+            }
+
+            if (shouldPlaySound && soundUri != null) {
                 builder.setSound(soundUri)
-            } else if (!playSound && type != AlertType.OPPORTUNITY_1_TO_4) {
+            } else {
                 builder.setSilent(true)
             }
 
@@ -731,6 +777,9 @@ class NexusNotificationManager(context: Context? = null) {
         private const val MAX_PERSISTED_EVENT_IDS = 500
         private const val MAX_HISTORY_ENTRIES = 100
         private const val PREFS_NAME = "nexus_notification_prefs"
+        private const val KEY_MASTER_ALERTS = "notif_master_alerts"
+        private const val KEY_SOUND_ALERTS = "notif_sound_alerts"
+        private const val KEY_VIBRATION_ALERTS = "notif_vibration_alerts"
         private const val KEY_PRICE_ALERTS = "notif_price_alerts"
         private const val KEY_LONG_SIGNALS = "notif_long_signals"
         private const val KEY_SHORT_SIGNALS = "notif_short_signals"
@@ -740,6 +789,9 @@ class NexusNotificationManager(context: Context? = null) {
         private const val KEY_DELIVERED_EVENT_IDS = "notif_delivered_event_ids"
         private const val KEY_ALERT_HISTORY = "notif_alert_history_v1"
         private const val KEY_FCM_TOKEN = "notif_fcm_token"
+        private const val KEY_FCM_SUBSCRIBED_TOPICS = "notif_fcm_subscribed_topics"
+        private const val KEY_FCM_TOPIC_SYNC_MS = "notif_fcm_topic_sync_ms"
+        private const val KEY_FCM_TOPIC_STATUS_NOTE = "notif_fcm_topic_status_note"
     }
 }
 

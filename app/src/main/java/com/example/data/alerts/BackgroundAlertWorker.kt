@@ -77,9 +77,11 @@ class BackgroundAlertWorker(
                 }
             }
 
-            // Part 4: Closed-app / background periodic scan for genuine >=1:4 and >=1:5 setups
+            // Part 4/5: Closed-app / background periodic scan for genuine >=1:4 and >=1:5 setups
+            notifManager.setMasterAlertsEnabled(settingsRepo.alertNotificationsEnabled.value)
             if (settingsRepo.alertNotificationsEnabled.value) {
-                val playSound = settingsRepo.soundEffectsEnabled.value || scannerRepo.scannerState.value.soundAlertsEnabled
+                val playSound = notifManager.isSoundAlertsEnabled() &&
+                    (settingsRepo.soundEffectsEnabled.value || scannerRepo.scannerState.value.soundAlertsEnabled)
                 val budgetConfig = scannerRepo.budgetConfig.value
                 for (pair in watchlistPairs.take(6)) {
                     try {
@@ -92,7 +94,7 @@ class BackgroundAlertWorker(
                             ?: completed15m.lastOrNull()?.close
                             ?: 0.0
                         if (currentPrice > 0.0) {
-                            val funding = apiClient.fetchFundingRate(pair.symbol)
+                            val fundingSnap = apiClient.fetchFundingRateSnapshot(pair.symbol)
                             val hrResult = HighRewardOpportunityDetector.scanPair(
                                 symbol = pair.symbol,
                                 baseAsset = pair.baseAsset,
@@ -101,8 +103,10 @@ class BackgroundAlertWorker(
                                 candles1h = c1h,
                                 candles15m = c15m,
                                 candles5m = c5m,
-                                fundingRatePercent = funding,
-                                budgetConfig = budgetConfig
+                                fundingRatePercent = fundingSnap?.ratePercent,
+                                budgetConfig = budgetConfig,
+                                fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                                isFundingDataStale = fundingSnap == null
                             )
                             scannerRepo.onHighRewardScanEvaluated(
                                 symbol = pair.symbol,

@@ -38,6 +38,25 @@ object HighRewardOpportunityDetector {
     const val MAX_LIQUIDATION_SL_RATIO = 0.55
     const val DEFAULT_SETUP_EXPIRY_BARS_15M = 12 // 3 hours on 15M chart
     const val MIN_HISTORICAL_OCCURRENCES_FOR_PROB = 5
+    const val MAX_FUNDING_DATA_AGE_MS = 10 * 60 * 1000L // 10 minutes freshness limit
+
+    fun isFundingDataReliable(
+        fundingRatePercent: Double?,
+        fundingDataTimestampMs: Long? = null,
+        isFundingDataStale: Boolean = false,
+        referenceTimeMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (isFundingDataStale) return false
+        if (fundingRatePercent == null || !fundingRatePercent.isFinite() || abs(fundingRatePercent) > 5.0) {
+            return false
+        }
+        if (fundingDataTimestampMs != null) {
+            if (fundingDataTimestampMs <= 0L) return false
+            val ageMs = referenceTimeMs - fundingDataTimestampMs
+            if (ageMs > MAX_FUNDING_DATA_AGE_MS || ageMs < -MAX_FUNDING_DATA_AGE_MS) return false
+        }
+        return true
+    }
 
     suspend fun scanPair(
         symbol: String,
@@ -50,7 +69,9 @@ object HighRewardOpportunityDetector {
         fundingRatePercent: Double? = null,
         budgetConfig: BudgetConfig = BudgetConfig(),
         configuredLeverage: Int? = null,
-        referenceTimeMs: Long = System.currentTimeMillis()
+        referenceTimeMs: Long = System.currentTimeMillis(),
+        fundingDataTimestampMs: Long? = null,
+        isFundingDataStale: Boolean = false
     ): HighRewardScanResult {
         if (!currentPrice.isFinite() || currentPrice <= 0.0) {
             return HighRewardScanResult(
@@ -132,6 +153,8 @@ object HighRewardOpportunityDetector {
             tech5m = tech5m,
             smc5m = smc5m,
             fundingRatePercent = fundingRatePercent,
+            fundingDataTimestampMs = fundingDataTimestampMs,
+            isFundingDataStale = isFundingDataStale,
             budgetConfig = budgetConfig,
             configuredLeverage = configuredLeverage,
             referenceTimeMs = referenceTimeMs
@@ -152,6 +175,8 @@ object HighRewardOpportunityDetector {
             tech5m = tech5m,
             smc5m = smc5m,
             fundingRatePercent = fundingRatePercent,
+            fundingDataTimestampMs = fundingDataTimestampMs,
+            isFundingDataStale = isFundingDataStale,
             budgetConfig = budgetConfig,
             configuredLeverage = configuredLeverage,
             referenceTimeMs = referenceTimeMs
@@ -165,7 +190,13 @@ object HighRewardOpportunityDetector {
             )
 
         val bestDiag = listOf(longEval.diagnostic, shortEval.diagnostic)
-            .maxBy { it.netRiskRewardRatio }
+            .maxWith(
+                compareBy<HighRewardCandidateDiagnostic>(
+                    { it.netRiskRewardRatio },
+                    { it.tier == OpportunityPriorityTier.WAIT_FUNDING_UNAVAILABLE },
+                    { it.grossRiskRewardRatio }
+                )
+            )
 
         return HighRewardScanResult(
             qualifiedOpportunities = qualified,
@@ -233,6 +264,8 @@ object HighRewardOpportunityDetector {
         tech5m: com.example.data.indicators.OverallAnalysisResult,
         smc5m: com.example.data.smc.SmcAnalysisResult,
         fundingRatePercent: Double?,
+        fundingDataTimestampMs: Long?,
+        isFundingDataStale: Boolean,
         budgetConfig: BudgetConfig,
         configuredLeverage: Int?,
         referenceTimeMs: Long
@@ -477,15 +510,36 @@ object HighRewardOpportunityDetector {
         val feeRate = feePerSidePct / 100.0
         val slipRate = slipPerSidePct / 100.0
 
-        val fundingReliable = fundingRatePercent != null && fundingRatePercent.isFinite() && abs(fundingRatePercent) <= 5.0
-        val adverseFundingFraction = if (fundingReliable) {
-            val dec = fundingRatePercent!! / 100.0
-            val signed = if (isLong) dec else -dec
-            max(0.0, signed) * BinanceFuturesScannerEngine.ESTIMATED_FUNDING_INTERVALS
-        } else 0.0
-
         val unitGrossRisk = slDistance
         val unitGrossReward = tpDistance
+        val grossRR = if (unitGrossRisk > 0.0) unitGrossReward / unitGrossRisk else 0.0
+
+        val fundingReliable = isFundingDataReliable(
+            fundingRatePercent = fundingRatePercent,
+            fundingDataTimestampMs = fundingDataTimestampMs,
+            isFundingDataStale = isFundingDataStale,
+            referenceTimeMs = referenceTimeMs
+        )
+        if (!fundingReliable) {
+            return DirectionEvaluation(
+                opportunity = null,
+                diagnostic = HighRewardCandidateDiagnostic(
+                    symbol = symbol,
+                    bestDirection = direction,
+                    grossRiskRewardRatio = grossRR,
+                    netRiskRewardRatio = 0.0,
+                    tier = OpportunityPriorityTier.WAIT_FUNDING_UNAVAILABLE,
+                    isFundingAvailable = false,
+                    reason = "WAIT / FUNDING DATA UNAVAILABLE (${direction.name}): Live Binance Futures funding rate for $symbol is missing, stale, or unreliable. Net R:R cannot be calculated without assuming 0% funding (Gross 1:${fmt2(grossRR)})."
+                )
+            )
+        }
+
+        val validFundingPct = fundingRatePercent!!
+        val dec = validFundingPct / 100.0
+        val signedFunding = if (isLong) dec else -dec
+        val adverseFundingFraction = max(0.0, signedFunding) * BinanceFuturesScannerEngine.ESTIMATED_FUNDING_INTERVALS
+
         val unitNetLossAtSl = unitGrossRisk +
             (currentPrice * (feeRate + slipRate)) +
             (structuralInvalidation * (feeRate + slipRate)) +
@@ -495,7 +549,6 @@ object HighRewardOpportunityDetector {
             (structuralTp * (feeRate + slipRate)) -
             (currentPrice * adverseFundingFraction)
 
-        val grossRR = if (unitGrossRisk > 0.0) unitGrossReward / unitGrossRisk else 0.0
         val netRR = if (unitNetLossAtSl > 0.0) unitNetProfitAtTp / unitNetLossAtSl else 0.0
 
         if (netRR < MIN_QUALIFYING_NET_RR) {
@@ -507,7 +560,7 @@ object HighRewardOpportunityDetector {
                     grossRiskRewardRatio = grossRR,
                     netRiskRewardRatio = netRR,
                     tier = OpportunityPriorityTier.WAIT_BELOW_1_TO_4,
-                    reason = "WAIT (${direction.name}): Net R:R 1:${fmt2(netRR)} (Gross 1:${fmt2(grossRR)}) is below strict 1:4.00 minimum after fees & slippage."
+                    reason = "WAIT (${direction.name}): Net R:R 1:${fmt2(netRR)} (Gross 1:${fmt2(grossRR)}) is below strict 1:4.00 minimum after fees, slippage & funding (${String.format(Locale.US, "%+.4f%%", validFundingPct)})."
                 )
             )
         }
@@ -572,8 +625,9 @@ object HighRewardOpportunityDetector {
         val expiresPkt = TimeZoneUtils.formatKarachiTimestamp(expiresAtMs)
         val signatureKey = "hr_${symbol}_${direction.name}_${triggerTsMs}_${tier.name}"
 
+        val fundingDisplay = String.format(Locale.US, "%+.4f%%", validFundingPct)
         val qualificationReasons = buildList {
-            add("Net Risk-to-Reward 1:${fmt2(netRR)} (Gross 1:${fmt2(grossRR)}) exceeds strict ${if (netRR >= HIGHEST_PRIORITY_NET_RR) "1:5.00 top-priority" else "1:4.00 minimum"} threshold after fees & slippage.")
+            add("Gross R:R 1:${fmt2(grossRR)} -> Net R:R 1:${fmt2(netRR)} exceeds strict ${if (netRR >= HIGHEST_PRIORITY_NET_RR) "1:5.00 top-priority" else "1:4.00 minimum"} threshold after fees ($${fmt2(estFeesUsdt)}), slippage ($${fmt2(estSlippageUsdt)}) & funding ($fundingDisplay -> -$${fmt2(estFundingUsdt)} reserve).")
             add("Entry Trigger Confirmed at $triggerPkt on completed 15M candle close (${timerResult.triggerPriceFormatted}).")
             add("Genuine structural Stop Loss at ${HighRewardOpportunity.fmtPrice(structuralInvalidation)} (-${fmt2(slDistancePercent)}%) vs HTF structural Target at ${HighRewardOpportunity.fmtPrice(structuralTp)} (+${fmt2(tpDistancePercent)}%).")
             add("Sizing Assumptions: $${fmt2(marginUsedUsdt)} margin @ ${leverageAssumed}x isolated leverage = $${fmt2(notionalUsdt)} notional; est. net ROI +${fmt1(estNetRoiPct)}% vs -${fmt1(estRiskMarginPct)}% margin risk.")
@@ -599,6 +653,8 @@ object HighRewardOpportunityDetector {
             netRR = netRR,
             feeRoundTripPct = feePerSidePct * 2.0,
             slipRoundTripPct = slipPerSidePct * 2.0,
+            fundingRateDisplay = fundingDisplay,
+            estFundingUsdt = estFundingUsdt,
             marginUsdt = marginUsedUsdt,
             leverage = leverageAssumed,
             estNetLossUsdt = estNetLossUsdt,
@@ -647,6 +703,8 @@ object HighRewardOpportunityDetector {
             estimatedRiskMarginPercent = estRiskMarginPct,
             feeRatePercentPerSide = feePerSidePct,
             slippagePercentPerSide = slipPerSidePct,
+            fundingRatePercent = validFundingPct,
+            fundingRateTimestampMs = fundingDataTimestampMs,
             modelConfidencePercent = confidence,
             historicalTargetHitProbabilityPercent = historicalProb,
             historicalSampleSize = btResult.sampleSize,
@@ -785,6 +843,8 @@ object HighRewardOpportunityDetector {
         netRR: Double,
         feeRoundTripPct: Double,
         slipRoundTripPct: Double,
+        fundingRateDisplay: String,
+        estFundingUsdt: Double,
         marginUsdt: Double,
         leverage: Int,
         estNetLossUsdt: Double,
@@ -802,17 +862,17 @@ object HighRewardOpportunityDetector {
         val supportBulletSummary = supportingSignals.take(4).joinToString(" • ")
 
         val roman = HighRewardUrduExplanation(
-            whySelected = "NEXUS ne $symbol par $dirRoman setup is liye select kiya kyun ke completed 15M candle close ($triggerPkt PKT) par entry trigger confirm hua aur 4H/1H HTF structure se genuine 1:${fmt2(netRR)} net Risk-to-Reward (${tier.label}) nikal raha hai.",
-            whereOneDollarRiskComesFrom = "Har $1.00 ka risk structural Stop Loss ($slStr, entry $entryStr se ${fmt2(slPct)}% faslay par) plus round-trip trading fees (${fmt2(feeRoundTripPct)}%) aur slippage (${fmt2(slipRoundTripPct)}%) se banta hai. Aapke budget margin $${fmt2(marginUsdt)} (${leverage}x leverage) par maximum est. net nuqsan -$${fmt2(estNetLossUsdt)} hai.",
-            howFiveDollarRewardCalculated = "Agar market aapke actual HTF structural Take Profit ($tpStr, +${fmt2(tpPct)}%) tak pohanchti hai, to fees aur slippage minus karne ke baad har $1 risk ke muqablay $${fmt2(netRR)} net reward banta hai (Gross 1:${fmt2(grossRR)}). Budget trade par est. net munafa +$${fmt2(estNetProfitUsdt)} (+${fmt1(estNetRoiPct)}% ROI) hai. Koi profit guarantee nahi.",
+            whySelected = "NEXUS ne $symbol par $dirRoman setup is liye select kiya kyun ke completed 15M candle close ($triggerPkt PKT) par entry trigger confirm hua aur 4H/1H HTF structure se genuine 1:${fmt2(netRR)} net Risk-to-Reward (Gross 1:${fmt2(grossRR)} | ${tier.label}) nikal raha hai.",
+            whereOneDollarRiskComesFrom = "Har $1.00 ka risk structural Stop Loss ($slStr, entry $entryStr se ${fmt2(slPct)}% faslay par) plus round-trip trading fees (${fmt2(feeRoundTripPct)}%), slippage (${fmt2(slipRoundTripPct)}%) aur funding rate ($fundingRateDisplay, reserve $${fmt2(estFundingUsdt)}) se banta hai. Aapke budget margin $${fmt2(marginUsdt)} (${leverage}x leverage) par maximum est. net nuqsan -$${fmt2(estNetLossUsdt)} hai.",
+            howFiveDollarRewardCalculated = "Agar market aapke actual HTF structural Take Profit ($tpStr, +${fmt2(tpPct)}%) tak pohanchti hai, to fees, slippage aur adverse funding minus karne ke baad har $1 risk ke muqablay $${fmt2(netRR)} net reward banta hai (Gross 1:${fmt2(grossRR)}). Budget trade par est. net munafa +$${fmt2(estNetProfitUsdt)} (+${fmt1(estNetRoiPct)}% ROI) hai. Koi profit guarantee nahi.",
             supportingSignals = supportBulletSummary.ifBlank { "1H/4H trend alignment, SMC BOS/CHoCH, FVG/Order Block aur completed candle trigger confirmation." },
             cancellationConditions = "Agar price Stop Loss $slStr ko cross kar le, 15M structure toot jaye, ya $expiresPkt (PKT) tak move na aaye to ye setup foran CANCEL / INVALIDATE ho jata hai."
         )
 
         val urdu = HighRewardUrduExplanation(
-            whySelected = "نیکسس نے $symbol پر $dirUrdu سیٹ اپ اس لیے منتخب کیا کیونکہ مکمل 15M کینڈل کلوز ($triggerPkt PKT) پر انٹری ٹرگر کنفرم ہوا اور اصل 4H/1H اسٹرکچر سے فیس اور سلپیج نکال کر 1:${fmt2(netRR)} خالص رِسک ٹو ریوارڈ (${tier.label}) حاصل ہو رہا ہے۔",
-            whereOneDollarRiskComesFrom = "ہر $1.00 کا رِسک انٹری ($entryStr) سے ${fmt2(slPct)}% دور اصل اسٹاپ لاس ($slStr)، راؤنڈ ٹرپ ٹریڈنگ فیس (${fmt2(feeRoundTripPct)}%) اور سلپیج (${fmt2(slipRoundTripPct)}%) سے بنتا ہے۔ $${fmt2(marginUsdt)} مارجن (${leverage}x لیوریج) پر زیادہ سے زیادہ متوقع خالص نقصان -$${fmt2(estNetLossUsdt)} ہے۔",
-            howFiveDollarRewardCalculated = "اگر قیمت اصل اسٹرکچرل ٹیک پرافٹ ($tpStr، +${fmt2(tpPct)}%) تک پہنچتی ہے تو تمام فیس اور سلپیج نکالنے کے بعد ہر $1 رِسک پر $${fmt2(netRR)} خالص منافع بنتا ہے (گراس 1:${fmt2(grossRR)})۔ آپ کے بجٹ پر متوقع خالص منافع +$${fmt2(estNetProfitUsdt)} (+${fmt1(estNetRoiPct)}% ROI) ہے۔ منافع کی کوئی گارنٹی نہیں۔",
+            whySelected = "نیکسس نے $symbol پر $dirUrdu سیٹ اپ اس لیے منتخب کیا کیونکہ مکمل 15M کینڈل کلوز ($triggerPkt PKT) پر انٹری ٹرگر کنفرم ہوا اور اصل 4H/1H اسٹرکچر سے فیس، سلپیج اور فنڈنگ نکال کر 1:${fmt2(netRR)} خالص رِسک ٹو ریوارڈ (گراس 1:${fmt2(grossRR)} | ${tier.label}) حاصل ہو رہا ہے۔",
+            whereOneDollarRiskComesFrom = "ہر $1.00 کا رِسک انٹری ($entryStr) سے ${fmt2(slPct)}% دور اصل اسٹاپ لاس ($slStr)، راؤنڈ ٹرپ ٹریڈنگ فیس (${fmt2(feeRoundTripPct)}%)، سلپیج (${fmt2(slipRoundTripPct)}%) اور فنڈنگ ریٹ ($fundingRateDisplay، ریزرو $${fmt2(estFundingUsdt)}) سے بنتا ہے۔ $${fmt2(marginUsdt)} مارجن (${leverage}x لیوریج) پر زیادہ سے زیادہ متوقع خالص نقصان -$${fmt2(estNetLossUsdt)} ہے۔",
+            howFiveDollarRewardCalculated = "اگر قیمت اصل اسٹرکچرل ٹیک پرافٹ ($tpStr، +${fmt2(tpPct)}%) تک پہنچتی ہے تو تمام فیس، سلپیج اور فنڈنگ نکالنے کے بعد ہر $1 رِسک پر $${fmt2(netRR)} خالص منافع بنتا ہے (گراس 1:${fmt2(grossRR)})۔ آپ کے بجٹ پر متوقع خالص منافع +$${fmt2(estNetProfitUsdt)} (+${fmt1(estNetRoiPct)}% ROI) ہے۔ منافع کی کوئی گارنٹی نہیں۔",
             supportingSignals = supportBulletSummary.ifBlank { "1H/4H ٹرینڈ، SMC اسٹرکچر بریک (BOS/CHoCH)، فیئر ویلیو گیپ (FVG)، آرڈر بلاک اور مکمل کینڈل کلوز کنفرمیشن۔" },
             cancellationConditions = "اگر قیمت اسٹاپ لاس ($slStr) کو توڑ دے، مارکیٹ اسٹرکچر الٹ جائے، یا $expiresPkt (PKT) تک ٹریڈ فعال نہ ہو تو یہ موقع فوری طور پر کینسل / غیر مؤثر ہو جائے گا۔"
         )

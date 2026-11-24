@@ -1085,7 +1085,7 @@ private fun HighRewardOpportunityRadarSection(
                         style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
                     )
                     Text(
-                        text = "Last Checked (PKT): ${scanState.lastScannedPkt} • WorkManager scans every 15m (Android min) when closed; Foreground Scanner checks continuously. Instant terminated-app push uses FCM topics (nexus_high_reward_1_5 / nexus_qualified_1_4) when paired with a backend sender.",
+                        text = "Last Checked (PKT): ${scanState.lastScannedPkt} • WorkManager scans ~every 15m when closed (Doze/battery limits apply); Foreground Scanner runs continuously. Instant push when closed uses free FCM topics (nexus_high_reward_1_5 / nexus_qualified_1_4) paired with the optional GitHub Actions scheduled workflow. Alerts require internet and cannot fire while force-stopped.",
                         style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
                     )
                 }
@@ -1119,7 +1119,7 @@ private fun HighRewardOpportunityRadarSection(
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
                                     Text(
-                                        text = if (isTop) "1:5+ TOP PRIORITY" else "1:4+ QUALIFIED",
+                                        text = if (isTop) "NEXUS 1:5" else "QUALIFIED 1:4",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             color = accent,
                                             fontWeight = FontWeight.ExtraBold,
@@ -1132,10 +1132,16 @@ private fun HighRewardOpportunityRadarSection(
                                     style = MaterialTheme.typography.titleSmall.copy(color = dirColor, fontWeight = FontWeight.Bold)
                                 )
                             }
-                            Text(
-                                text = "Net 1:${String.format(Locale.US, "%.2f", opp.netRiskRewardRatio)}",
-                                style = MaterialTheme.typography.labelMedium.copy(color = accent, fontWeight = FontWeight.ExtraBold)
-                            )
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "Net 1:${String.format(Locale.US, "%.2f", opp.netRiskRewardRatio)}",
+                                    style = MaterialTheme.typography.labelMedium.copy(color = accent, fontWeight = FontWeight.ExtraBold)
+                                )
+                                Text(
+                                    text = "Gross 1:${String.format(Locale.US, "%.2f", opp.grossRiskRewardRatio)}",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp)
+                                )
+                            }
                         }
 
                         Text(

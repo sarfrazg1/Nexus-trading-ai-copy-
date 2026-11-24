@@ -218,6 +218,7 @@ class TradingViewModel(
     // Learning Center & App Settings State
     private val learningPrefsRepo = LearningPreferencesRepository()
     private val appSettingsRepo = AppSettingsRepository()
+    private var boundAppContext: Context? = null
     private var nexusAiRepo = com.example.data.ai.NexusAiRepository()
     val futuresScannerRepo = com.example.data.scanner.FuturesScannerRepository.getInstance(notificationManager = repository.notificationManager)
     private val _scannerScreenMode = MutableStateFlow(0)
@@ -821,7 +822,8 @@ class TradingViewModel(
                         ?: completed15m.lastOrNull()?.close
                         ?: 0.0
                     if (currentPrice > 0.0) {
-                        val funding = repository.futuresApiClient.fetchFundingRate(pair.symbol)
+                        val fundingSnap = repository.futuresApiClient.fetchFundingRateSnapshot(pair.symbol)
+                        val funding = fundingSnap?.ratePercent
                         val result = com.example.data.scanner.BinanceFuturesScannerEngine.evaluatePair(
                             symbol = pair.symbol,
                             baseAsset = pair.baseAsset,
@@ -834,7 +836,8 @@ class TradingViewModel(
                         )
                         result.signal?.let { futuresScannerRepo.onSignalEvaluated(it) }
 
-                        val playHrSound = appSettingsRepo.soundEffectsEnabled.value || futuresScannerRepo.scannerState.value.soundAlertsEnabled
+                        val playHrSound = repository.notificationManager.isSoundAlertsEnabled() &&
+                            (appSettingsRepo.soundEffectsEnabled.value || futuresScannerRepo.scannerState.value.soundAlertsEnabled)
                         val hrResult = com.example.data.scanner.HighRewardOpportunityDetector.scanPair(
                             symbol = pair.symbol,
                             baseAsset = pair.baseAsset,
@@ -844,7 +847,9 @@ class TradingViewModel(
                             candles15m = c15m,
                             candles5m = c5m,
                             fundingRatePercent = funding,
-                            budgetConfig = futuresScannerRepo.budgetConfig.value
+                            budgetConfig = futuresScannerRepo.budgetConfig.value,
+                            fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                            isFundingDataStale = fundingSnap == null
                         )
                         futuresScannerRepo.onHighRewardScanEvaluated(
                             symbol = pair.symbol,
@@ -915,11 +920,13 @@ class TradingViewModel(
 
     fun bindLearningContext(context: Context) {
         val appContext = context.applicationContext ?: context
+        boundAppContext = appContext
         repository.notificationManager.bindContext(appContext)
         futuresScannerRepo.bindContext(appContext)
         com.example.data.alerts.BackgroundAlertWorker.schedulePeriodicMonitoring(appContext)
         learningPrefsRepo.bindContext(appContext)
         appSettingsRepo.bindContext(appContext)
+        repository.notificationManager.setMasterAlertsEnabled(appSettingsRepo.alertNotificationsEnabled.value)
         com.example.data.remote.NexusFirebaseMessagingService.syncTopicSubscriptions(
             context = appContext,
             enabled = appSettingsRepo.alertNotificationsEnabled.value
@@ -1496,12 +1503,18 @@ class TradingViewModel(
 
     fun setAlertNotificationsEnabled(enabled: Boolean) {
         appSettingsRepo.setAlertNotificationsEnabled(enabled)
-        com.example.data.remote.NexusFirebaseMessagingService.syncTopicSubscriptions(enabled = enabled)
+        repository.notificationManager.setMasterAlertsEnabled(enabled)
+        com.example.data.remote.NexusFirebaseMessagingService.syncTopicSubscriptions(
+            context = boundAppContext,
+            enabled = enabled
+        )
         _learningUpdate.value++
     }
 
     fun setSoundEffectsEnabled(enabled: Boolean) {
         appSettingsRepo.setSoundEffectsEnabled(enabled)
+        futuresScannerRepo.setSoundAlerts(enabled)
+        repository.notificationManager.setSoundAlertsEnabled(enabled)
         _learningUpdate.value++
     }
 
@@ -1745,7 +1758,7 @@ class TradingViewModel(
                     val c5m = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.M5, limit = 30)
                     val price = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m).lastOrNull()?.close ?: 0.0
                     if (price > 0.0) {
-                        val funding = repository.futuresApiClient.fetchFundingRate(normSym)
+                        val fundingSnap = repository.futuresApiClient.fetchFundingRateSnapshot(normSym)
                         val hrResult = com.example.data.scanner.HighRewardOpportunityDetector.scanPair(
                             symbol = normSym,
                             baseAsset = base,
@@ -1754,8 +1767,10 @@ class TradingViewModel(
                             candles1h = c1h,
                             candles15m = c15m,
                             candles5m = c5m,
-                            fundingRatePercent = funding,
-                            budgetConfig = futuresScannerRepo.budgetConfig.value
+                            fundingRatePercent = fundingSnap?.ratePercent,
+                            budgetConfig = futuresScannerRepo.budgetConfig.value,
+                            fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                            isFundingDataStale = fundingSnap == null
                         )
                         futuresScannerRepo.onHighRewardScanEvaluated(
                             symbol = normSym,

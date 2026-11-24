@@ -1,0 +1,40 @@
+name: NEXUS High-Reward Opportunity Alerts (Free FCM Backend)
+
+# Optional zero-cost remote push alert backend using GitHub Actions + FCM HTTP v1.
+# - 100% Free & unlimited on Public repositories.
+# - On Private repositories: */30 cron = max 1,440 billed min/month (under GitHub's 2,000 free min/month limit).
+#   For public repos, you can optionally tighten cron to */15 or */5.
+# - Requires GitHub Secret: FIREBASE_SERVICE_ACCOUNT_JSON (never stored in APK or source code).
+# - If secret is not configured yet, this workflow exits 0 cleanly without errors.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  scan-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Restore duplicate-alert prevention cache
+        uses: actions/cache@v4
+        with:
+          path: .nexus-fcm-cache
+          key: nexus-fcm-sent-cache-${{ github.run_id }}
+          restore-keys: |
+            nexus-fcm-sent-cache-
+
+      - name: Scan Futures pairs & dispatch qualifying FCM alerts
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: node .github/scripts/nexus_fcm_scanner.mjs

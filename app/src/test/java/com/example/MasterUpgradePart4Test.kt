@@ -190,10 +190,12 @@ class MasterUpgradePart4Test {
             candles1h = tight1h,
             candles15m = tight15m,
             candles5m = tight15m.takeLast(30),
+            fundingRatePercent = 0.01,
             referenceTimeMs = nowMs
         )
         assertTrue("Setups < 1:4 net R:R must be rejected", rejected.qualifiedOpportunities.isEmpty())
         assertFalse(rejected.bestDiagnostic.tier.isQualified)
+        assertEquals(OpportunityPriorityTier.WAIT_BELOW_1_TO_4, rejected.bestDiagnostic.tier)
 
         // 3. Unconfirmed entry trigger (wick sweeps above 100,090 but completed candle closes inside range at 99,810) MUST be rejected
         val unconfirmed15m = tight15m.dropLast(1) + tight15m.last().copy(
@@ -210,6 +212,7 @@ class MasterUpgradePart4Test {
             candles1h = buildBullishHtfPullbackWithSupplyAbove(50, 3_600_000L, nowMs, 105_500.0, 99_700.0, 100_000.0),
             candles15m = unconfirmed15m,
             candles5m = unconfirmed15m.takeLast(30),
+            fundingRatePercent = 0.01,
             referenceTimeMs = nowMs
         )
         assertTrue("Unconfirmed entry trigger must never qualify (diag=${unconfirmed.bestDiagnostic.reason})", unconfirmed.qualifiedOpportunities.isEmpty())
@@ -276,7 +279,7 @@ class MasterUpgradePart4Test {
             val history14 = notifMgr.alertHistory.value.firstOrNull { it.eventId == opp14.signatureKey }
             assertNotNull(history14)
             assertEquals(AlertType.OPPORTUNITY_1_TO_4, history14!!.alertType)
-            assertTrue(history14.title.contains("Qualified Opportunity"))
+            assertTrue(history14.title.contains("NEXUS QUALIFIED 1:4 OPPORTUNITY"))
             assertFalse(history14.title.contains("NEXUS 1:5 HIGH REWARD OPPORTUNITY"))
 
             // Lifecycle invalidation on SL breach & expiry
@@ -288,10 +291,25 @@ class MasterUpgradePart4Test {
             assertEquals(OpportunityStatus.EXPIRED, expired.status)
             assertFalse(expired.isQualified)
 
-            // Repository sorting priority: >=1:5 first, then 1:4..<5
+            // Repository sorting priority: >=1:5 first, then 1:4..<5 (use current clock because repository evaluates expiry against System.currentTimeMillis)
+            val liveTriggerMs = System.currentTimeMillis()
+            val repoOpp15 = buildSampleOpportunity(
+                signatureKey = "hr_BTCUSDT_LONG_${liveTriggerMs}_1_5",
+                netRR = 5.45,
+                tier = OpportunityPriorityTier.HIGHEST_1_TO_5_PLUS,
+                triggerMs = liveTriggerMs
+            )
+            val repoOpp14 = buildSampleOpportunity(
+                signatureKey = "hr_SOLUSDT_LONG_${liveTriggerMs}_1_4",
+                netRR = 4.35,
+                tier = OpportunityPriorityTier.QUALIFIED_1_TO_4,
+                triggerMs = liveTriggerMs,
+                symbol = "SOLUSDT",
+                baseAsset = "SOL"
+            )
             val repo = FuturesScannerRepository(ctx, notifMgr)
-            repo.onHighRewardScanEvaluated("SOLUSDT", HighRewardScanResult(listOf(opp14), diagnosticFor(opp14)))
-            repo.onHighRewardScanEvaluated("BTCUSDT", HighRewardScanResult(listOf(opp15), diagnosticFor(opp15)))
+            repo.onHighRewardScanEvaluated("SOLUSDT", HighRewardScanResult(listOf(repoOpp14), diagnosticFor(repoOpp14)))
+            repo.onHighRewardScanEvaluated("BTCUSDT", HighRewardScanResult(listOf(repoOpp15), diagnosticFor(repoOpp15)))
 
             val active = repo.highRewardState.value.activeOpportunities
             assertEquals(2, active.size)

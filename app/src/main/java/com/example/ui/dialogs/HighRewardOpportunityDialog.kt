@@ -138,7 +138,7 @@ fun HighRewardOpportunityDialog(
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
-                                    text = if (isTopPriority) "NEXUS 1:5 HIGH REWARD OPPORTUNITY" else "1:4+ QUALIFIED OPPORTUNITY",
+                                    text = if (isTopPriority) "NEXUS 1:5 HIGH REWARD OPPORTUNITY" else "NEXUS QUALIFIED 1:4 OPPORTUNITY",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = accentColor,
                                         fontWeight = FontWeight.ExtraBold,
@@ -255,7 +255,7 @@ fun HighRewardOpportunityDialog(
                         )
                     }
                     Text(
-                        text = "$1.00 Risk -> $${fmt2(opportunity.normalizedNetRewardUsd)} Net Reward (after ${fmt2(opportunity.feeRatePercentPerSide * 2)}% fees + ${fmt2(opportunity.slippagePercentPerSide * 2)}% slippage)",
+                        text = "$1.00 Risk -> $${fmt2(opportunity.normalizedNetRewardUsd)} Net Reward (after ${fmt2(opportunity.feeRatePercentPerSide * 2)}% fees + ${fmt2(opportunity.slippagePercentPerSide * 2)}% slippage + funding ${String.format(Locale.US, "%+.4f%%", opportunity.fundingRatePercent)})",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = TextPrimary,
                             fontWeight = FontWeight.SemiBold,
@@ -267,7 +267,7 @@ fun HighRewardOpportunityDialog(
                         style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
                     )
                     Text(
-                        text = "Assumptions: $${fmt2(opportunity.budgetMarginUsdt)} isolated margin @ ${opportunity.leverageAssumed}x leverage (Notional $${fmt2(opportunity.notionalUsdt)}) | Fees $${fmt2(opportunity.estimatedFeesUsdt)} | Slippage $${fmt2(opportunity.estimatedSlippageUsdt)}",
+                        text = "Assumptions: $${fmt2(opportunity.budgetMarginUsdt)} isolated margin @ ${opportunity.leverageAssumed}x leverage (Notional $${fmt2(opportunity.notionalUsdt)}) | Fees $${fmt2(opportunity.estimatedFeesUsdt)} | Slippage $${fmt2(opportunity.estimatedSlippageUsdt)} | Funding Reserve $${fmt2(opportunity.estimatedFundingReserveUsdt)}",
                         style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp)
                     )
                 }

@@ -165,10 +165,17 @@ class BinanceFuturesApiClient(
         cached?.candles ?: emptyList()
     }
 
+    data class FundingRateSnapshot(
+        val ratePercent: Double,
+        val serverTimeMs: Long? = null,
+        val fetchedAtMs: Long = System.currentTimeMillis()
+    )
+
     /**
-     * Fetches Funding Rate and Mark Price for USDT-M Futures.
+     * Fetches Funding Rate and Mark Price timestamp for USDT-M Futures.
+     * Returns null when missing, non-finite, or out of sanity bounds.
      */
-    suspend fun fetchFundingRate(symbol: String): Double? = withContext(Dispatchers.IO) {
+    suspend fun fetchFundingRateSnapshot(symbol: String): FundingRateSnapshot? = withContext(Dispatchers.IO) {
         val normalizedSymbol = symbol.uppercase().trim()
         val url = "$FUTURES_BASE_URL/fapi/v1/premiumIndex?symbol=$normalizedSymbol"
 
@@ -182,8 +189,16 @@ class BinanceFuturesApiClient(
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: return@withContext null
                     val json = JSONObject(body)
-                    val rate = json.optString("lastFundingRate").toDoubleOrNull()
-                    return@withContext rate?.let { it * 100.0 } // As percentage
+                    val ratePct = json.optString("lastFundingRate").toDoubleOrNull()?.times(100.0)
+                    if (ratePct == null || !ratePct.isFinite() || kotlin.math.abs(ratePct) > 5.0) {
+                        return@withContext null
+                    }
+                    val serverTime = json.optLong("time", 0L).takeIf { it > 0L }
+                    return@withContext FundingRateSnapshot(
+                        ratePercent = ratePct,
+                        serverTimeMs = serverTime,
+                        fetchedAtMs = System.currentTimeMillis()
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -191,6 +206,11 @@ class BinanceFuturesApiClient(
         }
         null
     }
+
+    /**
+     * Fetches Funding Rate percentage for USDT-M Futures.
+     */
+    suspend fun fetchFundingRate(symbol: String): Double? = fetchFundingRateSnapshot(symbol)?.ratePercent
 
     data class DerivativesSnapshot(
         val symbol: String,

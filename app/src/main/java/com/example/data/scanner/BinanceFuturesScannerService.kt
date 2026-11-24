@@ -159,7 +159,8 @@ class BinanceFuturesScannerService : Service() {
                             ?: 0.0
 
                         if (currentPrice > 0.0) {
-                            val fundingRate = apiClient.fetchFundingRate(pair.symbol)
+                            val fundingSnap = apiClient.fetchFundingRateSnapshot(pair.symbol)
+                            val fundingRate = fundingSnap?.ratePercent
 
                             val result = BinanceFuturesScannerEngine.evaluatePair(
                                 symbol = pair.symbol,
@@ -180,7 +181,7 @@ class BinanceFuturesScannerService : Service() {
                                 }
                             }
 
-                            // Part 4: Additive >= 1:4 / >= 1:5 High Reward Opportunity scan
+                            // Part 4/5: Additive >= 1:4 / >= 1:5 High Reward Opportunity scan with strict funding check
                             val hrResult = HighRewardOpportunityDetector.scanPair(
                                 symbol = pair.symbol,
                                 baseAsset = pair.baseAsset,
@@ -190,7 +191,9 @@ class BinanceFuturesScannerService : Service() {
                                 candles15m = candles15m,
                                 candles5m = candles5m,
                                 fundingRatePercent = fundingRate,
-                                budgetConfig = repository.budgetConfig.value
+                                budgetConfig = repository.budgetConfig.value,
+                                fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                                isFundingDataStale = fundingSnap == null
                             )
                             repository.onHighRewardScanEvaluated(
                                 symbol = pair.symbol,

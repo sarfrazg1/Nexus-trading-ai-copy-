@@ -11,7 +11,8 @@ import java.util.UUID
  */
 enum class OpportunityPriorityTier(val label: String, val isQualified: Boolean) {
     HIGHEST_1_TO_5_PLUS("NEXUS 1:5 HIGH REWARD OPPORTUNITY", true),
-    QUALIFIED_1_TO_4("1:4+ Qualified Opportunity", true),
+    QUALIFIED_1_TO_4("NEXUS QUALIFIED 1:4 OPPORTUNITY", true),
+    WAIT_FUNDING_UNAVAILABLE("WAIT / FUNDING DATA UNAVAILABLE", false),
     WAIT_BELOW_1_TO_4("WAIT — Below 1:4 Net R:R", false),
     WAIT_TRIGGER_NOT_CONFIRMED("WAIT — Entry Trigger Unconfirmed", false),
     WAIT_INSUFFICIENT_STRUCTURE("WAIT — Structure / Safety Rejected", false)
@@ -78,6 +79,9 @@ data class HighRewardOpportunity(
     val estimatedRiskMarginPercent: Double,
     val feeRatePercentPerSide: Double,
     val slippagePercentPerSide: Double,
+    val fundingRatePercent: Double = 0.0,
+    val fundingRateTimestampMs: Long? = null,
+    val estimatedFundingIntervals: Double = BinanceFuturesScannerEngine.ESTIMATED_FUNDING_INTERVALS,
     val modelConfidencePercent: Int,
     val historicalTargetHitProbabilityPercent: Double? = null,
     val historicalSampleSize: Int = 0,
@@ -96,7 +100,7 @@ data class HighRewardOpportunity(
             tier == OpportunityPriorityTier.HIGHEST_1_TO_5_PLUS ->
                 "NEXUS 1:5 HIGH REWARD OPPORTUNITY • $symbol ${direction.name}"
             isQualified ->
-                "NEXUS 1:${String.format(Locale.US, "%.2f", netRiskRewardRatio)} Qualified Opportunity • $symbol ${direction.name}"
+                "NEXUS QUALIFIED 1:4 OPPORTUNITY (1:${String.format(Locale.US, "%.2f", netRiskRewardRatio)}) • $symbol ${direction.name}"
             else ->
                 "WAIT • $symbol (${tier.label})"
         }
@@ -126,6 +130,7 @@ data class HighRewardCandidateDiagnostic(
     val netRiskRewardRatio: Double,
     val tier: OpportunityPriorityTier,
     val reason: String,
+    val isFundingAvailable: Boolean = true,
     val evaluatedAtPkt: String = TimeZoneUtils.formatKarachiTimestamp(System.currentTimeMillis())
 )
 
