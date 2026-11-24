@@ -374,14 +374,18 @@ class NexusAiRepository(
             - If the user writes explicitly in Standard Urdu, Roman Urdu, or English, honor their request naturally.
 
             TRUTHFULNESS & STRICT SEPARATION RULES (CRITICAL):
-            1. For market/price/setup questions, cite ONLY real values in the attached VERIFIED HYBRID MARKET FACTS.
+            1. Pipeline: Your explanations come strictly from MARKET INTELLIGENCE -> TRADING REASONING ENGINE -> NEXUS AI ASSISTANT. Cite ONLY real values in VERIFIED HYBRID MARKET FACTS, TRADING REASONING ENGINE EVALUATION, SECONDARY COMPARISON SNAPSHOT, and TRADE WORKFLOW.
             2. ALWAYS distinguish Spot Market vs USDT-M Perpetual Futures explicitly; NEVER blend Spot and Futures quotes silently.
-            3. ALWAYS report timestamps (UTC) and disclose when any provider is STALE, RATE_LIMITED, or UNAVAILABLE.
-            4. SEPARATE VERIFIED FACTS vs POSSIBLE EXPLANATIONS:
-               - Present verified price, funding, OI, cross-exchange spread, global cap, TVL, and sentiment under VERIFIED FACTS.
-               - Present filtered news headlines ONLY under POSSIBLE EXPLANATIONS / CONTEXT — NEVER treat headlines as proven causal drivers without corroborating official/on-chain evidence.
-            5. NEVER invent prices, indicator values, missing API fields, whale transactions, or news catalysts.
-            6. For trade or buying questions: NEVER guarantee profits and NEVER force a BUY or SELL call. Provide balanced Bullish and Bearish scenarios, possible entry zones, invalidation/Stop Loss levels, and key risks (1-2% capital risk).
+            3. ALWAYS report timestamps in Pakistan Standard Time (Asia/Karachi, PKT) and disclose explicitly when any provider, setup, indicator, or feed is STALE, WAITING, EXPIRED, INVALIDATED, UNAVAILABLE, or NOT APPLICABLE.
+            4. ENTRY TIMER, EXIT PLANNER & WORKFLOW DISCIPLINE:
+               - Clearly state whether the Entry Timer is WAITING, TRIGGERED, EXPIRED, INVALIDATED, or NO DATA based on completed candle closes (never count wicks alone as confirmed breakouts).
+               - When asked about Time Machine backtests, 10,000-run Monte Carlo probabilities, Budget Manager USDT/PKR sizing, Risk Manager checks (PASS/BLOCK/WARNING), or Paper Orders, explain the exact figures in the Trade Workflow section.
+               - Remind the user that scanner setups and paper orders NEVER auto-execute live trades and stop orders are NOT guaranteed to fill at their exact price under slippage or volatility.
+            5. SEPARATE CONFIRMED FACTS vs AI/NLP INTERPRETATION vs SCENARIOS:
+               - Present verified price, completed candle closes, funding, OI, cross-exchange spread, global cap, TVL, and reported headline timestamps under CONFIRMED FACTS.
+               - Present sentiment interpretation and filtered news headlines ONLY under AI / PROBABILISTIC INTERPRETATION — NEVER treat headlines as proven causal drivers without corroborating official/on-chain evidence.
+            6. NEVER invent prices, indicator values, missing API fields, whale transactions, congressional trades, or news catalysts.
+            7. For trade, LONG/SHORT, or buying questions: NEVER guarantee profits and NEVER force a BUY or SELL call. Provide balanced Bullish and Bearish scenarios, possible entry zones, invalidation/Stop Loss levels, and key risks (1-2% capital risk).
         """.trimIndent()
     }
 
@@ -479,7 +483,10 @@ class NexusAiRepository(
                         id = obj.getString("id"),
                         title = obj.getString("title"),
                         createdAt = obj.getLong("createdAt"),
-                        lastActiveAt = obj.getLong("lastActiveAt")
+                        lastActiveAt = obj.getLong("lastActiveAt"),
+                        languageMode = runCatching {
+                            LearningLanguageMode.valueOf(obj.optString("languageMode", LearningLanguageMode.BILINGUAL.name))
+                        }.getOrDefault(LearningLanguageMode.BILINGUAL)
                     )
                 )
             }
@@ -497,6 +504,7 @@ class NexusAiRepository(
                 put("title", item.title)
                 put("createdAt", item.createdAt)
                 put("lastActiveAt", item.lastActiveAt)
+                put("languageMode", item.languageMode.name)
             }
             arr.put(obj)
         }

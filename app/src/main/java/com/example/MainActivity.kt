@@ -82,8 +82,17 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    private var activeDeepLinkIntent by mutableStateOf<android.content.Intent?>(null)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        activeDeepLinkIntent = intent
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        activeDeepLinkIntent = intent
         configureAppCheck(this, intent)
         enableEdgeToEdge()
         setContent {
@@ -223,6 +232,8 @@ class MainActivity : ComponentActivity() {
                                         NexusTradingApp(
                                             viewModel = tradingViewModel,
                                             authorizedState = gs,
+                                            pendingDeepLinkIntent = activeDeepLinkIntent,
+                                            onDeepLinkConsumed = { activeDeepLinkIntent = null },
                                             onOpenAdminPanel = { subVm.openAdminPanel() },
                                             onSignOutClick = {
                                                 scope.launch { GoogleAuthHelper.signOut(context) }
@@ -311,6 +322,8 @@ private fun GateErrorScreen(
 fun NexusTradingApp(
     viewModel: TradingViewModel = viewModel(),
     authorizedState: AccessGateState.Authorized? = null,
+    pendingDeepLinkIntent: android.content.Intent? = null,
+    onDeepLinkConsumed: () -> Unit = {},
     onOpenAdminPanel: () -> Unit = {},
     onSignOutClick: () -> Unit = {}
 ) {
@@ -335,6 +348,22 @@ fun NexusTradingApp(
         }
     }
 
+    LaunchedEffect(pendingDeepLinkIntent) {
+        val dl = pendingDeepLinkIntent ?: return@LaunchedEffect
+        val navTabName = dl.getStringExtra(com.example.util.NexusNotificationManager.EXTRA_NAV_TAB)
+        val signalSymbol = dl.getStringExtra(com.example.util.NexusNotificationManager.EXTRA_SIGNAL_SYMBOL)
+        val signalId = dl.getStringExtra(com.example.util.NexusNotificationManager.EXTRA_SIGNAL_ID)
+        val alertTypeName = dl.getStringExtra(com.example.util.NexusNotificationManager.EXTRA_ALERT_TYPE)
+        val openWorkflow = dl.getBooleanExtra(com.example.util.NexusNotificationManager.EXTRA_OPEN_WORKFLOW, false)
+        if (!navTabName.isNullOrBlank()) {
+            NavigationTab.entries.firstOrNull { it.name == navTabName }?.let { viewModel.selectTab(it) }
+        }
+        if (openWorkflow && !signalSymbol.isNullOrBlank()) {
+            viewModel.openTradeWorkflowBySymbol(signalSymbol, signalId, alertTypeName)
+        }
+        onDeepLinkConsumed()
+    }
+
     // Trigger user messages in snackbar
     LaunchedEffect(uiState.userMessage) {
         uiState.userMessage?.let { msg ->
@@ -345,7 +374,9 @@ fun NexusTradingApp(
 
     // Predictive back handler
     BackHandler(
-        enabled = uiState.selectedGlossaryTerm != null ||
+        enabled = uiState.selectedHighRewardOpportunity != null ||
+                uiState.tradeWorkflowState.isVisible ||
+                uiState.selectedGlossaryTerm != null ||
                 uiState.selectedEconomicTerm != null ||
                 uiState.selectedLessonForDetail != null ||
                 uiState.selectedAssetDetail != null ||
@@ -355,6 +386,8 @@ fun NexusTradingApp(
                 uiState.currentTab != NavigationTab.DASHBOARD
     ) {
         when {
+            uiState.selectedHighRewardOpportunity != null -> viewModel.closeHighRewardDetail()
+            uiState.tradeWorkflowState.isVisible -> viewModel.closeTradeWorkflow()
             uiState.selectedGlossaryTerm != null -> viewModel.closeGlossaryDialog()
             uiState.selectedEconomicTerm != null -> viewModel.dismissEconomicGlossary()
             uiState.selectedLessonForDetail != null -> viewModel.closeLessonDetail()
@@ -593,7 +626,15 @@ fun NexusTradingApp(
                         onIntervalSelected = { sec -> viewModel.setFuturesScannerInterval(sec) },
                         onTogglePaperTrading = { enabled -> viewModel.setFuturesScannerPaperTrading(enabled) },
                         onExplainSignalWithAi = { signal -> viewModel.explainFuturesSignalWithAi(signal) },
-                        onSimulatePaperTrade = { signal -> viewModel.simulateFuturesPaperTrade(signal) }
+                        onSimulatePaperTrade = { signal -> viewModel.simulateFuturesPaperTrade(signal) },
+                        strict92ConfidenceMode = uiState.strict92ConfidenceMode,
+                        onToggleStrict92Mode = { enabled -> viewModel.setStrict92ConfidenceMode(enabled) },
+                        onOpenWorkflow = { signal -> viewModel.openTradeWorkflow(signal) },
+                        paperOrdersCount = uiState.tradeWorkflowState.paperOrders.size,
+                        activeAlertRulesCount = uiState.tradeWorkflowState.tradeAlertRules.count { it.isActive },
+                        highRewardScanState = uiState.highRewardScanState,
+                        onScanHighRewardNow = { viewModel.scanHighRewardOpportunitiesNow() },
+                        onInspectHighRewardOpportunity = { opp -> viewModel.openHighRewardDetail(opp) }
                     )
                 }
 
@@ -627,7 +668,7 @@ fun NexusTradingApp(
 
                     val planLabel = authorizedState?.userRecord?.planName.orEmpty()
                     val expiryLabel = authorizedState?.userRecord?.expiresAt?.toDate()?.let { date ->
-                        SimpleDateFormat("MMM dd, yyyy", Locale.US).format(date)
+                        com.example.util.TimeZoneUtils.formatKarachiDateOnly(date.time)
                     }.orEmpty()
 
                     SettingsScreen(
@@ -704,7 +745,13 @@ fun NexusTradingApp(
             news = news,
             onDismiss = { viewModel.closeNewsDetail() },
             onToggleBookmark = { viewModel.toggleNewsBookmark(news.id) },
-            onOpenGlossaryTerm = { term -> viewModel.openEconomicGlossary(term) }
+            onOpenGlossaryTerm = { term -> viewModel.openEconomicGlossary(term) },
+            isFetchingFullArticle = uiState.isFetchingFullNewsArticle,
+            selectedLanguage = uiState.selectedNewsLanguage,
+            isTranslating = uiState.isTranslatingNews,
+            translatedArticle = uiState.translatedNewsArticle,
+            onSelectLanguage = { lang -> viewModel.selectNewsLanguage(lang) },
+            onRetryTranslation = { viewModel.retryNewsTranslation() }
         )
     }
 
@@ -722,6 +769,26 @@ fun NexusTradingApp(
             term = term,
             currentLanguageMode = uiState.learningLanguageMode,
             onDismiss = { viewModel.dismissEconomicGlossary() }
+        )
+    }
+
+    if (uiState.tradeWorkflowState.isVisible && uiState.tradeWorkflowState.selectedSignal != null) {
+        com.example.ui.screens.TradeWorkflowSheet(
+            workflowState = uiState.tradeWorkflowState,
+            onDismiss = { viewModel.closeTradeWorkflow() },
+            onUpdateBudgetConfig = { cfg -> viewModel.updateWorkflowBudgetConfig(cfg) },
+            onRerunTimeMachine = { fee, slip, seed -> viewModel.rerunWorkflowTimeMachine(fee, slip, seed) },
+            onSelectExecutionMode = { mode -> viewModel.setWorkflowExecutionMode(mode) },
+            onExplicitConfirmationChanged = { confirmed -> viewModel.setWorkflowExplicitConfirmation(confirmed) },
+            onSubmitPaperOrder = { viewModel.submitWorkflowPaperOrder() }
+        )
+    }
+
+    uiState.selectedHighRewardOpportunity?.let { opp ->
+        com.example.ui.dialogs.HighRewardOpportunityDialog(
+            opportunity = opp,
+            appLanguageMode = uiState.learningLanguageMode,
+            onDismiss = { viewModel.closeHighRewardDetail() }
         )
     }
 }

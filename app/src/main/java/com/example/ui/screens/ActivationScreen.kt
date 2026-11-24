@@ -99,7 +99,7 @@ fun ActivationScreen(
 
     val formattedExpiry = remember(state.userRecord?.expiresAt) {
         state.userRecord?.expiresAt?.toDate()?.let { date ->
-            SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.US).format(date)
+            com.example.util.TimeZoneUtils.formatKarachiTimestamp(date.time)
         }
     }
 

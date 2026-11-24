@@ -123,8 +123,8 @@ fun SettingsScreen(
     var showAboutDialog by remember { mutableStateOf(false) }
 
     val formattedLastRefresh = remember(settingsState.lastMarketRefreshTimestamp) {
-        val sdf = SimpleDateFormat("h:mm:ss a", Locale.US)
-        sdf.format(Date(settingsState.lastMarketRefreshTimestamp))
+        if (settingsState.lastMarketRefreshTimestamp <= 0L) "Not refreshed yet"
+        else com.example.util.TimeZoneUtils.formatKarachiTime12h(settingsState.lastMarketRefreshTimestamp)
     }
 
     LazyColumn(

@@ -593,7 +593,10 @@ class TradingRepository(
         )
 
         if (hybrid.filteredNews.isNotEmpty()) {
-            _news.value = hybrid.filteredNews.map { it.article }
+            val savedIds = _news.value.filter { it.isSaved }.map { it.id }.toSet()
+            _news.value = financialNewsService.markSeenAndDeduplicate(
+                hybrid.filteredNews.map { it.article }
+            ).map { if (savedIds.contains(it.id)) it.copy(isSaved = true) else it }
         }
     }
 
@@ -642,7 +645,10 @@ class TradingRepository(
 
     suspend fun refreshNews(forceRefresh: Boolean = false) {
         try {
-            val freshNews = financialNewsService.fetchMarketNews(forceRefresh)
+            val savedIds = _news.value.filter { it.isSaved }.map { it.id }.toSet()
+            val freshNews = financialNewsService.fetchMarketNews(forceRefresh).map {
+                if (savedIds.contains(it.id)) it.copy(isSaved = true) else it
+            }
             if (freshNews.isNotEmpty()) {
                 _news.value = freshNews
                 freshNews.firstOrNull { it.impactLevel == com.example.data.model.NewsImpactLevel.HIGH }?.let { highNews ->
@@ -736,6 +742,16 @@ class TradingRepository(
         }
     }
 
+    suspend fun fetchFullNewsArticle(newsId: String): MarketNews? {
+        val current = _news.value.firstOrNull { it.id == newsId } ?: return null
+        val enriched = financialNewsService.fetchFullArticleForDetail(current)
+        val updated = if (current.isSaved) enriched.copy(isSaved = true) else enriched
+        _news.value = _news.value.map { item ->
+            if (item.id == newsId) updated else item
+        }
+        return updated
+    }
+
     fun connectApiFeed(feedId: String, apiKey: String): Boolean {
         if (apiKey.isBlank()) return false
         _apiConfigs.value = _apiConfigs.value.map { config ->
@@ -799,10 +815,8 @@ class TradingRepository(
         }
     }
 
-    private fun formatTimestamp(millis: Long): String {
-        val sdf = SimpleDateFormat("h:mm:ss a", Locale.US)
-        return sdf.format(Date(millis))
-    }
+    private fun formatTimestamp(millis: Long): String =
+        com.example.util.TimeZoneUtils.formatKarachiTime12h(millis)
 
     private fun generateSparkline(basePrice: Double, changePct: Double): List<Float> {
         val points = mutableListOf<Float>()
@@ -1182,47 +1196,47 @@ class TradingRepository(
                 id = "news_1",
                 title = "Global Central Banks Boost Gold Reserves as Currency Diversification Accelerates",
                 source = "Bloomberg Terminal",
-                timestamp = "18m ago",
+                timestamp = "Reference • 14:40 PKT",
                 category = "Commodities",
                 summary = "Official sector bullion purchases reached 290 metric tons in the previous quarter, supporting precious metals macro strength.",
                 impact = NewsImpact.BULLISH,
                 isSaved = true,
-                fullContent = "Global central banks continued their unprecedented bullion accumulation spree through the current fiscal quarter, adding over 290 metric tons of physical gold to sovereign reserves. Emerging market central banks accounted for over 65% of recorded volumes. Analysts from Goldman Sachs and UBS noted that ongoing geopolitical de-dollarization and reserve safety mandates are providing an asymmetric floor under gold spot prices, even in high real-yield environments."
+                fullContent = "Global central banks continued their bullion accumulation spree through the current fiscal quarter, adding over 290 metric tons of physical gold to sovereign reserves."
             ),
             MarketNews(
                 id = "news_2",
                 title = "Bitcoin Spot ETFs See $420M Inflows in Single Session as Institutional Custody Expands",
                 source = "Nexus Institutional Wire",
-                timestamp = "42m ago",
-                category = "Crypto",
+                timestamp = "Reference • 14:15 PKT",
+                category = "ETF & Institutional",
                 summary = "Institutional asset managers recorded net positive inflows led by IBIT and FBTC as market liquidity thickens.",
                 impact = NewsImpact.BULLISH,
                 isSaved = false,
-                fullContent = "US-listed spot Bitcoin exchange-traded funds registered a combined net inflow of $420.5 million on Thursday, marking the third consecutive day of institutional accumulation. On-chain metrics tracked by Glassnode show liquid exchange inventory declining to multi-year lows of 2.18 million BTC. Analysts suggest institutional OTC desks are seeing increased order sizes ahead of the upcoming monthly options expiry."
+                fullContent = "US-listed spot Bitcoin exchange-traded funds registered a combined net inflow of $420.5 million as institutional custody allocations expanded."
             ),
             MarketNews(
                 id = "news_3",
                 title = "OPEC+ Weighs Production Quota Delays as Global Crude Demand Projections Temper",
                 source = "Reuters Energy",
-                timestamp = "2h ago",
-                category = "Commodities",
+                timestamp = "Reference • 12:30 PKT",
+                category = "Oil & Energy",
                 summary = "Delegates indicate the cartel may postpone its planned 180,000 bpd monthly output revival to stabilize crude benchmark prices.",
                 impact = NewsImpact.BEARISH,
                 isSaved = false,
-                fullContent = "OPEC and its non-OPEC allies are evaluating an extension of voluntary supply reductions through the coming quarter. Softening manufacturing indices in key industrial economies have moderated short-term refinery intake estimates. Brent and West Texas Intermediate futures traded mixed following the report, with options skew tilting towards downside put protection."
+                fullContent = "OPEC and its allies are evaluating an extension of voluntary supply reductions through the coming quarter amid moderated demand projections."
             ),
             MarketNews(
                 id = "news_4",
                 title = "Federal Reserve Balance Sheet Runoff Signals Liquidity Tightening in Short-Term Repo",
                 source = "Financial Times Macro",
-                timestamp = "4h ago",
-                category = "Macro",
+                timestamp = "Reference • 10:30 PKT",
+                category = "Forex & Macro",
                 summary = "Overnight Reverse Repo facility balances dip below $200 billion as Treasury bill issuance absorbs cash reserves.",
                 impact = NewsImpact.NEUTRAL,
                 isSaved = false,
-                fullContent = "The Federal Reserve's ongoing quantitative tightening has reduced system liquidity reserves to levels closely watched by money market traders. Overnight reverse repo balances touched their lowest mark since 2021. Market strategists expect short-term yield volatility to persist until the FOMC updates guidance on balance sheet tapering thresholds."
+                fullContent = "The Federal Reserve's quantitative tightening reduced reverse repo reserves, keeping FOMC liquidity guidance closely watched across risk markets."
             )
-        )
+        ).map { com.example.data.news.NewsImpactAnalyzer.enrichNewsItem(it) }
 
         fun initialScannerItems(): List<ScannerItem> = listOf(
             ScannerItem(

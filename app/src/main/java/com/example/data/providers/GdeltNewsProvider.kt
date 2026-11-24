@@ -5,22 +5,23 @@ import com.example.data.model.MarketDataStatus
 import com.example.data.model.MarketNews
 import com.example.data.model.NewsImpact
 import com.example.data.news.NewsImpactAnalyzer
+import com.example.util.TimeZoneUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
 /**
  * GDELT Project v2 Financial & Macroeconomic News Provider.
  * Enforces strict filtering for:
- * 1. Financial/macro/crypto keyword relevance (drops noisy non-market articles).
+ * 1. Crypto/macro/ETF/regulatory/exchange keyword relevance (drops noisy non-market articles).
  * 2. Publication recency (drops stale articles older than maxAgeHours when timestamp present).
  * 3. Domain reliability tier classification (HIGH / MEDIUM / LOW).
  * 4. Explicit non-causal labeling: headlines are NEVER treated as proven causes of market moves.
+ * 5. All displayed timestamps formatted in Pakistan Standard Time (Asia/Karachi, PKT).
  */
 class GdeltNewsProvider(
     private val baseUrl: String = DEFAULT_BASE_URL,
@@ -39,9 +40,9 @@ class GdeltNewsProvider(
         minRelevanceScore: Int = 2,
         includeLowReliability: Boolean = false
     ): ProviderFetchOutcome<List<FilteredNewsItem>> = withContext(Dispatchers.IO) {
-        val rawQuery = "(bitcoin OR crypto OR ethereum OR \"federal reserve\" OR inflation OR cpi OR ppi OR gold OR \"crude oil\" OR stablecoin) sourcelang:english"
+        val rawQuery = "(bitcoin OR crypto OR ethereum OR solana OR \"federal reserve\" OR fomc OR inflation OR cpi OR ppi OR etf OR binance OR coinbase OR sec OR regulation OR sanctions OR gold OR \"crude oil\" OR stablecoin) sourcelang:english"
         val encodedQuery = URLEncoder.encode(rawQuery, "UTF-8")
-        val url = "$baseUrl/api/v2/doc/doc?query=$encodedQuery&mode=artlist&maxrecords=25&timespan=72h&format=json&sort=DateDesc"
+        val url = "$baseUrl/api/v2/doc/doc?query=$encodedQuery&mode=artlist&maxrecords=30&timespan=72h&format=json&sort=DateDesc"
 
         val outcome = http.getWithCacheAndRetry(
             providerId = PROVIDER_ID,
@@ -116,19 +117,21 @@ class GdeltNewsProvider(
             val reliability = classifyDomainReliability(domain)
             if (!includeLowReliability && reliability == NewsReliabilityTier.LOW) continue
 
-            val formattedDate = publishedMs?.let { formatShortUtc(it) } ?: "Recent Wire"
+            val formattedDate = publishedMs?.let { TimeZoneUtils.formatKarachiShort(it) } ?: "Recent Wire (${TimeZoneUtils.ASIA_KARACHI_ID})"
             val rawNews = MarketNews(
                 id = "gdelt_${i}_${seendate.take(10)}",
                 title = title,
                 source = "${domain.ifBlank { "Financial Wire" }} (${reliability.label})",
                 timestamp = formattedDate,
                 category = inferCategory(title),
-                summary = "Wire headline from $domain (Relevance $relevance • ${reliability.label}). Headline only — not a verified market cause.",
+                summary = "Wire headline from $domain (Relevance $relevance • ${reliability.label} • $formattedDate). Partial/Summary dispatch — tap to fetch full article if publisher permits.",
                 impact = NewsImpact.NEUTRAL,
-                fullContent = "GDELT Wire Headline from $domain.\nPublished: $formattedDate\nReliability Tier: ${reliability.label}\nRelevance Score: $relevance\n\nDisclaimer: Headlines do not prove direct market causality without corroborating order flow or official releases.\n\nURL: $articleUrl",
+                fullContent = "Confirmed Dispatch Metadata:\n• Outlet: $domain (${reliability.label})\n• Published (${TimeZoneUtils.ASIA_KARACHI_ID}): $formattedDate\n• Relevance Score: $relevance\n\nPartial Wire Notice: GDELT provides indexed headline metadata; complete article body is fetched live from the publisher URL when technically & legally accessible.\n\nURL: $articleUrl",
                 url = articleUrl,
                 eventStatus = EventStatus.UNVERIFIED,
-                analysisMethod = "GDELT Filtered Wire (${reliability.name})"
+                analysisMethod = "GDELT Filtered Wire (${reliability.name})",
+                publishedTimestampMs = publishedMs,
+                contentStatus = com.example.data.model.ArticleContentStatus.PARTIAL_SUMMARY_ONLY
             )
 
             val enriched = NewsImpactAnalyzer.enrichNewsItem(rawNews)
@@ -156,13 +159,16 @@ class GdeltNewsProvider(
         val lower = title.lowercase(Locale.US)
         val highWeightTerms = listOf(
             "bitcoin", "btc", "ethereum", "eth", "crypto", "federal reserve", "fomc",
-            "inflation", "cpi", "ppi", "interest rate", "rate cut", "rate hike",
-            "etf", "sec ", "sec,", "gold", "crude oil", "opec", "treasury yield",
-            "stablecoin", "usdt", "usdc", "defi", "liquidation", "futures", "binance"
+            "inflation", "cpi", "ppi", "pce", "interest rate", "rate cut", "rate hike",
+            "etf", "sec ", "sec,", "cftc", "mica", "regulation", "gold", "crude oil",
+            "opec", "treasury yield", "stablecoin", "usdt", "usdc", "defi", "liquidation",
+            "futures", "binance", "coinbase", "bybit", "okx", "kraken", "blackrock",
+            "sanctions", "tariff", "geopolitical"
         )
         val secondaryTerms = listOf(
-            "solana", "market", "rally", "selloff", "crash", "bull", "bear",
-            "powell", "payroll", "nfp", "dollar", "dxy", "gdp", "recession"
+            "solana", "xrp", "bnb", "altcoin", "market", "rally", "selloff", "crash",
+            "bull", "bear", "powell", "payroll", "nfp", "dollar", "dxy", "gdp",
+            "recession", "institutional", "custody", "inflow", "outflow"
         )
         var score = 0
         for (term in highWeightTerms) {
@@ -179,10 +185,10 @@ class GdeltNewsProvider(
         val tier1Domains = listOf(
             "reuters.com", "bloomberg.com", "ft.com", "wsj.com", "cnbc.com",
             "apnews.com", "marketwatch.com", "barrons.com", "federalreserve.gov",
-            "bls.gov", "sec.gov", "treasury.gov", "coindesk.com", "theblock.co",
+            "bls.gov", "sec.gov", "cftc.gov", "treasury.gov", "coindesk.com", "theblock.co",
             "cointelegraph.com", "decrypt.co", "blockworks.co", "finance.yahoo.com",
             "yahoo.com", "bbc.com", "bbc.co.uk", "nytimes.com", "axios.com",
-            "fortune.com", "dlnews.com", "theguardian.com"
+            "fortune.com", "dlnews.com", "theguardian.com", "binance.com", "coinbase.com"
         )
         if (tier1Domains.any { d == it || d.endsWith(".$it") }) return NewsReliabilityTier.HIGH
 
@@ -192,7 +198,7 @@ class GdeltNewsProvider(
             "coingecko.com", "benzinga.com", "fool.com", "economist.com",
             "economictimes.indiatimes.com", "indiatimes.com", "livemint.com",
             "moneycontrol.com", "businesstoday.in", "cryptoslate.com",
-            "bitcoinmagazine.com", "unchainedcrypto.com", "thestreet.com"
+            "bitcoinmagazine.com", "unchainedcrypto.com", "thestreet.com", "bybit.com"
         )
         if (tier2Domains.any { d == it || d.endsWith(".$it") }) return NewsReliabilityTier.MEDIUM
 
@@ -202,8 +208,10 @@ class GdeltNewsProvider(
     private fun inferCategory(title: String): String {
         val l = title.lowercase(Locale.US)
         return when {
+            l.contains("etf") || l.contains("blackrock") || l.contains("institutional") -> "ETF & Institutional"
+            l.contains("sec ") || l.contains("cftc") || l.contains("mica") || l.contains("binance") || l.contains("coinbase") || l.contains("regulat") -> "Regulation & Exchanges"
             l.contains("gold") || l.contains("oil") || l.contains("crude") || l.contains("opec") -> "Commodities"
-            l.contains("fed") || l.contains("cpi") || l.contains("ppi") || l.contains("rate") || l.contains("inflation") -> "Macro & Central Banks"
+            l.contains("fed") || l.contains("cpi") || l.contains("ppi") || l.contains("rate") || l.contains("inflation") || l.contains("sanction") || l.contains("tariff") -> "Macro & Central Banks"
             l.contains("defi") || l.contains("stablecoin") -> "DeFi & Stablecoins"
             else -> "Crypto Markets"
         }
@@ -218,15 +226,10 @@ class GdeltNewsProvider(
         }.getOrNull()
     }
 
-    private fun formatShortUtc(millis: Long): String {
-        val fmt = SimpleDateFormat("MMM dd, HH:mm 'UTC'", Locale.US)
-        fmt.timeZone = TimeZone.getTimeZone("UTC")
-        return fmt.format(Date(millis))
-    }
-
     companion object {
         const val PROVIDER_ID = "gdelt_news_wire"
         const val PROVIDER_NAME = "GDELT Project Financial Wire"
         const val DEFAULT_BASE_URL = "https://api.gdeltproject.org"
     }
 }
+

@@ -27,6 +27,8 @@ object OfflineTradingAnalysisEngine {
         EXPLAIN_LIQUIDATIONS,
         TIMEFRAME_COMPARISON,
         RISK_MANAGEMENT,
+        COMPARE_ASSETS,
+        WORKFLOW_AND_BACKTEST,
         GENERAL_ASSET_SNAPSHOT,
         OUT_OF_SCOPE_OR_FOLLOWUP
     }
@@ -54,6 +56,8 @@ object OfflineTradingAnalysisEngine {
             FallbackIntent.EXPLAIN_LIQUIDATIONS -> buildLiquidationsExplanation(context, language)
             FallbackIntent.TIMEFRAME_COMPARISON -> buildTimeframeAdvice(context, language)
             FallbackIntent.RISK_MANAGEMENT -> buildRiskAnalysis(context, language)
+            FallbackIntent.COMPARE_ASSETS -> buildMultiAssetComparison(context, language)
+            FallbackIntent.WORKFLOW_AND_BACKTEST -> buildWorkflowAnalysis(context, language)
             FallbackIntent.GENERAL_ASSET_SNAPSHOT -> buildGeneralAssetSnapshot(context, language)
             FallbackIntent.OUT_OF_SCOPE_OR_FOLLOWUP -> buildLimitedScopeNotice(query, context, language)
         }
@@ -67,7 +71,11 @@ object OfflineTradingAnalysisEngine {
         val tfTokenCount = listOf("1m", "5m", "15m", "1h", "4h", "1d").count { tf ->
             Regex("(^|[^a-z0-9])$tf([^a-z0-9]|$)").containsMatchIn(q)
         }
+        val mentionedCoins = listOf("btc", "bitcoin", "eth", "ethereum", "sol", "solana", "bnb", "xrp", "sui", "gold", "xau")
+            .count { token -> Regex("(^|[^a-z0-9])$token([^a-z0-9]|$)").containsMatchIn(q) }
         return when {
+            q.contains("time machine") || q.contains("monte carlo") || q.contains("backtest") || q.contains("paper order") || q.contains("budget") || q.contains("risk guard") || q.contains("workflow") -> FallbackIntent.WORKFLOW_AND_BACKTEST
+            q.contains("compare") || q.contains(" vs ") || q.contains("mawaazna") || q.contains("mawazna") || q.contains("farq") || q.contains("موازنہ") || mentionedCoins >= 2 -> FallbackIntent.COMPARE_ASSETS
             q.contains("ppi") || q.contains("producer price") -> FallbackIntent.EXPLAIN_PPI
             q.contains("funding") || q.contains("فنڈنگ") -> FallbackIntent.EXPLAIN_FUNDING_RATE
             q.contains("open interest") || q.contains("اوپن انٹرسٹ") || Regex("\\boi\\b").containsMatchIn(q) -> FallbackIntent.EXPLAIN_OPEN_INTEREST
@@ -78,11 +86,11 @@ object OfflineTradingAnalysisEngine {
             q.contains("timeframe") || tfTokenCount >= 2 || q.contains("ٹائم فریم") || q.contains("چارٹ") || q.contains("پانچ منٹ") -> FallbackIntent.TIMEFRAME_COMPARISON
             q.contains("fall further") || q.contains("drop more") || q.contains("crash more") || q.contains("mazeed gir") || q.contains("نیچے جا") || q.contains("مزید گر") -> FallbackIntent.FURTHER_DOWNSIDE_RISK
             q.contains("support") || q.contains("resistance") || q.contains("levels") || q.contains("سپورٹ") || q.contains("مزاحمت") -> FallbackIntent.SUPPORT_RESISTANCE_LEVELS
-            q.contains("good time to buy") || q.contains("should i buy") || q.contains("entry zone") || q.contains("entry") || q.contains("kharid") || q.contains("buy") || q.contains("انٹری") || q.contains("خرید") -> FallbackIntent.BUY_OPPORTUNITY_AND_ENTRY
+            q.contains("good time to buy") || q.contains("should i buy") || q.contains("entry zone") || q.contains("entry") || q.contains("kharid") || q.contains("buy") || q.contains("long") || q.contains("short") || q.contains("انٹری") || q.contains("خرید") || q.contains("لانگ") || q.contains("شارٹ") -> FallbackIntent.BUY_OPPORTUNITY_AND_ENTRY
             q.contains("falling") || q.contains("dump") || q.contains("crash") || q.contains("moving") || q.contains("causing") || q.contains("why is") || q.contains("tvl") || q.contains("defi") || q.contains("fear") || q.contains("greed") || q.contains("bybit") || q.contains("gir") || q.contains("کیوں گر") || q.contains("کیوں") -> FallbackIntent.MARKET_FALL_OR_MOVE
             q.contains("5m") || q.contains("15m") || q.contains("1h") || q.contains("4h") -> FallbackIntent.TIMEFRAME_COMPARISON
             q.contains("risk") || q.contains("leverage") || q.contains("stop loss") || q.contains("رسک") || q.contains("لیوریج") || q.contains("اسٹاپ لاس") -> FallbackIntent.RISK_MANAGEMENT
-            q.contains("trend") || q.contains("analy") || q.contains("price") || q.contains("btc") || q.contains("eth") || q.contains("sol") || q.contains("gold") || q.contains("تجزیہ") || q.contains("قیمت") -> FallbackIntent.GENERAL_ASSET_SNAPSHOT
+            q.contains("trend") || q.contains("analy") || q.contains("price") || q.contains("btc") || q.contains("eth") || q.contains("sol") || q.contains("gold") || q.contains("تجزیہ") || q.contains("قیمت") || q.contains("سیٹ اپ") || q.contains("بی ٹی سی") || q.contains("بٹ کوائن") || q.contains("ایتھیریم") -> FallbackIntent.GENERAL_ASSET_SNAPSHOT
             // Short follow-ups like "what about eth?" or "and support?"
             combinedContext.contains("support") || combinedContext.contains("resistance") -> FallbackIntent.SUPPORT_RESISTANCE_LEVELS
             q.length <= 28 && recentHistory.isNotEmpty() -> FallbackIntent.GENERAL_ASSET_SNAPSHOT
@@ -227,33 +235,42 @@ object OfflineTradingAnalysisEngine {
         val res = fmtPrice(ctx.resistanceLevel)
         val fib = ctx.fibGoldenPocket ?: "Unavailable"
         val rsi = ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "N/A"
+        val timerLine = ctx.entryTimerSummary ?: "Entry Timer: Awaiting completed 15M candle close confirmation."
+        val exitLine = ctx.exitPlanSummary ?: "Exit Plan: Set SL beyond invalidation and remember stop orders may experience slippage."
         return when (lang) {
             LearningLanguageMode.ENGLISH -> """
                 ⚖️ Balanced Trade Scenarios for ${ctx.assetName} (${ctx.symbol}) — Not Financial Advice
                 • Current Price: ${fmtPrice(ctx.currentPrice)} | RSI(14): $rsi | Timeframe: ${ctx.timeframe}
+                • $timerLine
                 • Bullish Scenario: Wait for price to hold support near $sup (or Fib Golden Pocket $fib) with bullish structure/CHoCH confirmation. Invalidation: clean candle close below $sup.
                 • Bearish Scenario: Rejection near resistance $res or breakdown below $sup opens downside continuation; avoid chasing green candles into resistance.
+                • $exitLine
                 • Risk Rule: Never risk more than 1–2% of account equity; no entry guarantees profit.
             """.trimIndent()
             LearningLanguageMode.ROMAN_URDU -> """
                 ⚖️ ${ctx.assetName} (${ctx.symbol}) Ke Balanced Scenarios (Koi Guarantee Nahi)
                 • Qeemat: ${fmtPrice(ctx.currentPrice)} | RSI(14): $rsi | Timeframe: ${ctx.timeframe}
-                • Bullish Scenario (Kharidari Zone): Agar price $sup support ya Fib Golden Pocket ($fib) par hold kare aur bullish confirmation de tab chhota entry zone ban sakta hai. Invalidation: $sup ke neeche candle close.
+                • $timerLine
+                • Bullish Scenario (Kharidari Zone): Agar price $sup support ya Fib Golden Pocket ($fib) par hold kare aur completed candle confirmation de tab entry zone ban sakta hai. Invalidation: $sup ke neeche candle close.
                 • Bearish Scenario (Girawat Khatra): Agar $res resistance se rejection aaye ya $sup toot jaye to mazeed neeche ja sakti hai.
-                • Risk Usool: Hamesha 1–2% capital risk aur Stop Loss lagayein.
+                • $exitLine
+                • Risk Usool: Hamesha 1–2% capital risk aur Stop Loss lagayein (Stop order slippage se exact price par fill hone ki guarantee nahi hoti).
             """.trimIndent()
             LearningLanguageMode.STANDARD_URDU -> """
                 ⚖️ ${ctx.assetName} (${ctx.symbol}) کے متوازن تجارتی منظرنامے
                 • موجودہ قیمت: ${fmtPrice(ctx.currentPrice)} | RSI: $rsi
-                • بلش منظرنامہ (خریداری کا امکان): سپورٹ $sup یا فبوناچی گولڈن پاکٹ ($fib) پر مضبوطی اور بلش تصدیق کے بعد انٹری پر غور کیا جا سکتا ہے، جبکہ $sup سے نیچے کلوزنگ پر سیٹ اپ منسوخ (Invalidate) ہو گا۔
+                • انٹری ٹائمر: $timerLine
+                • بلش منظرنامہ (خریداری کا امکان): سپورٹ $sup یا فبوناچی گولڈن پاکٹ ($fib) پر مضبوطی اور مکمل کینڈل کلوز کی تصدیق کے بعد انٹری پر غور کیا جا سکتا ہے، جبکہ $sup سے نیچے کلوزنگ پر سیٹ اپ منسوخ (Invalidate) ہو گا۔
                 • بیئرش منظرنامہ: مزاحمت $res سے واپسی یا سپورٹ ٹوٹنے کی صورت میں مزید کمی کا خطرہ موجود رہے گا۔
-                • رسک اصول: منافع کی کوئی ضمانت نہیں ہوتی؛ کل سرمائے کا ۱ سے ۲ فیصد سے زیادہ رسک نہ لیں۔
+                • ایگزٹ پلان: $exitLine
+                • رسک اصول: منافع کی کوئی ضمانت نہیں ہوتی؛ کل سرمائے کا ۱ سے ۲ فیصد سے زیادہ رسک نہ لیں اور یاد رکھیں کہ اسٹاپ آرڈر عین اسی قیمت پر پورا ہونے کی ضمانت نہیں ہوتی۔
             """.trimIndent()
             LearningLanguageMode.BILINGUAL -> """
                 ⚖️ Balanced Scenarios (${ctx.symbol}) / متوازن تجارتی امکانات
                 • Price: ${fmtPrice(ctx.currentPrice)} | Support: $sup | Resistance: $res | Fib Zone: $fib
-                • Bullish trigger: Hold above $sup with confirmation (Invalidation < $sup). Bearish risk: Rejection at $res.
-                • اردو ہدایت: جلد بازی میں خریداری کے بجائے تصدیق اور واضح اسٹاپ لاس کا انتظار کریں۔
+                • $timerLine
+                • $exitLine
+                • اردو ہدایت: مکمل کینڈل کلوز کی تصدیق اور واضح اسٹاپ لاس کا انتظار کریں۔
             """.trimIndent()
         }
     }
@@ -559,6 +576,66 @@ object OfflineTradingAnalysisEngine {
         """.trimIndent()
     }
 
+    private fun buildMultiAssetComparison(ctx: MarketContextSnapshot, lang: LearningLanguageMode): String {
+        val primaryLine = "${ctx.assetName} (${ctx.symbol}): ${fmtPrice(ctx.currentPrice)} (${String.format(Locale.US, "%+.2f%%", ctx.change24hPercent)}) | RSI(14): ${ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "N/A"} | S/R: ${fmtPrice(ctx.supportLevel)} / ${fmtPrice(ctx.resistanceLevel)}"
+        val secondaryLine = ctx.comparisonAssetSummary ?: ctx.marketBreadthDetails.ifBlank { "Secondary asset comparison snapshot unavailable." }
+        return when (lang) {
+            LearningLanguageMode.ENGLISH -> """
+                ⚖️ [MULTI-ASSET VERIFIED COMPARISON]
+                • Primary Asset: $primaryLine
+                • Comparison Asset / Market Breadth: $secondaryLine
+                • Derivatives (${ctx.symbol}): ${ctx.derivativesSummary ?: "Unavailable"}
+                • Key Principle: Never enter correlated positions simultaneously without adjusting combined portfolio risk to 1–2% max.
+            """.trimIndent()
+            LearningLanguageMode.ROMAN_URDU -> """
+                ⚖️ [DO ASSETS KA TASDEEQ SHUDA MAWAZNA]
+                • Pehla Asset: $primaryLine
+                • Doosra Asset / Breadth: $secondaryLine
+                • Derivatives (${ctx.symbol}): ${ctx.derivativesSummary ?: "Dastiyab nahi"}
+                • Ehtiyat: Correlated coins mein aik sath double risk na lein; kul portfolio risk 1–2% tak mehdood rakhein.
+            """.trimIndent()
+            LearningLanguageMode.STANDARD_URDU -> """
+                ⚖️ [اثاثوں کا تصدیق شدہ موازنہ]
+                • بنیادی اثاثہ: $primaryLine
+                • موازنہ اثاثہ / مارکیٹ صورتحال: $secondaryLine
+                • ڈیریویٹوز: ${ctx.derivativesSummary ?: "دستیاب نہیں"}
+                • ہدایت: ایک جیسی سمت میں چلنے والے دو کوائنز میں بیک وقت زیادہ لیوریج نہ لیں۔
+            """.trimIndent()
+            LearningLanguageMode.BILINGUAL -> """
+                ⚖️ [MULTI-ASSET COMPARISON / اثاثوں کا موازنہ]
+                • Primary: $primaryLine
+                • Comparison: $secondaryLine
+                • اردو: دونوں اثاثوں کے اسٹرکچر اور فنڈنگ ریٹ دیکھ کر الگ الگ اسٹاپ لاس طے کریں۔
+            """.trimIndent()
+        }
+    }
+
+    private fun buildWorkflowAnalysis(ctx: MarketContextSnapshot, lang: LearningLanguageMode): String {
+        val wf = ctx.workflowContextSummary ?: "No active Trade Workflow sheet open yet. Tap 'Workflow' on any Scanner signal to inspect Time Machine backtest, 10,000-run Monte Carlo, Budget sizing, and 12-check Risk Guard."
+        return when (lang) {
+            LearningLanguageMode.ENGLISH -> """
+                🛡️ [TRADE WORKFLOW, TIME MACHINE & RISK GUARD]
+                $wf
+                • Reminder: All scanner signals and paper orders require explicit manual confirmation; live exchange execution is disabled by safety policy.
+            """.trimIndent()
+            LearningLanguageMode.ROMAN_URDU -> """
+                🛡️ [TRADE WORKFLOW, TIME MACHINE AUR RISK GUARD]
+                $wf
+                • Yaad Dehani: Scanner ya paper order khudkaar live trade nahi lagata; har order ke liye aapki manual tasdeeq zaroori hai.
+            """.trimIndent()
+            LearningLanguageMode.STANDARD_URDU -> """
+                🛡️ [ٹریڈ ورک فلو، ٹائم مشین اور رسک گارڈ]
+                $wf
+                • یاددہانی: کوئی بھی آرڈر خودکار لائیو ٹریڈ نہیں لگاتا؛ صرف پیپر ٹریڈ اور دستی تصدیق فعال ہے۔
+            """.trimIndent()
+            LearningLanguageMode.BILINGUAL -> """
+                🛡️ [WORKFLOW & RISK GUARD / ورک فلو اور رسک گارڈ]
+                $wf
+                • اردو: ٹائم مشین، مونٹی کارلو اور رسک گارڈ کی تصدیق کے بعد ہی پیپر آرڈر کی اجازت ملتی ہے۔
+            """.trimIndent()
+        }
+    }
+
     private fun buildGeneralAssetSnapshot(ctx: MarketContextSnapshot, lang: LearningLanguageMode): String {
         val rsi = ctx.rsi14 ?: 50.0
         val rsiStatus = when {
@@ -572,6 +649,8 @@ object OfflineTradingAnalysisEngine {
         val globalLine = ctx.coinGeckoGlobalSummary ?: "CoinGecko global unavailable"
         val defiLine = ctx.defiLlamaSummary ?: "DefiLlama unavailable"
         val fngLine = ctx.fearGreedSummary ?: "Sentiment unavailable"
+        val timerLine = ctx.entryTimerSummary ?: "Entry Timer: Pending scan"
+        val exitLine = ctx.exitPlanSummary ?: "Exit Planner: Pre-entry SL/TP required"
 
         return when (lang) {
             LearningLanguageMode.ENGLISH -> """
@@ -585,6 +664,7 @@ object OfflineTradingAnalysisEngine {
                 • SMC Structure: ${ctx.bosChochCondition ?: "Pending"} | ${ctx.fvgStatus ?: "No FVG data"}
                 • Key Levels: Support ${fmtPrice(ctx.supportLevel)} | Resistance ${fmtPrice(ctx.resistanceLevel)} | Fib ${ctx.fibGoldenPocket ?: "N/A"}
                 • Derivatives: ${ctx.derivativesSummary ?: "Unavailable"}
+                • Entry Timer & Exit Plan: $timerLine | $exitLine
                 • Scenario Guidance (Possible Outcomes): ${if (rsi > 70.0) "Extended/overbought — wait for pullback confirmation before longing." else if (rsi < 30.0) "Oversold — watch for bullish structure shift at support." else "Balanced range — wait for clean breakout above resistance or hold at support with 1-2% risk."}
             """.trimIndent()
             LearningLanguageMode.ROMAN_URDU -> """
@@ -597,6 +677,7 @@ object OfflineTradingAnalysisEngine {
                 • EMA Trend: ${ctx.emaCondition ?: "Dastiyab nahi"}
                 • Support: ${fmtPrice(ctx.supportLevel)} | Resistance: ${fmtPrice(ctx.resistanceLevel)}
                 • Derivatives: ${ctx.derivativesSummary ?: "Dastiyab nahi"}
+                • Entry Timer & Exit Plan: $timerLine | $exitLine
                 • Mashwara (Possible Scenarios): Support ya Resistance ki confirmation ke baghair jaldi mein trade na lein aur Stop Loss lagayein.
             """.trimIndent()
             LearningLanguageMode.STANDARD_URDU -> """
@@ -608,6 +689,7 @@ object OfflineTradingAnalysisEngine {
                 • آر ایس آئی (RSI 14): ${ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "دستیاب نہیں"}
                 • رجحان (EMA): ${ctx.emaCondition ?: "دستیاب نہیں"}
                 • سپورٹ: ${fmtPrice(ctx.supportLevel)} | مزاحمت: ${fmtPrice(ctx.resistanceLevel)}
+                • انٹری ٹائمر اور ایگزٹ پلان: $timerLine | $exitLine
                 • ہدایت: تصدیق کے بغیر جلد بازی میں ٹریڈ نہ لگائیں اور ۱ تا ۲ فیصد سے زیادہ رسک نہ لیں۔
             """.trimIndent()
             LearningLanguageMode.BILINGUAL -> """
@@ -615,6 +697,7 @@ object OfflineTradingAnalysisEngine {
                 Asset: ${ctx.assetName} (${ctx.symbol} • ${ctx.instrumentTypeLabel}) | Price: $priceStr ($changeStr)
                 • Sentiment & DeFi: $fngLine | $defiLine
                 • RSI(14): ${ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "N/A"} | Support: ${fmtPrice(ctx.supportLevel)} | Resistance: ${fmtPrice(ctx.resistanceLevel)}
+                • Entry Timer: $timerLine
                 • اردو خلاصہ: تصدیق شدہ لیولز کے مطابق واضح بریک آؤٹ یا سپورٹ ری ٹیسٹ کا انتظار کریں اور اسٹاپ لاس لازمی لگائیں۔
             """.trimIndent()
         }

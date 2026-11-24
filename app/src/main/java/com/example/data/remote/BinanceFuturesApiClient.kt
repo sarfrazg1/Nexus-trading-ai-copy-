@@ -257,6 +257,58 @@ class BinanceFuturesApiClient(
         null
     }
 
+    data class FuturesTicker24hr(
+        val symbol: String,
+        val lastPrice: Double,
+        val priceChangePercent: Double,
+        val quoteVolume: Double = 0.0
+    )
+
+    /**
+     * Fetches 24h public USDT-M Futures tickers (with Spot REST fallback) for requested symbols.
+     */
+    suspend fun fetch24hrTickers(symbols: List<String>): Map<String, FuturesTicker24hr> = withContext(Dispatchers.IO) {
+        val targetSet = symbols.map { it.uppercase().trim() }.filter { it.isNotEmpty() }.toSet()
+        if (targetSet.isEmpty()) return@withContext emptyMap()
+        val urls = listOf(
+            "$FUTURES_BASE_URL/fapi/v1/ticker/24hr",
+            "$SPOT_FALLBACK_URL/api/v3/ticker/24hr"
+        )
+        for (url in urls) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/json")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use
+                    val body = response.body?.string() ?: return@use
+                    val array = JSONArray(body)
+                    val result = mutableMapOf<String, FuturesTicker24hr>()
+                    for (i in 0 until array.length()) {
+                        val obj = array.optJSONObject(i) ?: continue
+                        val sym = obj.optString("symbol").uppercase()
+                        if (sym in targetSet) {
+                            val lastPrice = obj.optString("lastPrice").toDoubleOrNull() ?: continue
+                            val chgPct = obj.optString("priceChangePercent").toDoubleOrNull() ?: 0.0
+                            val qVol = obj.optString("quoteVolume").toDoubleOrNull() ?: 0.0
+                            result[sym] = FuturesTicker24hr(
+                                symbol = sym,
+                                lastPrice = lastPrice,
+                                priceChangePercent = chgPct,
+                                quoteVolume = qVol
+                            )
+                        }
+                    }
+                    if (result.isNotEmpty()) return@withContext result
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error fetching 24h tickers from $url: ${e.message}")
+            }
+        }
+        emptyMap()
+    }
+
     /**
      * Fetches funding rate, open interest, and long/short ratio together for a Binance Futures symbol.
      */

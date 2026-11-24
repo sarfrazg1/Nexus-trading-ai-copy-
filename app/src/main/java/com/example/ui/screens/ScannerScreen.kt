@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -102,6 +105,14 @@ fun ScannerScreen(
     onTogglePaperTrading: (Boolean) -> Unit = {},
     onExplainSignalWithAi: (FuturesScanSignal) -> Unit = {},
     onSimulatePaperTrade: (FuturesScanSignal) -> Unit = {},
+    strict92ConfidenceMode: Boolean = false,
+    onToggleStrict92Mode: (Boolean) -> Unit = {},
+    onOpenWorkflow: (FuturesScanSignal) -> Unit = {},
+    paperOrdersCount: Int = 0,
+    activeAlertRulesCount: Int = 0,
+    highRewardScanState: com.example.data.scanner.HighRewardScanState = com.example.data.scanner.HighRewardScanState(),
+    onScanHighRewardNow: () -> Unit = {},
+    onInspectHighRewardOpportunity: (com.example.data.scanner.HighRewardOpportunity) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -187,7 +198,7 @@ fun ScannerScreen(
 
                 IconButton(
                     onClick = onRefreshScanner,
-                    modifier = Modifier.size(36.dp).testTag("refresh_scanner_btn")
+                    modifier = Modifier.size(48.dp).testTag("refresh_scanner_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
@@ -241,7 +252,7 @@ fun ScannerScreen(
                             )
                         )
                         Text(
-                            text = "Real-time 15m/1h/4h BOS, liquidity sweeps, funding & OI anomaly detection",
+                            text = "Completed-candle 15m/1h/4h patterns, bar-by-bar Entry Timer (PKT) & Pre-Entry Exit Planner",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = TextSecondary
                             )
@@ -340,6 +351,62 @@ fun ScannerScreen(
                 BatteryOptimizationNoticeCard()
             }
 
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(NavyCard)
+                        .border(
+                            1.dp,
+                            if (strict92ConfidenceMode) BullishGreen.copy(alpha = 0.55f) else NavyBorder,
+                            RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onToggleStrict92Mode(!strict92ConfidenceMode) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .testTag("strict_92_toggle"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (strict92ConfidenceMode) "STRICT 92% CONFIDENCE FILTER: ON" else "92% Strict Qualifying Filter: OFF",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = if (strict92ConfidenceMode) BullishGreen else NexusGold,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Text(
+                            text = "Never inflates scores • Model Conf != Empirical Win Rate | Paper Orders: $paperOrdersCount | Alert Rules: $activeAlertRulesCount",
+                            style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (strict92ConfidenceMode) BullishGreen else NavySurfaceVariant)
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = if (strict92ConfidenceMode) ">=92%" else "All >=60%",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = if (strict92ConfidenceMode) NavyBackground else TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            item {
+                HighRewardOpportunityRadarSection(
+                    scanState = highRewardScanState,
+                    onScanNow = onScanHighRewardNow,
+                    onInspectOpportunity = onInspectHighRewardOpportunity
+                )
+            }
+
             // Sub-tabs for Futures Scanner
             item {
                 val activeCount = futuresScannerState.activeSignals.count {
@@ -392,10 +459,13 @@ fun ScannerScreen(
             when (futuresSubTab) {
                 0 -> {
                     // Confirmed Entries
-                    val confirmedSignals = futuresScannerState.activeSignals.filter {
+                    val rawConfirmed = futuresScannerState.activeSignals.filter {
                         it.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED ||
                                 it.lifecycle == FuturesSignalLifecycle.ACTIVE
                     }
+                    val confirmedSignals = if (strict92ConfidenceMode) {
+                        rawConfirmed.filter { it.qualityScore >= 92 }
+                    } else rawConfirmed
 
                     if (confirmedSignals.isEmpty()) {
                         item {
@@ -403,7 +473,8 @@ fun ScannerScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, NavyBorder, RoundedCornerShape(12.dp)),
+                                    .border(1.dp, NavyBorder, RoundedCornerShape(12.dp))
+                                    .testTag(if (strict92ConfidenceMode) "no_qualifying_setup_card" else "empty_confirmed_card"),
                                 colors = CardDefaults.cardColors(containerColor = NavyCard)
                             ) {
                                 Column(
@@ -418,15 +489,23 @@ fun ScannerScreen(
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text(
-                                        text = "No Confirmed Entries Right Now",
+                                        text = if (strict92ConfidenceMode) "No qualifying setup available." else "No Confirmed Entries Right Now",
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             color = TextPrimary,
                                             fontWeight = FontWeight.Bold
                                         )
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
+                                    val highestRaw = rawConfirmed.maxOfOrNull { it.qualityScore }
+                                    val detailText = if (strict92ConfidenceMode) {
+                                        val obs = highestRaw?.let { "Highest unadjusted Model Confidence observed: $it% (< 92% threshold)." }
+                                            ?: "No scanned pairs currently meet the >=92% Model Confidence rubric."
+                                        "$obs Scores are never inflated. Model Confidence != Historical Empirical Win Rate."
+                                    } else {
+                                        "NEXUS scans completed candles only (15M primary + 1H/4H confluence). Wicks never trigger confirmation. Tap Refresh or Start Scanner — manual confirmation only; no auto-trading."
+                                    }
                                     Text(
-                                        text = "The NEXUS confluence engine never forces a trade. When 4H macro trend, 1H OB/FVG, and 15M/5M BOS align across your selected watchlist coins, confirmed entries will appear here instantly with sound/push alerts.",
+                                        text = detailText,
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             color = TextMuted,
                                             lineHeight = 16.sp
@@ -448,7 +527,8 @@ fun ScannerScreen(
                                     )
                                     clipboard.setPrimaryClip(clip)
                                 },
-                                onSimulatePaperTrade = { onSimulatePaperTrade(signal) }
+                                onSimulatePaperTrade = { onSimulatePaperTrade(signal) },
+                                onOpenWorkflow = { onOpenWorkflow(signal) }
                             )
                             Spacer(modifier = Modifier.height(10.dp))
                         }
@@ -457,14 +537,18 @@ fun ScannerScreen(
 
                 1 -> {
                     // Developing Setups
-                    val setups = futuresScannerState.watchlistSetups
+                    val rawSetups = futuresScannerState.watchlistSetups
+                    val setups = if (strict92ConfidenceMode) {
+                        rawSetups.filter { it.qualityScore >= 92 }
+                    } else rawSetups
                     if (setups.isEmpty()) {
                         item {
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, NavyBorder, RoundedCornerShape(12.dp)),
+                                    .border(1.dp, NavyBorder, RoundedCornerShape(12.dp))
+                                    .testTag(if (strict92ConfidenceMode) "no_qualifying_setup_card_setups" else "empty_setups_card"),
                                 colors = CardDefaults.cardColors(containerColor = NavyCard)
                             ) {
                                 Column(
@@ -479,7 +563,7 @@ fun ScannerScreen(
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text(
-                                        text = "No Developing Setups Detected",
+                                        text = if (strict92ConfidenceMode) "No qualifying setup available." else "No Developing Setups Detected",
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             color = TextPrimary,
                                             fontWeight = FontWeight.Bold
@@ -487,7 +571,11 @@ fun ScannerScreen(
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = "Monitoring 4H and 1H structure on selected watchlist coins. Potential setups approaching Order Blocks or liquidity pools will display here as WATCHLIST_SETUP prior to entry confirmation.",
+                                        text = if (strict92ConfidenceMode) {
+                                            "No developing setups meet the unadjusted >=92% Model Confidence rubric."
+                                        } else {
+                                            "Monitoring 4H and 1H structure on selected watchlist coins. Potential setups approaching Order Blocks or liquidity pools will display here as WATCHLIST_SETUP prior to entry confirmation."
+                                        },
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             color = TextMuted,
                                             lineHeight = 16.sp
@@ -509,7 +597,8 @@ fun ScannerScreen(
                                     )
                                     clipboard.setPrimaryClip(clip)
                                 },
-                                onSimulatePaperTrade = { onSimulatePaperTrade(signal) }
+                                onSimulatePaperTrade = { onSimulatePaperTrade(signal) },
+                                onOpenWorkflow = { onOpenWorkflow(signal) }
                             )
                             Spacer(modifier = Modifier.height(10.dp))
                         }
@@ -542,6 +631,10 @@ fun ScannerScreen(
                         )
                     }
                 }
+            }
+
+            item {
+                SkillAdaptationMatrixCard()
             }
         }
 
@@ -804,3 +897,271 @@ fun ScannerScreen(
         }
     }
 }
+
+@Composable
+private fun SkillAdaptationMatrixCard() {
+    var expanded by remember { mutableStateOf(false) }
+    val skills = remember { com.example.data.scanner.SkillAdaptationRegistry.allAdaptedSkills }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, NavyBorder, RoundedCornerShape(12.dp))
+            .testTag("skill_adaptation_matrix_card"),
+        colors = CardDefaults.cardColors(containerColor = NavyCard)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp)
+                    .testTag("skill_adaptation_toggle_btn"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "11-SKILL CRYPTO & FUTURES ADAPTATION MATRIX",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = NexusGold,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                    )
+                    Text(
+                        text = "9 Active Crypto Modules • Earnings Analyst (External API) • Pelosi Tracker (N/A)",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 11.sp)
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse 11-skill matrix" else "Expand 11-skill matrix",
+                    tint = NexusGold
+                )
+            }
+
+            if (expanded) {
+                Spacer(modifier = Modifier.height(10.dp))
+                skills.forEach { skill ->
+                    val statusColor = when (skill.status) {
+                        com.example.data.scanner.SkillAdaptationStatus.ACTIVE_ADAPTED -> BullishGreen
+                        com.example.data.scanner.SkillAdaptationStatus.REQUIRES_EXTERNAL_CONFIG -> NexusGold
+                        com.example.data.scanner.SkillAdaptationStatus.NOT_APPLICABLE -> TextMuted
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(NavySurface)
+                            .border(1.dp, NavyBorder, RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                            .testTag("adapted_skill_${skill.id.name.lowercase()}")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = skill.originalName,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(statusColor.copy(alpha = 0.14f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = skill.status.badgeLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = statusColor,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 9.sp
+                                    )
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = skill.nexusModuleName,
+                            style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontSize = 10.sp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = skill.adaptationSummary,
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Policy: ${skill.honestDisclosure}",
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HighRewardOpportunityRadarSection(
+    scanState: com.example.data.scanner.HighRewardScanState,
+    onScanNow: () -> Unit,
+    onInspectOpportunity: (com.example.data.scanner.HighRewardOpportunity) -> Unit
+) {
+    val active = scanState.activeOpportunities
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+                1.dp,
+                if (active.any { it.tier == com.example.data.scanner.OpportunityPriorityTier.HIGHEST_1_TO_5_PLUS }) {
+                    BullishGreen.copy(alpha = 0.6f)
+                } else {
+                    NexusGold.copy(alpha = 0.4f)
+                },
+                RoundedCornerShape(14.dp)
+            )
+            .testTag("high_reward_radar_section"),
+        colors = CardDefaults.cardColors(containerColor = NavyCard)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "NEXUS 1:5 HIGH-REWARD RADAR",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = NexusGold,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 1.sp
+                        )
+                    )
+                    Text(
+                        text = "Strict >=1:4 Min Net R:R | Top Priority >=1:5 (PKT)",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp)
+                    )
+                }
+                OutlinedButton(
+                    onClick = onScanNow,
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, NexusGold.copy(alpha = 0.6f)),
+                    modifier = Modifier.testTag("scan_1_5_now_btn")
+                ) {
+                    Text("Scan 1:5", fontSize = 11.sp, color = NexusGold, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (active.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(NavySurface)
+                        .padding(12.dp)
+                        .testTag("high_reward_wait_card"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "WAIT — No Confirmed >=1:4 Opportunity",
+                        style = MaterialTheme.typography.labelMedium.copy(color = NexusGold, fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = scanState.waitBannerMessage,
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+                    )
+                    Text(
+                        text = "Last Checked (PKT): ${scanState.lastScannedPkt} • WorkManager scans every 15m (Android min) when closed; Foreground Scanner checks continuously. Instant terminated-app push uses FCM topics (nexus_high_reward_1_5 / nexus_qualified_1_4) when paired with a backend sender.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
+                    )
+                }
+            } else {
+                active.forEach { opp ->
+                    val isTop = opp.tier == com.example.data.scanner.OpportunityPriorityTier.HIGHEST_1_TO_5_PLUS
+                    val accent = if (isTop) BullishGreen else NexusGold
+                    val dirColor = if (opp.direction == com.example.data.scanner.FuturesDirection.LONG) BullishGreen else BearishRed
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NavySurface)
+                            .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                            .clickable { onInspectOpportunity(opp) }
+                            .padding(12.dp)
+                            .testTag("high_reward_card_${opp.symbol}"),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(5.dp))
+                                        .background(accent.copy(alpha = 0.16f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isTop) "1:5+ TOP PRIORITY" else "1:4+ QUALIFIED",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = accent,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 9.sp
+                                        )
+                                    )
+                                }
+                                Text(
+                                    text = "${opp.symbol} ${opp.direction.name}",
+                                    style = MaterialTheme.typography.titleSmall.copy(color = dirColor, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            Text(
+                                text = "Net 1:${String.format(Locale.US, "%.2f", opp.netRiskRewardRatio)}",
+                                style = MaterialTheme.typography.labelMedium.copy(color = accent, fontWeight = FontWeight.ExtraBold)
+                            )
+                        }
+
+                        Text(
+                            text = "Trigger (PKT): ${opp.entryTriggerTimestampPkt}",
+                            style = MaterialTheme.typography.bodySmall.copy(color = NexusGold, fontSize = 10.sp)
+                        )
+                        Text(
+                            text = "Entry ${opp.entryFormatted} | SL ${opp.stopLossFormatted} | TP ${opp.takeProfitFormatted}",
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        )
+                        Text(
+                            text = "$1 Risk -> $${String.format(Locale.US, "%.2f", opp.normalizedNetRewardUsd)} Net Reward | Est. Net +$${String.format(Locale.US, "%.2f", opp.estimatedNetProfitUsdt)} / -$${String.format(Locale.US, "%.2f", opp.estimatedNetLossUsdt)} (+${String.format(Locale.US, "%.1f", opp.estimatedNetRoiPercent)}% ROI @ ${opp.leverageAssumed}x)",
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp)
+                        )
+                        Text(
+                            text = opp.romanUrduExplanation.whySelected,
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
+                        )
+                        Text(
+                            text = "Tap for full Urdu / Roman Urdu explanation, risks & invalidations ->",
+                            style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -40,6 +40,22 @@ data class TimeframeStance(
     val detail: String
 )
 
+data class ConfidenceBreakdownItem(
+    val component: String,
+    val awardedPoints: Int,
+    val maxPoints: Int,
+    val evidence: String
+)
+
+data class ConfidenceEvidence(
+    val modelConfidenceScore: Int,
+    val rubricBreakdown: List<ConfidenceBreakdownItem> = emptyList(),
+    val empiricalHistoricalWinRatePercent: Double? = null,
+    val historicalSampleSize: Int = 0,
+    val separationNote: String =
+        "Model Confidence ($modelConfidenceScore%) reflects technical rubric alignment — NOT historical empirical win rate (92% confidence != 92% win rate)."
+)
+
 /**
  * Complete Scanned Signal Model for Binance USDT-M Futures.
  */
@@ -64,7 +80,7 @@ data class FuturesScanSignal(
     val invalidationCondition: String,          // Exact condition that cancels the trade
     val lifecycle: FuturesSignalLifecycle,
     val timestamp: Long = System.currentTimeMillis(),
-    val formattedTimestamp: String = SimpleDateFormat("MMM dd, HH:mm:ss", Locale.US).format(Date(timestamp)),
+    val formattedTimestamp: String = com.example.util.TimeZoneUtils.formatKarachiTimestamp(timestamp),
     val primaryTimeframe: CandleTimeframe = CandleTimeframe.M15,
     val suggestedLeverage: Int = 3,              // Capped 3x-5x for risk control
     val atrVolatilityPercent: Double = 0.0,
@@ -76,7 +92,12 @@ data class FuturesScanSignal(
     val paperTradeExecuted: Boolean = false,
     val paperTradeEntryPrice: Double? = null,
     val paperTradeExitPrice: Double? = null,
-    val paperTradePnlPercent: Double? = null
+    val paperTradePnlPercent: Double? = null,
+    val detectedPattern: CryptoSetupPattern = CryptoSetupPattern.MTF_CONFLUENCE,
+    val setupDisclaimer: String = PatternDetectionResult.SCANNER_SETUP_DISCLAIMER,
+    val entryTimer: EntryTimerResult? = null,
+    val exitPlan: PreEntryExitPlan? = null,
+    val confidenceEvidence: ConfidenceEvidence? = null
 ) {
     val entryZoneFormatted: String
         get() = String.format(Locale.US, "$%.2f - $%.2f", entryZoneMin, entryZoneMax)
@@ -176,6 +197,8 @@ data class ScannerEngineState(
     val paperTradingEnabled: Boolean = false,
     val scanIntervalSeconds: Int = 30,
     val minQualityScoreFilter: Int = 60,
+    val strict92ConfidenceMode: Boolean = false,
+    val minQualifyingConfidence: Int = 60,
     val soundAlertsEnabled: Boolean = true,
     val vibrationEnabled: Boolean = true,
     val errorMessage: String? = null

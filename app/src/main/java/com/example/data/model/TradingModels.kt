@@ -87,7 +87,15 @@ enum class AlertType(val label: String) {
     SIGNAL_SHORT("Short Signal"),
     IMPORTANT_NEWS("Important News"),
     HIGH_IMPACT_EVENT("High-Impact Event"),
-    WATCHLIST_UPDATE("Watchlist Update")
+    WATCHLIST_UPDATE("Watchlist Update"),
+    ENTRY_TRIGGER("Entry Trigger"),
+    STOP_LOSS("Stop Loss"),
+    TAKE_PROFIT("Take Profit"),
+    SETUP_INVALIDATION("Setup Invalidation"),
+    SIGNAL_EXPIRY("Signal Expiry"),
+    MARKET_CONDITION_CHANGE("Market Condition Change"),
+    OPPORTUNITY_1_TO_4("1:4+ Qualified Opportunity"),
+    OPPORTUNITY_1_TO_5("1:5 High-Reward Opportunity")
 }
 
 data class MarketAlert(
@@ -166,6 +174,11 @@ enum class EventStatus(val label: String) {
     UNVERIFIED("Unverified Report")
 }
 
+enum class ArticleContentStatus(val label: String) {
+    COMPLETE("Complete Article"),
+    PARTIAL_SUMMARY_ONLY("Partial / Summary Only")
+}
+
 data class MarketNews(
     val id: String,
     val title: String,
@@ -180,7 +193,18 @@ data class MarketNews(
     val affectedAssets: List<String> = emptyList(),
     val impactLevel: NewsImpactLevel = NewsImpactLevel.MEDIUM,
     val eventStatus: EventStatus = EventStatus.CONFIRMED,
-    val analysisMethod: String = "Rule-Based NLP Analysis"
+    val analysisMethod: String = "Rule-Based NLP Analysis",
+    val confirmedFacts: List<String> = emptyList(),
+    val aiInterpretation: String = "",
+    val publishedTimestampMs: Long? = null,
+    val isPreviouslySeen: Boolean = false,
+    val contentStatus: ArticleContentStatus = ArticleContentStatus.PARTIAL_SUMMARY_ONLY,
+    val btcImpactSummary: String = "",
+    val altcoinImpactSummary: String = "",
+    val shortTermScenario: String = "",
+    val longTermScenario: String = "",
+    val uncertaintyAndRisks: String = "",
+    val fetchedArticleCharCount: Int = 0
 )
 
 enum class Timeframe(val label: String) {

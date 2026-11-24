@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.learning.LearningLanguageMode
+import com.example.data.scanner.EntryTimerStatus
 import com.example.data.scanner.FuturesDirection
 import com.example.data.scanner.FuturesScanSignal
 import com.example.data.scanner.FuturesSignalLifecycle
@@ -364,6 +365,7 @@ fun FuturesSignalCard(
     onExplainClick: () -> Unit,
     onCopyLevels: () -> Unit,
     onSimulatePaperTrade: () -> Unit,
+    onOpenWorkflow: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isLong = signal.direction == FuturesDirection.LONG
@@ -432,6 +434,93 @@ fun FuturesSignalCard(
                 }
             }
 
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Pattern & Entry Timer Status Row
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(NexusGold.copy(alpha = 0.14f))
+                        .border(1.dp, NexusGold.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                        .testTag("pattern_badge_${signal.symbol}")
+                ) {
+                    Text(
+                        text = signal.detectedPattern.label,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = NexusGold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
+
+                val timer = signal.entryTimer
+                val timerStatus = timer?.status ?: EntryTimerStatus.WAITING
+                val timerColor = Color(timerStatus.badgeColorHex)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(timerColor.copy(alpha = 0.16f))
+                        .border(1.dp, timerColor.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                        .testTag("entry_timer_chip_${signal.symbol}")
+                ) {
+                    Text(
+                        text = "TIMER: ${timerStatus.label}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = timerColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
+            }
+
+            // Entry Timer Trigger / Bar-by-bar Status Note
+            signal.entryTimer?.let { timer ->
+                Spacer(modifier = Modifier.height(6.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NavySurface)
+                        .padding(8.dp)
+                        .testTag("entry_timer_box_${signal.symbol}")
+                ) {
+                    val headline = if (timer.status == EntryTimerStatus.TRIGGERED && timer.triggerTimestampPkt != null) {
+                        val tp = timer.triggerPrice?.let { String.format(Locale.US, "$%.2f", it) } ?: signal.currentPriceFormatted
+                        "Triggered on completed close @ $tp • ${timer.triggerTimestampPkt}"
+                    } else {
+                        timer.statusExplanation
+                    }
+                    Text(
+                        text = headline,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = TextPrimary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 14.sp
+                        )
+                    )
+                    if (timer.wickRejectionCount > 0) {
+                        Text(
+                            text = "Wick-only probes ignored: ${timer.wickRejectionCount} (completed candle close required)",
+                            style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontSize = 9.sp)
+                        )
+                    }
+                    Text(
+                        text = "${signal.setupDisclaimer} (PKT: ${signal.formattedTimestamp})",
+                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp)
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             // Pricing Grid: Entry Zone, Current, Stop Loss, TP1-3
@@ -486,14 +575,18 @@ fun FuturesSignalCard(
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "Confluence: ${signal.qualityScore}%",
+                        text = "Model Conf: ${signal.qualityScore}%",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (signal.qualityScore >= 75) BullishGreen else NexusGold,
+                            color = if (signal.qualityScore >= 92) BullishGreen else if (signal.qualityScore >= 75) NexusGold else TextSecondary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
+                    )
+                    Text(
+                        text = "Model Conf != Hist. Win Rate",
+                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 8.sp)
                     )
                 }
             }
@@ -581,9 +674,56 @@ fun FuturesSignalCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("TP1: ${signal.tp1Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
-                        Text("TP2: ${signal.tp2Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
-                        Text("TP3: ${signal.tp3Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
+                        Text("TP1 (40%): ${signal.tp1Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
+                        Text("TP2 (35%): ${signal.tp2Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
+                        Text("TP3 (25%): ${signal.tp3Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
+                    }
+
+                    // Pre-Entry Exit Planner section
+                    signal.exitPlan?.let { plan ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(NavySurface)
+                                .border(1.dp, NavyBorder, RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                                .testTag("exit_planner_card_${signal.symbol}")
+                        ) {
+                            Text(
+                                text = "PRE-ENTRY EXIT PLANNER",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = NexusGold,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Stop Basis: ${plan.invalidationBasis} (ATR Ref: ${String.format(Locale.US, "$%.2f", plan.atrBasedStopLevel)})",
+                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp)
+                            )
+                            Text(
+                                text = "Setup Expiry (PKT): ${plan.expiryDeadlinePkt}",
+                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp)
+                            )
+                            plan.calculationAssumptions.take(3).forEach { assumption ->
+                                Text(
+                                    text = "• $assumption",
+                                    style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 9.sp, lineHeight = 13.sp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "⚠️ ${plan.stopOrderDisclaimer}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = BearishRed,
+                                    fontSize = 9.sp,
+                                    lineHeight = 13.sp
+                                )
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -596,37 +736,57 @@ fun FuturesSignalCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (isExpanded) "Hide Details ▲" else "View Details ▼",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = NexusGold,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp
-                    ),
-                    modifier = Modifier.clickable { isExpanded = !isExpanded }
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { isExpanded = !isExpanded }
+                        .padding(horizontal = 6.dp, vertical = 10.dp)
+                        .testTag("view_details_${signal.symbol}")
+                ) {
+                    Text(
+                        text = if (isExpanded) "Hide Details ▲" else "View Details ▼",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = NexusGold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onCopyLevels, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Levels", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    IconButton(onClick = onCopyLevels, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Levels", tint = TextSecondary, modifier = Modifier.size(18.dp))
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(onClick = onSimulatePaperTrade, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Security, contentDescription = "Simulate Paper Trade", tint = if (signal.paperTradeExecuted) BullishGreen else TextSecondary, modifier = Modifier.size(16.dp))
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(NexusGold.copy(alpha = 0.15f))
-                            .clickable { onExplainClick() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(BullishGreen.copy(alpha = 0.16f))
+                            .border(1.dp, BullishGreen.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                            .clickable { onOpenWorkflow() }
+                            .padding(horizontal = 10.dp, vertical = 10.dp)
+                            .testTag("workflow_btn_${signal.symbol}"),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = NexusGold, modifier = Modifier.size(12.dp))
+                            Icon(Icons.Default.Security, contentDescription = "Open Trade Workflow for ${signal.symbol}", tint = BullishGreen, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Ask AI", style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("Workflow", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontWeight = FontWeight.Bold, fontSize = 11.sp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(NexusGold.copy(alpha = 0.15f))
+                            .clickable { onExplainClick() }
+                            .padding(horizontal = 10.dp, vertical = 10.dp)
+                            .testTag("ask_ai_signal_${signal.symbol}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Ask AI about ${signal.symbol}", tint = NexusGold, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Ask AI", style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold, fontSize = 11.sp))
                         }
                     }
                 }

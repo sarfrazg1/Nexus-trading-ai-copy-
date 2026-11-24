@@ -63,6 +63,8 @@ fun NewsScreen(
     val filters = listOf(
         "ALL",
         "CRYPTO",
+        "ETF & INSTITUTIONAL",
+        "REGULATION & EXCHANGES",
         "FOREX & MACRO",
         "GOLD & SILVER",
         "OIL & ENERGY",
@@ -76,12 +78,20 @@ fun NewsScreen(
         when (newsFilter) {
             "ALL" -> true
             "CRYPTO" -> item.category.equals("Crypto", ignoreCase = true) ||
-                    item.affectedAssets.any { it in listOf("BTC", "ETH", "SOL", "CRYPTO") }
+                    item.category.contains("Crypto", ignoreCase = true) ||
+                    item.affectedAssets.any { it in listOf("BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK", "SUI", "TON", "TRX", "LTC", "DOT", "BCH", "CRYPTO") }
+            "ETF & INSTITUTIONAL" -> item.category.contains("ETF", ignoreCase = true) ||
+                    item.category.contains("Institutional", ignoreCase = true) ||
+                    item.title.contains("ETF", ignoreCase = true)
+            "REGULATION & EXCHANGES" -> item.category.contains("Regulation", ignoreCase = true) ||
+                    item.category.contains("Exchange", ignoreCase = true) ||
+                    item.title.contains("SEC", ignoreCase = true) ||
+                    item.title.contains("Binance", ignoreCase = true)
             "FOREX & MACRO" -> item.category.contains("Macro", ignoreCase = true) ||
                     item.category.contains("Forex", ignoreCase = true) ||
                     item.affectedAssets.any { it in listOf("DXY", "SPX", "MACRO") }
             "GOLD & SILVER" -> item.category.contains("Gold", ignoreCase = true) ||
-                    item.category.contains("Commodities", ignoreCase = true) && item.title.contains("Gold", ignoreCase = true) ||
+                    (item.category.contains("Commodities", ignoreCase = true) && item.title.contains("Gold", ignoreCase = true)) ||
                     item.affectedAssets.any { it in listOf("XAU", "XAG") }
             "OIL & ENERGY" -> item.category.contains("Oil", ignoreCase = true) ||
                     item.category.contains("Energy", ignoreCase = true) ||
@@ -111,15 +121,15 @@ fun NewsScreen(
             ) {
                 Column {
                     Text(
-                        text = "FINANCIAL NEWS & MACRO ANALYZER",
+                        text = "FINANCIAL NEWS & MACRO MONITOR • ASIA/KARACHI (PKT)",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = NexusGold,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp
+                            letterSpacing = 1.0.sp
                         )
                     )
                     Text(
-                        text = "Global Market Terminal Wire",
+                        text = "Global Crypto & Macro Wire",
                         style = MaterialTheme.typography.titleLarge.copy(
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold
@@ -129,7 +139,7 @@ fun NewsScreen(
 
                 IconButton(
                     onClick = onRefreshNews,
-                    modifier = Modifier.size(36.dp).testTag("refresh_news_btn")
+                    modifier = Modifier.size(48.dp).testTag("refresh_news_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,

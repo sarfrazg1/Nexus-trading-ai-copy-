@@ -9,14 +9,14 @@ import com.example.data.model.MarketDataStatus
 import com.example.data.model.MarketNews
 import com.example.data.model.MarketOverview
 import com.example.data.model.ScannerItem
+import com.example.data.reasoning.TradingReasoningEngine
 import com.example.data.remote.BinanceFuturesApiClient
 import com.example.data.scanner.FuturesScanSignal
 import com.example.data.signal.AiTradingSignal
 import com.example.data.smc.FvgStatus
 import com.example.data.smc.PriceZoneType
 import com.example.data.smc.SmcAnalysisResult
-import java.text.SimpleDateFormat
-import java.util.Date
+import com.example.util.TimeZoneUtils
 import java.util.Locale
 
 /**
@@ -34,8 +34,15 @@ object MarketContextBuilder {
     /**
      * Detects which tracked asset (if any) the user explicitly mentioned in their query.
      */
-    fun detectMentionedAssetId(query: String, assets: List<MarketAsset>): String? {
+    fun detectMentionedAssetId(query: String, assets: List<MarketAsset>): String? =
+        detectMentionedAssets(query, assets).firstOrNull()
+
+    /**
+     * Detects all distinct tracked assets mentioned in order (e.g., "Compare BTC and ETH" -> ["BTC", "ETH"]).
+     */
+    fun detectMentionedAssets(query: String, assets: List<MarketAsset>): List<String> {
         val q = query.lowercase(Locale.US)
+        val matchedPositions = mutableListOf<Pair<Int, String>>()
         val aliases = mapOf(
             "bitcoin" to "BTC",
             "btc" to "BTC",
@@ -84,9 +91,11 @@ object MarketContextBuilder {
 
         for ((alias, assetId) in aliases) {
             val regex = Regex("(^|[^a-z0-9])${Regex.escape(alias)}([^a-z0-9]|$)")
-            if (regex.containsMatchIn(q) || q.contains(alias) && alias.length >= 4) {
+            val match = regex.find(q)
+            val idx = match?.range?.first ?: if (alias.length >= 4) q.indexOf(alias) else -1
+            if (idx >= 0) {
                 if (assets.isEmpty() || assets.any { it.id.equals(assetId, ignoreCase = true) }) {
-                    return assetId
+                    matchedPositions.add(idx to assetId)
                 }
             }
         }
@@ -95,12 +104,16 @@ object MarketContextBuilder {
         for (asset in assets) {
             val idLower = asset.id.lowercase(Locale.US)
             val nameLower = asset.name.lowercase(Locale.US)
-            val wordMatch = Regex("(^|[^a-z0-9])${Regex.escape(idLower)}([^a-z0-9]|$)")
-            if (wordMatch.containsMatchIn(q) || (nameLower.length >= 4 && q.contains(nameLower))) {
-                return asset.id
+            val wordMatch = Regex("(^|[^a-z0-9])${Regex.escape(idLower)}([^a-z0-9]|$)").find(q)
+            val idx = wordMatch?.range?.first ?: if (nameLower.length >= 4) q.indexOf(nameLower) else -1
+            if (idx >= 0) {
+                matchedPositions.add(idx to asset.id)
             }
         }
-        return null
+        return matchedPositions
+            .sortedBy { it.first }
+            .map { it.second }
+            .distinct()
     }
 
     fun buildSnapshot(
@@ -121,18 +134,22 @@ object MarketContextBuilder {
         derivatives: BinanceFuturesApiClient.DerivativesSnapshot? = null,
         isLiveNewsFeed: Boolean = false,
         newsLastFetchedFormatted: String = "Preloaded Macro Reference",
-        hybridState: com.example.data.providers.UnifiedHybridMarketState? = null
+        hybridState: com.example.data.providers.UnifiedHybridMarketState? = null,
+        comparisonAssetSummary: String? = null,
+        workflowContextSummary: String? = null
     ): MarketContextSnapshot {
         val symbol = asset?.symbol ?: signal?.symbol ?: futuresSignal?.symbol ?: "BTCUSDT"
         val assetName = asset?.name ?: futuresSignal?.baseAsset ?: "Bitcoin"
-        val currentPrice = asset?.currentPrice ?: futuresSignal?.currentPrice ?: candles.lastOrNull()?.close ?: 0.0
+        val completedCandles = TimeZoneUtils.filterCompletedCandles(candles)
+        val currentPrice = asset?.currentPrice ?: futuresSignal?.currentPrice ?: completedCandles.lastOrNull()?.close ?: candles.lastOrNull()?.close ?: 0.0
         val change24h = asset?.change24hPercent ?: 0.0
 
-        val contextBuiltAt = SimpleDateFormat("HH:mm:ss dd-MMM-yyyy", Locale.US).format(Date())
+        val contextBuiltAt = TimeZoneUtils.formatKarachiTimestamp(System.currentTimeMillis())
         val actualAssetTimestamp = when {
-            asset?.lastUpdated != null -> SimpleDateFormat("HH:mm:ss dd-MMM-yyyy", Locale.US).format(Date(asset.lastUpdated))
+            asset?.lastUpdated != null -> TimeZoneUtils.formatKarachiTimestamp(asset.lastUpdated)
             asset?.lastUpdatedFormatted?.isNotBlank() == true && asset.lastUpdatedFormatted != "Never" -> asset.lastUpdatedFormatted
-            candles.isNotEmpty() -> SimpleDateFormat("HH:mm:ss dd-MMM-yyyy", Locale.US).format(Date(candles.last().openTime))
+            completedCandles.isNotEmpty() -> TimeZoneUtils.formatKarachiTimestamp(completedCandles.last().openTime)
+            candles.isNotEmpty() -> TimeZoneUtils.formatKarachiTimestamp(candles.last().openTime)
             else -> "Unavailable"
         }
 
@@ -202,7 +219,7 @@ object MarketContextBuilder {
                 parts.add("Global Long/Short Account Ratio (1h): ${String.format(Locale.US, "%.2f", ls)}")
             }
             if (parts.isNotEmpty()) {
-                val ts = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(d.fetchedAtMillis))
+                val ts = TimeZoneUtils.formatKarachiTimeOnly(d.fetchedAtMillis)
                 "${parts.joinToString(" | ")} [Source: ${d.source} at $ts]"
             } else null
         }
@@ -315,6 +332,28 @@ object MarketContextBuilder {
             "• ${meta.providerName}: ${meta.dataStatus.label} (${meta.health.label}) @ ${meta.timestampFormatted}$suffix"
         }
 
+        val reasoningReport = TradingReasoningEngine.evaluate(
+            asset = asset,
+            candles = completedCandles.ifEmpty { candles },
+            timeframe = timeframe,
+            technicalAnalysis = technicalAnalysis,
+            smcAnalysis = smcAnalysis,
+            signal = signal,
+            futuresSignal = futuresSignal,
+            newsList = newsList,
+            derivatives = derivatives,
+            hybridState = hybridState
+        )
+
+        val newsFactsVsInterpretation = if (newsList.isNotEmpty()) {
+            newsList.take(3).joinToString("\n") { n ->
+                val facts = n.confirmedFacts.takeIf { it.isNotEmpty() }?.joinToString("; ")
+                    ?: "Reported headline (${n.source} • ${n.timestamp}): ${n.title}"
+                val interp = n.aiInterpretation.ifBlank { "${n.impact.label}/${n.impactLevel.label} probabilistic interpretation" }
+                "CONFIRMED FACTS: $facts\nAI/NLP INTERPRETATION: $interp"
+            }
+        } else null
+
         return MarketContextSnapshot(
             symbol = symbol,
             assetName = assetName,
@@ -339,7 +378,7 @@ object MarketContextBuilder {
             isRealData = currentPrice > 0.0,
             futuresSignalSummary = futuresSignal?.let { fs ->
                 """
-                Scanned Pair: ${fs.symbol} | Direction: ${fs.direction.name} | Status: ${fs.lifecycle.label}
+                Scanned Pair: ${fs.symbol} | Direction: ${fs.direction.name} | Status: ${fs.lifecycle.label} | Pattern: ${fs.detectedPattern.label}
                 Entry Zone: ${fs.entryZoneFormatted} (Current: ${fs.currentPriceFormatted})
                 Stop Loss: ${fs.stopLossFormatted} (-${String.format(Locale.US, "%.2f", fs.slDistancePercent)}%)
                 TP1: ${fs.tp1Formatted} (+${String.format(Locale.US, "%.2f", fs.tp1DistancePercent)}%)
@@ -371,7 +410,22 @@ object MarketContextBuilder {
             coinGeckoGlobalSummary = coinGeckoText,
             defiLlamaSummary = defiLlamaText,
             fearGreedSummary = fearGreedText,
-            providerHealthSummary = providerHealthText
+            providerHealthSummary = providerHealthText,
+            reasoningReportSummary = reasoningReport.promptSummary,
+            entryTimerSummary = reasoningReport.entryTimerSummary,
+            exitPlanSummary = reasoningReport.exitPlanSummary,
+            newsFactsVsInterpretationSummary = newsFactsVsInterpretation,
+            comparisonAssetSummary = comparisonAssetSummary,
+            workflowContextSummary = workflowContextSummary,
+            dataUnavailableDisclosures = buildList {
+                if (currentPrice <= 0.0) add("Live quote for $symbol is currently UNAVAILABLE.")
+                if (rsi == null) add("Technical indicators for $symbol ($timeframe) are unavailable (insufficient candles).")
+                if (derivText == null) add("Binance USDT-M derivatives (Funding/OI/L-S Ratio) for $symbol are unavailable.")
+                if (crossExchangeText == null) add("Bybit V5 cross-exchange check for $resolvedBinancePair is unavailable.")
+                if (!isLiveNewsFeed) add("Live GDELT news feed is currently unreachable; using static macro reference.")
+                add("Pelosi Tracker (US Congressional stock disclosures) is NOT APPLICABLE to 24/7 crypto futures.")
+                add("Token Unlock / Corporate Earnings feed requires external API configuration (using DefiLlama TVL & exchange disclosures).")
+            }
         )
     }
 

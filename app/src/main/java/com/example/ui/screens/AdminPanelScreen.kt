@@ -993,7 +993,7 @@ private fun ErrorNoticeCard(message: String) {
 
 private fun formatTs(ts: Timestamp?): String {
     val date = ts?.toDate() ?: return "—"
-    return SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.US).format(date)
+    return com.example.util.TimeZoneUtils.formatKarachiShort(date.time)
 }
 
 private fun copyText(context: Context, label: String, text: String) {

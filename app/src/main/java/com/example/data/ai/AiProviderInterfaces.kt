@@ -241,7 +241,7 @@ class FirebaseGenerativeAiClient(
                 generationConfig = generationConfig {
                     temperature = 0.45f
                     topP = 0.9f
-                    maxOutputTokens = 1400
+                    maxOutputTokens = 2800
                     thinkingConfig = thinkingConfig {
                         thinkingLevel = ThinkingLevel.LOW
                     }
@@ -486,82 +486,169 @@ class DeepSeekAiProvider(
             put("model", MODEL_NAME)
             put("messages", messages)
             put("temperature", 0.4)
-            put("max_tokens", 1600)
-            put("stream", false)
+            put("max_tokens", 2400)
+            put("stream", true)
         }
 
         val request = Request.Builder()
             .url("$baseUrl/chat/completions")
             .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
+            .header("Accept", "text/event-stream, application/json")
             .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
-        client.newCall(request).execute().use { response ->
-            val bodyStr = response.body?.string().orEmpty()
-            if (response.code == 402) {
-                val msg = "DeepSeek returned HTTP 402 (Insufficient balance / payment required) — provider disabled automatically (zero-cost policy)."
-                availabilityRef.set(AiProviderAvailability.DISABLED_PAYMENT_REQUIRED)
-                statusDetailRef.set(msg)
-                throw AiProviderException(
-                    provider = AiProviderType.DEEPSEEK,
-                    httpCode = 402,
-                    isPaymentRequired = true,
-                    message = msg
-                )
-            }
-            if (response.code == 429) {
-                val retryAfterSec = response.header("Retry-After")?.toLongOrNull() ?: 60L
-                val untilMs = clockMillis() + retryAfterSec * 1000L
-                cooldownUntilRef.set(untilMs)
-                val msg = "DeepSeek rate limit reached (HTTP 429). Paused for ${retryAfterSec}s."
-                availabilityRef.set(AiProviderAvailability.COOLDOWN_RATE_LIMIT)
-                statusDetailRef.set(msg)
-                throw AiProviderException(
-                    provider = AiProviderType.DEEPSEEK,
-                    httpCode = 429,
-                    isQuotaExhausted = true,
-                    message = msg
-                )
-            }
-            if (!response.isSuccessful) {
-                val errMsg = runCatching {
-                    JSONObject(bodyStr).optJSONObject("error")?.optString("message")
-                }.getOrNull().orEmpty().ifBlank { "HTTP ${response.code}" }
-                availabilityRef.set(AiProviderAvailability.ERROR)
-                statusDetailRef.set("DeepSeek error: $errMsg")
-                throw AiProviderException(
-                    provider = AiProviderType.DEEPSEEK,
-                    httpCode = response.code,
-                    message = "DeepSeek API failed ($errMsg)"
-                )
-            }
+        var attempt = 0
+        var succeeded = false
+        while (attempt < 2 && !succeeded) {
+            attempt++
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (response.code == 402) {
+                        val msg = "DeepSeek returned HTTP 402 (Insufficient balance / payment required) — provider disabled automatically (zero-cost policy)."
+                        availabilityRef.set(AiProviderAvailability.DISABLED_PAYMENT_REQUIRED)
+                        statusDetailRef.set(msg)
+                        throw AiProviderException(
+                            provider = AiProviderType.DEEPSEEK,
+                            httpCode = 402,
+                            isPaymentRequired = true,
+                            message = msg
+                        )
+                    }
+                    if (response.code == 429) {
+                        val retryAfterSec = response.header("Retry-After")?.toLongOrNull() ?: 60L
+                        val untilMs = clockMillis() + retryAfterSec * 1000L
+                        cooldownUntilRef.set(untilMs)
+                        val msg = "DeepSeek rate limit reached (HTTP 429). Paused for ${retryAfterSec}s."
+                        availabilityRef.set(AiProviderAvailability.COOLDOWN_RATE_LIMIT)
+                        statusDetailRef.set(msg)
+                        throw AiProviderException(
+                            provider = AiProviderType.DEEPSEEK,
+                            httpCode = 429,
+                            isQuotaExhausted = true,
+                            message = msg
+                        )
+                    }
+                    if (!response.isSuccessful) {
+                        val bodyStr = response.body?.string().orEmpty()
+                        if (response.code >= 500 && attempt < 2) {
+                            delay(600L)
+                            return@use
+                        }
+                        val errMsg = runCatching {
+                            JSONObject(bodyStr).optJSONObject("error")?.optString("message")
+                        }.getOrNull().orEmpty().ifBlank { "HTTP ${response.code}" }
+                        availabilityRef.set(AiProviderAvailability.ERROR)
+                        statusDetailRef.set("DeepSeek error: $errMsg")
+                        throw AiProviderException(
+                            provider = AiProviderType.DEEPSEEK,
+                            httpCode = response.code,
+                            message = "DeepSeek API failed ($errMsg)"
+                        )
+                    }
 
-            val contentText = runCatching {
-                JSONObject(bodyStr)
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
-            }.getOrElse { ex ->
-                throw AiProviderException(
-                    provider = AiProviderType.DEEPSEEK,
-                    message = "DeepSeek response parse error: ${ex.message}",
-                    cause = ex
-                )
-            }
+                    val contentType = response.header("Content-Type").orEmpty().lowercase()
+                    val body = response.body ?: throw AiProviderException(
+                        provider = AiProviderType.DEEPSEEK,
+                        message = "DeepSeek returned an empty response body."
+                    )
 
-            if (contentText.isBlank()) {
-                throw AiProviderException(
-                    provider = AiProviderType.DEEPSEEK,
-                    message = "DeepSeek returned an empty response."
-                )
+                    if (contentType.contains("text/event-stream")) {
+                        val source = body.source()
+                        var emittedAny = false
+                        while (!source.exhausted()) {
+                            val line = source.readUtf8Line() ?: break
+                            val trimmedLine = line.trim()
+                            if (!trimmedLine.startsWith("data:")) continue
+                            val dataPayload = trimmedLine.removePrefix("data:").trim()
+                            if (dataPayload == "[DONE]") break
+                            val deltaText = runCatching {
+                                val choices = JSONObject(dataPayload).optJSONArray("choices")
+                                val first = choices?.optJSONObject(0)
+                                val deltaObj = first?.optJSONObject("delta")
+                                val msgObj = first?.optJSONObject("message")
+                                when {
+                                    deltaObj != null && !deltaObj.isNull("content") -> deltaObj.optString("content", "")
+                                    msgObj != null && !msgObj.isNull("content") -> msgObj.optString("content", "")
+                                    else -> ""
+                                }
+                            }.getOrNull().orEmpty()
+                            if (deltaText.isNotEmpty()) {
+                                emittedAny = true
+                                emit(deltaText)
+                            }
+                        }
+                        if (!emittedAny) {
+                            throw AiProviderException(
+                                provider = AiProviderType.DEEPSEEK,
+                                message = "DeepSeek SSE stream completed with empty response."
+                            )
+                        }
+                        availabilityRef.set(AiProviderAvailability.READY)
+                        statusDetailRef.set("DeepSeek Chat active ($MODEL_NAME)")
+                        succeeded = true
+                    } else {
+                        val bodyStr = body.string()
+                        if (bodyStr.trimStart().startsWith("data:")) {
+                            var emittedAny = false
+                            for (line in bodyStr.lineSequence()) {
+                                val trimmedLine = line.trim()
+                                if (!trimmedLine.startsWith("data:")) continue
+                                val dataPayload = trimmedLine.removePrefix("data:").trim()
+                                if (dataPayload == "[DONE]") break
+                                val deltaText = runCatching {
+                                    val choices = JSONObject(dataPayload).optJSONArray("choices")
+                                    val first = choices?.optJSONObject(0)
+                                    val deltaObj = first?.optJSONObject("delta")
+                                    val msgObj = first?.optJSONObject("message")
+                                    when {
+                                        deltaObj != null && !deltaObj.isNull("content") -> deltaObj.optString("content", "")
+                                        msgObj != null && !msgObj.isNull("content") -> msgObj.optString("content", "")
+                                        else -> ""
+                                    }
+                                }.getOrNull().orEmpty()
+                                if (deltaText.isNotEmpty()) {
+                                    emittedAny = true
+                                    emit(deltaText)
+                                }
+                            }
+                            if (!emittedAny) {
+                                throw AiProviderException(
+                                    provider = AiProviderType.DEEPSEEK,
+                                    message = "DeepSeek returned an empty stream response."
+                                )
+                            }
+                        } else {
+                            val contentText = runCatching {
+                                JSONObject(bodyStr)
+                                    .getJSONArray("choices")
+                                    .getJSONObject(0)
+                                    .getJSONObject("message")
+                                    .getString("content")
+                            }.getOrElse { ex ->
+                                throw AiProviderException(
+                                    provider = AiProviderType.DEEPSEEK,
+                                    message = "DeepSeek response parse error: ${ex.message}",
+                                    cause = ex
+                                )
+                            }
+                            if (contentText.isBlank()) {
+                                throw AiProviderException(
+                                    provider = AiProviderType.DEEPSEEK,
+                                    message = "DeepSeek returned an empty response."
+                                )
+                            }
+                            emit(contentText.trim())
+                        }
+                        availabilityRef.set(AiProviderAvailability.READY)
+                        statusDetailRef.set("DeepSeek Chat active ($MODEL_NAME)")
+                        succeeded = true
+                    }
+                }
+            } catch (e: IOException) {
+                if (attempt >= 2) throw e
+                delay(600L)
             }
-
-            availabilityRef.set(AiProviderAvailability.READY)
-            statusDetailRef.set("DeepSeek Chat active ($MODEL_NAME)")
-            emit(contentText.trim())
         }
     }.flowOn(Dispatchers.IO)
 

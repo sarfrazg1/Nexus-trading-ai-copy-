@@ -126,16 +126,22 @@ object BinanceFuturesScannerEngine {
                 )
             }
         }
-        if (candles15m.size < 20 || candles1h.size < 20) {
+        val effectiveNowMs = referenceTimeMs ?: System.currentTimeMillis()
+        val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(candles15m, effectiveNowMs)
+        val completed1h = com.example.util.TimeZoneUtils.filterCompletedCandles(candles1h, effectiveNowMs)
+        val completed4h = com.example.util.TimeZoneUtils.filterCompletedCandles(candles4h, effectiveNowMs)
+        val completed5m = com.example.util.TimeZoneUtils.filterCompletedCandles(candles5m, effectiveNowMs)
+
+        if (completed15m.size < 20 || completed1h.size < 20) {
             return ScanEvaluationResult(
                 signal = null,
                 isNoTrade = true,
-                noTradeReason = "Insufficient candle history on $symbol for multi-timeframe analysis."
+                noTradeReason = "Insufficient completed candle history on $symbol for multi-timeframe analysis."
             )
         }
-        if (!hasValidCandles(candles15m) || !hasValidCandles(candles1h) ||
-            (candles4h.isNotEmpty() && !hasValidCandles(candles4h)) ||
-            (candles5m.isNotEmpty() && !hasValidCandles(candles5m))
+        if (!hasValidCandles(completed15m) || !hasValidCandles(completed1h) ||
+            (completed4h.isNotEmpty() && !hasValidCandles(completed4h)) ||
+            (completed5m.isNotEmpty() && !hasValidCandles(completed5m))
         ) {
             return ScanEvaluationResult(
                 signal = null,
@@ -143,7 +149,7 @@ object BinanceFuturesScannerEngine {
                 noTradeReason = "Corrupted or non-finite OHLCV candle data detected on $symbol."
             )
         }
-        val latestClose15m = candles15m.last().close
+        val latestClose15m = completed15m.last().close
         val priceDivergence = abs(currentPrice - latestClose15m) / latestClose15m
         if (priceDivergence > MAX_PRICE_CANDLE_DIVERGENCE) {
             return ScanEvaluationResult(
@@ -153,29 +159,39 @@ object BinanceFuturesScannerEngine {
             )
         }
 
-        // 1. Analyze 4H & 1H for Macro Direction & Higher-Timeframe (HTF) Key Zones
-        val tech1h = TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.H1, candles1h)
-        val smc1h = SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.H1, candles1h)
+        // 1. Analyze 4H & 1H for Macro Direction & Higher-Timeframe (HTF) Key Zones (completed candles only)
+        val tech1h = TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.H1, completed1h)
+        val smc1h = SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.H1, completed1h)
 
-        val tech4h = if (candles4h.size >= 15) {
-            TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.H4, candles4h)
+        val tech4h = if (completed4h.size >= 15) {
+            TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.H4, completed4h)
         } else tech1h
 
-        val smc4h = if (candles4h.size >= 15) {
-            SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.H4, candles4h)
+        val smc4h = if (completed4h.size >= 15) {
+            SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.H4, completed4h)
         } else smc1h
 
-        // 2. Analyze 15M & 5M for Execution Timing & Lower-Timeframe (LTF) Confirmation
-        val tech15m = TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.M15, candles15m)
-        val smc15m = SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.M15, candles15m)
+        // 2. Analyze 15M (Primary) & 5M for Execution Timing & Lower-Timeframe (LTF) Confirmation
+        val tech15m = TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.M15, completed15m)
+        val smc15m = SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.M15, completed15m)
 
-        val tech5m = if (candles5m.size >= 15) {
-            TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.M5, candles5m)
+        val tech5m = if (completed5m.size >= 15) {
+            TechnicalIndicatorsEngine.analyze(symbol, baseAsset, CandleTimeframe.M5, completed5m)
         } else tech15m
 
-        val smc5m = if (candles5m.size >= 15) {
-            SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.M5, candles5m)
+        val smc5m = if (completed5m.size >= 15) {
+            SmcCalculationEngine.analyze(symbol, baseAsset, CandleTimeframe.M5, completed5m)
         } else smc15m
+
+        // 2b. Detect Crypto Chart Setup Patterns (Breakouts, UTC Session ORB, Flags, Oversold Bounce, Trend Cont, Reversal)
+        val patternDetection = CryptoPatternDetector.detect(
+            candles15m = completed15m,
+            tech15m = tech15m,
+            smc15m = smc15m,
+            tech1h = tech1h,
+            smc1h = smc1h,
+            referenceTimeMs = effectiveNowMs
+        )
 
         // Extract key indicators
         val ema50_1h = tech1h.trend.emaSet.ema50 ?: currentPrice
@@ -217,7 +233,7 @@ object BinanceFuturesScannerEngine {
         // Timeframe stances breakdown
         val stance4h = TimeframeStance(
             timeframe = CandleTimeframe.H4,
-            trend = if (candles4h.isNotEmpty() && currentPrice > (tech4h.trend.emaSet.ema50 ?: currentPrice)) "Bullish" else "Bearish",
+            trend = if (completed4h.isNotEmpty() && currentPrice > (tech4h.trend.emaSet.ema50 ?: currentPrice)) "Bullish" else "Bearish",
             structure = smc4h.marketStructure.trendState.label,
             isConfirmed = true,
             detail = "4H Macro Trend: ${smc4h.marketStructure.trendState.label}"
@@ -301,6 +317,15 @@ object BinanceFuturesScannerEngine {
             reasons.add("Elevated Volume Confirmation: RVOL ${String.format(Locale.US, "%.2fx", rvol)}")
         }
 
+        // 6. Chart Setup Pattern Bonus (10 pts)
+        if (patternDetection?.direction == FuturesDirection.LONG) {
+            bullishScore += 10
+            reasons.addAll(patternDetection.reasons.take(2))
+        } else if (patternDetection?.direction == FuturesDirection.SHORT) {
+            bearishScore += 10
+            reasons.addAll(patternDetection.reasons.take(2))
+        }
+
         // Determine Direction & Confluence
         val isLongEligible = bullishScore >= 60 && bullishScore > bearishScore + 15
         val isShortEligible = bearishScore >= 60 && bearishScore > bullishScore + 15
@@ -315,8 +340,59 @@ object BinanceFuturesScannerEngine {
 
         val direction = if (isLongEligible) FuturesDirection.LONG else FuturesDirection.SHORT
         val totalScore = if (direction == FuturesDirection.LONG) bullishScore.coerceAtMost(96) else bearishScore.coerceAtMost(96)
+        val isBullDir = direction == FuturesDirection.LONG
+
+        val rubricBreakdown = listOf(
+            ConfidenceBreakdownItem(
+                component = "HTF Trend & EMA Alignment (1H/4H)",
+                awardedPoints = if ((isBullDir && isHtfBullish) || (!isBullDir && isHtfBearish)) 25 else 0,
+                maxPoints = 25,
+                evidence = if ((isBullDir && isHtfBullish) || (!isBullDir && isHtfBearish)) {
+                    "Price aligned with 1H EMA50 (${formatPrice(ema50_1h)}) & EMA200 (${formatPrice(ema200_1h)})"
+                } else "No HTF EMA alignment"
+            ),
+            ConfidenceBreakdownItem(
+                component = "LTF Market Structure Break (CHoCH)",
+                awardedPoints = if ((isBullDir && hasBullishChoch) || (!isBullDir && hasBearishChoch)) 25 else 0,
+                maxPoints = 25,
+                evidence = if ((isBullDir && hasBullishChoch) || (!isBullDir && hasBearishChoch)) {
+                    "Confirmed ${if (isBullDir) "Bullish" else "Bearish"} CHoCH on 15M/5M"
+                } else "No CHoCH trigger"
+            ),
+            ConfidenceBreakdownItem(
+                component = "Unfilled Fair Value Gap (FVG)",
+                awardedPoints = if ((isBullDir && hasBullishFvg) || (!isBullDir && hasBearishFvg)) 15 else 0,
+                maxPoints = 15,
+                evidence = if ((isBullDir && hasBullishFvg) || (!isBullDir && hasBearishFvg)) {
+                    "Unfilled institutional FVG zone active"
+                } else "No active unfilled FVG"
+            ),
+            ConfidenceBreakdownItem(
+                component = "Momentum & RSI14 Window (35-65)",
+                awardedPoints = if (rsi15m in 35.0..65.0 && ((isBullDir && isHtfBullish) || (!isBullDir && isHtfBearish))) 15 else 0,
+                maxPoints = 15,
+                evidence = "15M RSI = ${String.format(Locale.US, "%.1f", rsi15m)}"
+            ),
+            ConfidenceBreakdownItem(
+                component = "Relative Volume Confirmation (RVOL >= 1.15x)",
+                awardedPoints = if (rvol >= 1.15 && ((isBullDir && isHtfBullish) || (!isBullDir && !isHtfBullish))) 10 else 0,
+                maxPoints = 10,
+                evidence = "15M RVOL = ${String.format(Locale.US, "%.2fx", rvol)}"
+            ),
+            ConfidenceBreakdownItem(
+                component = "Chart Setup Pattern Match",
+                awardedPoints = if (patternDetection?.direction == direction) 10 else 0,
+                maxPoints = 10,
+                evidence = patternDetection?.takeIf { it.direction == direction }?.pattern?.label ?: "No extra pattern bonus"
+            )
+        )
+        val confidenceEvidence = ConfidenceEvidence(
+            modelConfidenceScore = totalScore,
+            rubricBreakdown = rubricBreakdown
+        )
 
         val qualityRating = when {
+            totalScore >= 92 -> "Qualifying >=92% Model Confidence"
             totalScore >= 85 -> "A+ Institutional Confluence"
             totalScore >= 70 -> "High Quality Multi-Timeframe Setup"
             else -> "Moderate Confluence"
@@ -401,11 +477,51 @@ object BinanceFuturesScannerEngine {
             "15M candle body close above ${formatPrice(targetCalc.stopLoss)} (-${String.format(Locale.US, "%.2f", targetCalc.slDistancePercent)}% / ${String.format(Locale.US, "%.1f", targetCalc.slNetMarginLossPercent)}% margin) — triggers safely before est. liquidation at ${formatPrice(targetCalc.estimatedLiquidationPrice)}."
         }
 
+        // Build Pre-Entry Exit Plan (SL, S/R vs ATR basis, Partial TPs, Expiry, Stop-fill Disclaimer)
+        val srInvalidation = if (direction == FuturesDirection.LONG) nearestSupport else nearestResistance
+        val preEntryExitPlan = ExitPlannerEngine.buildPlan(
+            direction = direction,
+            entryPrice = entryPrice,
+            srInvalidationLevel = srInvalidation,
+            atr15m = atr15m,
+            targetCalc = targetCalc,
+            timeframe = CandleTimeframe.M15,
+            setupExpiryBars = 12,
+            referenceTimeMs = effectiveNowMs
+        )
+
+        // Bar-by-bar Entry Timer evaluation on COMPLETED 15M candles only (wicks never confirm breakouts)
+        val resolvedPattern = patternDetection?.pattern ?: CryptoSetupPattern.MTF_CONFLUENCE
+        val prevCompletedBar = completed15m[completed15m.lastIndex - 1]
+        val triggerLevel = if (patternDetection != null && patternDetection.direction == direction) {
+            patternDetection.breakoutLevel
+        } else {
+            if (direction == FuturesDirection.LONG) {
+                min(prevCompletedBar.close, nearestResistance)
+            } else {
+                max(prevCompletedBar.close, nearestSupport)
+            }
+        }
+        val timerResult = EntryTimerEngine.evaluateBarByBar(
+            symbol = symbol,
+            direction = direction,
+            triggerLevel = triggerLevel,
+            invalidationLevel = targetCalc.stopLoss,
+            candles = completed15m,
+            setupStartIndex = (completed15m.lastIndex - 2).coerceAtLeast(0),
+            config = EntryTimerConfig(
+                requireCandleClose = true,
+                requireVolumeConfirmation = false,
+                minRvolForConfirm = 1.25,
+                maxWaitBars = 12
+            ),
+            referenceTimeMs = effectiveNowMs
+        )
+
         // Determine Lifecycle State:
-        // If price is within entry zone and score >= 68: ENTRY_CONFIRMED
-        // Otherwise if approaching zone: WATCHLIST_SETUP
+        // Require BOTH entry zone proximity, confluence >= 68, AND EntryTimer TRIGGERED on completed candle close
         val isInsideEntryZone = currentPrice in (entryMin * 0.999)..(entryMax * 1.001)
-        val lifecycle = if (isInsideEntryZone && totalScore >= 68) {
+        val lifecycle = if (isInsideEntryZone && totalScore >= 68 && timerResult.status == EntryTimerStatus.TRIGGERED) {
             FuturesSignalLifecycle.ENTRY_CONFIRMED
         } else {
             FuturesSignalLifecycle.WATCHLIST_SETUP
@@ -434,7 +550,12 @@ object BinanceFuturesScannerEngine {
             atrVolatilityPercent = atrPct,
             fundingRatePercent = if (targetCalc.fundingDataReliable) fundingRate else null,
             maxPriceReached = currentPrice,
-            minPriceReached = currentPrice
+            minPriceReached = currentPrice,
+            detectedPattern = resolvedPattern,
+            setupDisclaimer = PatternDetectionResult.SCANNER_SETUP_DISCLAIMER,
+            entryTimer = timerResult,
+            exitPlan = preEntryExitPlan,
+            confidenceEvidence = confidenceEvidence
         )
 
         return ScanEvaluationResult(

@@ -174,11 +174,30 @@ fun NewsItemCard(
                             )
                         }
                     }
+                    // Seen Across Refreshes Pill
+                    if (news.isPreviouslySeen) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(NavySurfaceVariant)
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                .testTag("news_seen_badge_${news.id}")
+                        ) {
+                            Text(
+                                text = "SEEN",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = TextMuted,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
                 }
 
                 IconButton(
                     onClick = onToggleBookmark,
-                    modifier = Modifier.size(24.dp).testTag("bookmark_btn_${news.id}")
+                    modifier = Modifier.size(48.dp).testTag("bookmark_btn_${news.id}")
                 ) {
                     Icon(
                         imageVector = if (news.isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,

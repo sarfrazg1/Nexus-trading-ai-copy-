@@ -34,6 +34,7 @@ import com.example.data.settings.AppSettingsRepository
 import com.example.data.settings.AppThemeMode
 import com.example.data.settings.RefreshRatePreference
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -151,7 +152,23 @@ data class TradingUiState(
     // Binance USDT-M Futures Auto-Scanner State
     val futuresScannerState: com.example.data.scanner.ScannerEngineState = com.example.data.scanner.ScannerEngineState(),
     val futuresWatchlist: List<com.example.data.scanner.FuturesWatchlistPair> = emptyList(),
-    val scannerScreenMode: Int = 0
+    val scannerScreenMode: Int = 0,
+
+    // Part 2: End-to-End Trade Workflow, Risk/Budget, Paper Orders & Lifecycle Alerts
+    val tradeWorkflowState: com.example.data.broker.TradeWorkflowState = com.example.data.broker.TradeWorkflowState(),
+    val strict92ConfidenceMode: Boolean = false,
+    val alertHistory: List<com.example.data.alerts.AlertHistoryEntry> = emptyList(),
+
+    // Part 3: Complete News Fetching & 3-Language Translation
+    val isFetchingFullNewsArticle: Boolean = false,
+    val selectedNewsLanguage: com.example.data.news.NewsLanguageOption = com.example.data.news.NewsLanguageOption.ENGLISH,
+    val isTranslatingNews: Boolean = false,
+    val translatedNewsArticle: com.example.data.news.TranslatedNewsArticle? = null,
+    val newsTranslationError: String? = null,
+
+    // Part 4: NEXUS 1:5 High-Reward Opportunity Radar
+    val highRewardScanState: com.example.data.scanner.HighRewardScanState = com.example.data.scanner.HighRewardScanState(),
+    val selectedHighRewardOpportunity: com.example.data.scanner.HighRewardOpportunity? = null
 ) {
     val selectedAssetDetail: MarketAsset?
         get() = selectedAssetId?.let { id -> assets.firstOrNull { it.id == id } }
@@ -220,7 +237,19 @@ class TradingViewModel(
     private val _lastAiError = MutableStateFlow<String?>(null)
     private val _lastAiErrorState = MutableStateFlow<com.example.data.ai.NexusAiStreamResult.Error?>(null)
     private val _selectedAiProvider = MutableStateFlow(com.example.data.ai.AiProviderType.GEMINI_FIREBASE)
-    private var lastDiscussedAiAssetId: String? = null
+    private val lastDiscussedAssetByConversation = mutableMapOf<String, String>()
+    private var lastAiSentQuery: String? = null
+    private var lastAiSentTimestampMs: Long = 0L
+    private val _tradeWorkflow = MutableStateFlow(com.example.data.broker.TradeWorkflowState())
+
+    // Part 3: News Full Content + 3-Language Translation
+    private var newsTranslationService = com.example.data.news.NewsTranslationService()
+    private val _isFetchingFullNewsArticle = MutableStateFlow(false)
+    private val _selectedNewsLanguage = MutableStateFlow(com.example.data.news.NewsLanguageOption.ENGLISH)
+    private val _isTranslatingNews = MutableStateFlow(false)
+    private val _translatedNewsArticle = MutableStateFlow<com.example.data.news.TranslatedNewsArticle?>(null)
+    private val _newsTranslationError = MutableStateFlow<String?>(null)
+    private val _selectedHighRewardOpportunity = MutableStateFlow<com.example.data.scanner.HighRewardOpportunity?>(null)
 
     val uiState: StateFlow<TradingUiState> = combine(
         combine(
@@ -351,7 +380,24 @@ class TradingViewModel(
             urduFontSize = appSettingsRepo.urduFontSize.value,
             futuresScannerState = futuresScannerRepo.scannerState.value,
             futuresWatchlist = futuresScannerRepo.watchlist.value,
-            scannerScreenMode = _scannerScreenMode.value
+            scannerScreenMode = _scannerScreenMode.value,
+            tradeWorkflowState = _tradeWorkflow.value.copy(
+                budgetConfig = futuresScannerRepo.budgetConfig.value,
+                dailyRiskLedger = futuresScannerRepo.dailyRiskLedger.value,
+                paperOrders = futuresScannerRepo.paperOrders.value,
+                tradeAlertRules = futuresScannerRepo.tradeAlertRules.value,
+                alertHistory = repository.notificationManager.alertHistory.value,
+                fcmTokenAvailable = !repository.notificationManager.getFcmToken().isNullOrBlank()
+            ),
+            strict92ConfidenceMode = futuresScannerRepo.scannerState.value.strict92ConfidenceMode,
+            alertHistory = repository.notificationManager.alertHistory.value,
+            isFetchingFullNewsArticle = _isFetchingFullNewsArticle.value,
+            selectedNewsLanguage = _selectedNewsLanguage.value,
+            isTranslatingNews = _isTranslatingNews.value,
+            translatedNewsArticle = _translatedNewsArticle.value,
+            newsTranslationError = _newsTranslationError.value,
+            highRewardScanState = futuresScannerRepo.highRewardState.value,
+            selectedHighRewardOpportunity = _selectedHighRewardOpportunity.value
         )
     }.stateIn(
         scope = viewModelScope,
@@ -374,6 +420,31 @@ class TradingViewModel(
         }
         viewModelScope.launch {
             futuresScannerRepo.watchlist.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            _tradeWorkflow.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.paperOrders.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.tradeAlertRules.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            repository.notificationManager.alertHistory.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.highRewardState.collect {
                 _learningUpdate.value++
             }
         }
@@ -557,11 +628,95 @@ class TradingViewModel(
     }
 
     fun openNewsDetail(news: MarketNews) {
+        val defaultLang = when (appSettingsRepo.languageMode.value) {
+            LearningLanguageMode.STANDARD_URDU -> com.example.data.news.NewsLanguageOption.URDU_SCRIPT
+            LearningLanguageMode.ROMAN_URDU -> com.example.data.news.NewsLanguageOption.ROMAN_URDU
+            LearningLanguageMode.ENGLISH, LearningLanguageMode.BILINGUAL -> com.example.data.news.NewsLanguageOption.ENGLISH
+        }
         _selectedNewsDetail.value = news
+        _selectedNewsLanguage.value = defaultLang
+        _translatedNewsArticle.value = null
+        _newsTranslationError.value = null
+        _isFetchingFullNewsArticle.value = true
+        _learningUpdate.value++
+
+        viewModelScope.launch {
+            try {
+                val hydrated = repository.fetchFullNewsArticle(news.id)
+                    ?: repository.financialNewsService.fetchFullArticleForDetail(news)
+                if (_selectedNewsDetail.value?.id == news.id) {
+                    _selectedNewsDetail.value = hydrated
+                }
+                _isFetchingFullNewsArticle.value = false
+                _learningUpdate.value++
+                if (defaultLang != com.example.data.news.NewsLanguageOption.ENGLISH) {
+                    translateCurrentNewsDetail(hydrated, defaultLang, forceRetry = false)
+                }
+            } catch (_: Exception) {
+                _isFetchingFullNewsArticle.value = false
+                _learningUpdate.value++
+            }
+        }
     }
 
     fun closeNewsDetail() {
         _selectedNewsDetail.value = null
+        _isFetchingFullNewsArticle.value = false
+        _isTranslatingNews.value = false
+        _translatedNewsArticle.value = null
+        _newsTranslationError.value = null
+        _learningUpdate.value++
+    }
+
+    fun selectNewsLanguage(language: com.example.data.news.NewsLanguageOption) {
+        _selectedNewsLanguage.value = language
+        _newsTranslationError.value = null
+        if (language == com.example.data.news.NewsLanguageOption.ENGLISH) {
+            _translatedNewsArticle.value = null
+            _isTranslatingNews.value = false
+            _learningUpdate.value++
+            return
+        }
+        val news = _selectedNewsDetail.value ?: return
+        viewModelScope.launch {
+            translateCurrentNewsDetail(news, language, forceRetry = false)
+        }
+    }
+
+    fun retryNewsTranslation() {
+        val news = _selectedNewsDetail.value ?: return
+        val lang = _selectedNewsLanguage.value
+        if (lang == com.example.data.news.NewsLanguageOption.ENGLISH) return
+        viewModelScope.launch {
+            translateCurrentNewsDetail(news, lang, forceRetry = true)
+        }
+    }
+
+    private suspend fun translateCurrentNewsDetail(
+        news: MarketNews,
+        language: com.example.data.news.NewsLanguageOption,
+        forceRetry: Boolean
+    ) {
+        _isTranslatingNews.value = true
+        _newsTranslationError.value = null
+        _learningUpdate.value++
+        try {
+            val result = newsTranslationService.translateArticle(
+                news = news,
+                targetLanguage = language,
+                preferredProvider = _selectedAiProvider.value,
+                forceRetry = forceRetry
+            )
+            if (_selectedNewsDetail.value?.id == news.id && _selectedNewsLanguage.value == language) {
+                _translatedNewsArticle.value = result
+                _newsTranslationError.value = result.errorNote
+            }
+        } catch (e: Exception) {
+            _newsTranslationError.value = e.message ?: "Translation failed"
+        } finally {
+            _isTranslatingNews.value = false
+            _learningUpdate.value++
+        }
     }
 
     fun openAddAlertDialog(defaultSymbol: String = "BTC/USDT") {
@@ -598,6 +753,11 @@ class TradingViewModel(
 
     fun toggleNewsBookmark(newsId: String) {
         repository.toggleNewsBookmark(newsId)
+        _selectedNewsDetail.value?.let { current ->
+            if (current.id == newsId) {
+                _selectedNewsDetail.value = current.copy(isSaved = !current.isSaved)
+            }
+        }
     }
 
     fun toggleFavorite(assetId: String) {
@@ -625,8 +785,84 @@ class TradingViewModel(
     }
 
     fun refreshScanner(timeframe: CandleTimeframe = _scannerTimeframe.value) {
-        viewModelScope.launch {
-            repository.refreshScanner(timeframe)
+        if (_scannerScreenMode.value == 0) {
+            refreshFuturesScannerOnDemand()
+        } else {
+            viewModelScope.launch {
+                repository.refreshScanner(timeframe)
+            }
+        }
+    }
+
+    fun refreshFuturesScannerOnDemand() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val pairs = futuresScannerRepo.getSelectedPairs()
+            if (pairs.isEmpty()) {
+                futuresScannerRepo.updateScannerStatus(
+                    status = com.example.data.scanner.ScannerStatus.PAUSED,
+                    errorMessage = "No pairs selected in Watchlist. Select at least 1 coin to scan."
+                )
+                return@launch
+            }
+            futuresScannerRepo.updateScannerStatus(com.example.data.scanner.ScannerStatus.SCANNING)
+            var scannedCount = 0
+            for (pair in pairs) {
+                try {
+                    futuresScannerRepo.updateScannerStatus(
+                        status = com.example.data.scanner.ScannerStatus.SCANNING,
+                        currentlyScanning = pair.symbol
+                    )
+                    val c15m = repository.futuresApiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.M15, limit = 50)
+                    val c1h = repository.futuresApiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H1, limit = 50)
+                    val c4h = repository.futuresApiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H4, limit = 30)
+                    val c5m = repository.futuresApiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.M5, limit = 30)
+                    val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m)
+                    val currentPrice = pair.currentPrice.takeIf { it > 0.0 }
+                        ?: completed15m.lastOrNull()?.close
+                        ?: 0.0
+                    if (currentPrice > 0.0) {
+                        val funding = repository.futuresApiClient.fetchFundingRate(pair.symbol)
+                        val result = com.example.data.scanner.BinanceFuturesScannerEngine.evaluatePair(
+                            symbol = pair.symbol,
+                            baseAsset = pair.baseAsset,
+                            currentPrice = currentPrice,
+                            candles4h = c4h,
+                            candles1h = c1h,
+                            candles15m = c15m,
+                            candles5m = c5m,
+                            fundingRate = funding
+                        )
+                        result.signal?.let { futuresScannerRepo.onSignalEvaluated(it) }
+
+                        val playHrSound = appSettingsRepo.soundEffectsEnabled.value || futuresScannerRepo.scannerState.value.soundAlertsEnabled
+                        val hrResult = com.example.data.scanner.HighRewardOpportunityDetector.scanPair(
+                            symbol = pair.symbol,
+                            baseAsset = pair.baseAsset,
+                            currentPrice = currentPrice,
+                            candles4h = c4h,
+                            candles1h = c1h,
+                            candles15m = c15m,
+                            candles5m = c5m,
+                            fundingRatePercent = funding,
+                            budgetConfig = futuresScannerRepo.budgetConfig.value
+                        )
+                        futuresScannerRepo.onHighRewardScanEvaluated(
+                            symbol = pair.symbol,
+                            result = hrResult,
+                            playSound = playHrSound,
+                            source = "On-Demand 1:5 Radar"
+                        )
+                        scannedCount++
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            futuresScannerRepo.updateScannerStatus(
+                status = com.example.data.scanner.ScannerStatus.IDLE,
+                currentlyScanning = null
+            )
+            val hrCount = futuresScannerRepo.highRewardState.value.activeOpportunities.size
+            _userMessage.value = "Futures scan completed ($scannedCount pairs | $hrCount active >=1:4/1:5 setups)"
         }
     }
 
@@ -679,9 +915,17 @@ class TradingViewModel(
 
     fun bindLearningContext(context: Context) {
         val appContext = context.applicationContext ?: context
+        repository.notificationManager.bindContext(appContext)
+        futuresScannerRepo.bindContext(appContext)
+        com.example.data.alerts.BackgroundAlertWorker.schedulePeriodicMonitoring(appContext)
         learningPrefsRepo.bindContext(appContext)
         appSettingsRepo.bindContext(appContext)
+        com.example.data.remote.NexusFirebaseMessagingService.syncTopicSubscriptions(
+            context = appContext,
+            enabled = appSettingsRepo.alertNotificationsEnabled.value
+        )
         nexusAiRepo = com.example.data.ai.NexusAiRepository(appContext)
+        newsTranslationService = com.example.data.news.NewsTranslationService(appContext)
         _aiConversations.value = nexusAiRepo.loadConversations()
         val activeId = _aiConversations.value.firstOrNull()?.id ?: "default_session"
         _currentAiConversationId.value = activeId
@@ -702,9 +946,14 @@ class TradingViewModel(
     // ==========================================
 
     fun sendAiMessage(query: String) {
-        if (query.isBlank() || _isAiLoading.value) return
-        val currentId = _currentAiConversationId.value
         val trimmedQuery = query.trim()
+        if (trimmedQuery.isBlank() || _isAiLoading.value) return
+        val nowMs = System.currentTimeMillis()
+        if (trimmedQuery == lastAiSentQuery && (nowMs - lastAiSentTimestampMs) < 2_000L) return
+        lastAiSentQuery = trimmedQuery
+        lastAiSentTimestampMs = nowMs
+
+        val currentId = _currentAiConversationId.value
         val userMsg = com.example.data.ai.NexusChatMessage(
             conversationId = currentId,
             sender = com.example.data.ai.MessageSender.USER,
@@ -834,14 +1083,14 @@ class TradingViewModel(
                 marketRefreshJob?.await()
                 newsRefreshJob?.await()
 
-                // 2. Resolve target asset from user query, prior conversation memory, or active screen
+                // 2. Resolve target asset(s) from user query, per-conversation memory, or active screen
                 val allAssets = repository.assets.value
-                val mentionedId = com.example.data.ai.MarketContextBuilder.detectMentionedAssetId(query, allAssets)
-                val targetAssetId = mentionedId
-                    ?: lastDiscussedAiAssetId
+                val mentionedAssets = com.example.data.ai.MarketContextBuilder.detectMentionedAssets(query, allAssets)
+                val targetAssetId = mentionedAssets.firstOrNull()
+                    ?: lastDiscussedAssetByConversation[conversationId]
                     ?: _selectedAssetId.value
                     ?: _analysisAssetSymbol.value
-                lastDiscussedAiAssetId = targetAssetId
+                lastDiscussedAssetByConversation[conversationId] = targetAssetId
 
                 val activeAsset = allAssets.firstOrNull { it.id.equals(targetAssetId, ignoreCase = true) }
                     ?: allAssets.firstOrNull { it.id.equals("BTC", ignoreCase = true) }
@@ -850,6 +1099,8 @@ class TradingViewModel(
                 val resolvedSymbol = activeAsset?.id ?: "BTC"
                 val resolvedName = activeAsset?.name ?: resolvedSymbol
                 val tf = _analysisTimeframe.value
+
+                val secondaryAssetId = mentionedAssets.firstOrNull { !it.equals(resolvedSymbol, ignoreCase = true) }
 
                 // 3. Gather fresh candles, technical indicators, SMC, and Binance Futures derivatives in parallel
                 val useExistingAnalysis = resolvedSymbol.equals(_analysisAssetSymbol.value, ignoreCase = true) &&
@@ -881,6 +1132,12 @@ class TradingViewModel(
                         } catch (_: Exception) {
                             null
                         }
+                    }
+                }
+
+                val secondaryAssetDeferred = secondaryAssetId?.let { secId ->
+                    async {
+                        buildSecondaryComparisonSummary(secId, allAssets, tf)
                     }
                 }
 
@@ -919,6 +1176,8 @@ class TradingViewModel(
                 } ?: futuresScannerRepo.scannerState.value.activeSignals.firstOrNull()
 
                 val derivativesSnapshot = derivativesDeferred.await()
+                val comparisonSummary = secondaryAssetDeferred?.await()
+                val workflowSummary = buildWorkflowContextSummary()
 
                 val contextSnapshot = com.example.data.ai.MarketContextBuilder.buildSnapshot(
                     asset = activeAsset,
@@ -938,7 +1197,9 @@ class TradingViewModel(
                     derivatives = derivativesSnapshot,
                     isLiveNewsFeed = repository.financialNewsService.lastFetchWasLive,
                     newsLastFetchedFormatted = repository.financialNewsService.lastFetchTimeFormatted,
-                    hybridState = repository.hybridMarketState.value
+                    hybridState = repository.hybridMarketState.value,
+                    comparisonAssetSummary = comparisonSummary,
+                    workflowContextSummary = workflowSummary
                 )
 
                 var finalizedList = baseList
@@ -995,13 +1256,126 @@ class TradingViewModel(
         }
     }
 
+    private suspend fun buildSecondaryComparisonSummary(
+        secondaryAssetId: String,
+        allAssets: List<MarketAsset>,
+        timeframe: CandleTimeframe
+    ): String? {
+        val asset = allAssets.firstOrNull { it.id.equals(secondaryAssetId, ignoreCase = true) } ?: return null
+        val candles = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+            try {
+                repository.getCandles(asset.id, timeframe, 100)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } ?: emptyList()
+
+        val ta = if (candles.size >= 15) {
+            com.example.data.indicators.TechnicalIndicatorsEngine.analyze(asset.id, asset.name, timeframe, candles)
+        } else null
+        val deriv = kotlinx.coroutines.withTimeoutOrNull(3_000L) {
+            try {
+                repository.fetchDerivativesForAsset(asset.id)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        val priceStr = asset.currentPrice?.let { "$${String.format(java.util.Locale.US, "%.2f", it)}" } ?: "UNAVAILABLE"
+        val chgStr = asset.change24hPercent?.let { String.format(java.util.Locale.US, "%+.2f%%", it) } ?: "N/A"
+        val rsiStr = ta?.momentum?.rsi14?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "Unavailable"
+        val ema20 = ta?.trend?.emaSet?.ema20
+        val ema50 = ta?.trend?.emaSet?.ema50
+        val emaTrend = if (ema20 != null && ema50 != null) {
+            if (ema20 > ema50) "Bullish (EMA20 > EMA50)" else "Bearish (EMA20 < EMA50)"
+        } else "Unavailable"
+        val fundingStr = deriv?.fundingRatePercent?.let { String.format(java.util.Locale.US, "%+.4f%%", it) } ?: "Unavailable"
+
+        return "${asset.name} (${asset.symbol}) | Price: $priceStr (24h: $chgStr) | Status: ${asset.dataStatus.label} | ${timeframe.label} RSI(14): $rsiStr | EMA Trend: $emaTrend | Funding: $fundingStr"
+    }
+
+    private fun buildWorkflowContextSummary(): String {
+        val budgetCfg = futuresScannerRepo.budgetConfig.value
+        val ledger = futuresScannerRepo.dailyRiskLedger.value
+        val paperOrders = futuresScannerRepo.paperOrders.value
+        val alertRules = futuresScannerRepo.tradeAlertRules.value
+        val wf = _tradeWorkflow.value
+
+        return buildString {
+            appendLine(
+                "Budget Config: Balance=${String.format(java.util.Locale.US, "%.2f", budgetCfg.accountBalanceUsdt)} USDT | " +
+                    "Max Risk/Trade=${String.format(java.util.Locale.US, "%.2f", budgetCfg.maxRiskPerTradeAmount)} ${budgetCfg.riskCurrency.label} " +
+                    "(Cap ${String.format(java.util.Locale.US, "%.1f%%", budgetCfg.maxRiskPercent)}) | " +
+                    "Leverage Limit=${budgetCfg.leverageLimit}x | Min R:R=${String.format(java.util.Locale.US, "%.2f", budgetCfg.minRiskRewardRatio)} | " +
+                    "Fee=${budgetCfg.feeRatePercentPerSide}%/side | Slippage=${budgetCfg.slippagePercentPerSide}%/side"
+            )
+            appendLine(
+                "Daily Risk Ledger (${ledger.dateKeyPkt} PKT): Trades Today=${ledger.tradesTakenToday}/${budgetCfg.maxTradesPerDay} | " +
+                    "Realized PnL=${String.format(java.util.Locale.US, "%+.2f", ledger.realizedPnlUsdtToday)} USDT | " +
+                    "Open Paper Orders=${paperOrders.size} | Active Lifecycle Alert Rules=${alertRules.count { it.isActive }} | Execution Mode=Paper Safe Mode"
+            )
+            wf.selectedSignal?.let { sig ->
+                appendLine("Selected Workflow Setup: ${sig.symbol} ${sig.direction.name} (${sig.detectedPattern.label}) | Entry=${sig.entryZoneFormatted} | SL=${sig.stopLossFormatted} | TP2=${sig.tp2Formatted}")
+            }
+            wf.budgetPlan?.let { bp ->
+                if (bp.isValid) {
+                    appendLine(
+                        "Calculated Size: Qty=${bp.positionQuantityFormatted} | Notional=$${String.format(java.util.Locale.US, "%.2f", bp.notionalValueUsdt)} | " +
+                            "Est. Margin=$${String.format(java.util.Locale.US, "%.2f", bp.estimatedMarginUsdt)} | " +
+                            "Max Planned Loss=$${String.format(java.util.Locale.US, "%.2f", bp.maximumPlannedLossUsdt)} | " +
+                            "Est. Liquidation=${String.format(java.util.Locale.US, "%.2f", bp.estimatedLiquidationPrice)} (${String.format(java.util.Locale.US, "%.1f%%", bp.liquidationDistancePercent)} away)"
+                    )
+                }
+            }
+            wf.riskAssessment?.let { risk ->
+                val blockers = risk.blockedReasons.joinToString("; ").ifBlank { "None" }
+                appendLine("Risk Guard Decision: ${risk.overallDecision.label} | Can Proceed=${risk.canProceedToOrder} | Blockers: $blockers")
+            }
+            wf.backtestResult?.let { bt ->
+                appendLine(
+                    "Time Machine Backtest (${bt.symbol} ${bt.timeframe.label}, ${bt.testPeriodStartPkt} -> ${bt.testPeriodEndPkt}): " +
+                        "Samples=${bt.sampleSize}, TP-First=${bt.tpFirstCount}, SL-First=${bt.slFirstCount}, Ambiguous=${bt.ambiguousSameCandleCount}, Unresolved=${bt.unresolvedCount} | " +
+                        "${bt.winRateSummaryFormatted} | Avg R:R=${String.format(java.util.Locale.US, "%.2f", bt.averageRewardRisk)}"
+                )
+            }
+            wf.monteCarloResult?.let { mc ->
+                if (mc.isSufficientData) {
+                    appendLine(
+                        "Monte Carlo (${mc.iterations} runs, Seed=${mc.seed}, Horizon=${mc.simulationHorizonBars} bars): " +
+                            "TP-First=${String.format(java.util.Locale.US, "%.1f%%", mc.tpFirstPercent)} | " +
+                            "SL-First=${String.format(java.util.Locale.US, "%.1f%%", mc.slFirstPercent)} | " +
+                            "Unresolved=${String.format(java.util.Locale.US, "%.1f%%", mc.neitherReachedPercent)} " +
+                            "(Historical bootstrap simulation ONLY — NOT a guaranteed win rate)"
+                    )
+                } else {
+                    appendLine("Monte Carlo: Insufficient historical data (${mc.insufficientDataReason ?: "need more completed candles/setups"}). Never fabricated.")
+                }
+            }
+        }.trim()
+    }
+
     private fun updateConversationTitleIfDefault(conversationId: String, firstQuery: String) {
         val currentConvs = _aiConversations.value
         val target = currentConvs.firstOrNull { it.id == conversationId } ?: return
+        val currentLang = appSettingsRepo.languageMode.value
         if (target.title == "Market Analysis" || target.title.startsWith("Analysis ")) {
             val newTitle = firstQuery.take(32).let { if (firstQuery.length > 32) "$it…" else it }
             val updated = currentConvs.map {
-                if (it.id == conversationId) it.copy(title = newTitle, lastActiveAt = System.currentTimeMillis()) else it
+                if (it.id == conversationId) {
+                    it.copy(title = newTitle, lastActiveAt = System.currentTimeMillis(), languageMode = currentLang)
+                } else it
+            }
+            _aiConversations.value = updated
+            nexusAiRepo.saveConversations(updated)
+        } else {
+            val updated = currentConvs.map {
+                if (it.id == conversationId) {
+                    it.copy(lastActiveAt = System.currentTimeMillis(), languageMode = currentLang)
+                } else it
             }
             _aiConversations.value = updated
             nexusAiRepo.saveConversations(updated)
@@ -1012,7 +1386,8 @@ class TradingViewModel(
         val newId = "chat_" + System.currentTimeMillis()
         val newConv = com.example.data.ai.NexusConversation(
             id = newId,
-            title = "Analysis ${java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(java.util.Date())}"
+            title = "Analysis ${com.example.util.TimeZoneUtils.formatKarachiCompact(System.currentTimeMillis())}",
+            languageMode = appSettingsRepo.languageMode.value
         )
         val updatedConvs = listOf(newConv) + _aiConversations.value
         _aiConversations.value = updatedConvs
@@ -1020,7 +1395,7 @@ class TradingViewModel(
         _aiMessages.value = emptyList()
         _lastAiError.value = null
         _lastAiErrorState.value = null
-        lastDiscussedAiAssetId = null
+        lastDiscussedAssetByConversation.remove(newId)
         nexusAiRepo.saveConversations(updatedConvs)
     }
 
@@ -1029,20 +1404,29 @@ class TradingViewModel(
         _aiMessages.value = emptyList()
         _lastAiError.value = null
         _lastAiErrorState.value = null
-        lastDiscussedAiAssetId = null
+        lastDiscussedAssetByConversation.remove(currentId)
         nexusAiRepo.saveMessages(currentId, emptyList())
         _userMessage.value = "Chat conversation cleared"
     }
 
     fun deleteAiConversation(id: String) {
         val updated = _aiConversations.value.filter { it.id != id }
-        val finalConvs = if (updated.isEmpty()) listOf(com.example.data.ai.NexusConversation(id = "default_session", title = "Market Analysis")) else updated
+        val finalConvs = if (updated.isEmpty()) {
+            listOf(
+                com.example.data.ai.NexusConversation(
+                    id = "default_session",
+                    title = "Market Analysis",
+                    languageMode = appSettingsRepo.languageMode.value
+                )
+            )
+        } else updated
+        lastDiscussedAssetByConversation.remove(id)
         _aiConversations.value = finalConvs
         nexusAiRepo.saveConversations(finalConvs)
         nexusAiRepo.saveMessages(id, emptyList())
-        val nextId = finalConvs.first().id
-        _currentAiConversationId.value = nextId
-        _aiMessages.value = nexusAiRepo.loadMessages(nextId)
+        val nextConv = finalConvs.first()
+        _currentAiConversationId.value = nextConv.id
+        _aiMessages.value = nexusAiRepo.loadMessages(nextConv.id)
         _lastAiError.value = null
         _lastAiErrorState.value = null
     }
@@ -1052,6 +1436,11 @@ class TradingViewModel(
         _aiMessages.value = nexusAiRepo.loadMessages(id)
         _lastAiError.value = null
         _lastAiErrorState.value = null
+        _aiConversations.value.firstOrNull { it.id == id }?.let { conv ->
+            if (conv.languageMode != appSettingsRepo.languageMode.value) {
+                setAppLanguageMode(conv.languageMode)
+            }
+        }
     }
 
     fun attachCurrentMarketToAi() {
@@ -1107,6 +1496,7 @@ class TradingViewModel(
 
     fun setAlertNotificationsEnabled(enabled: Boolean) {
         appSettingsRepo.setAlertNotificationsEnabled(enabled)
+        com.example.data.remote.NexusFirebaseMessagingService.syncTopicSubscriptions(enabled = enabled)
         _learningUpdate.value++
     }
 
@@ -1123,6 +1513,7 @@ class TradingViewModel(
 
     fun clearTemporaryCache() {
         val repoPurged = repository.clearCache()
+        newsTranslationService.clearCache()
         appSettingsRepo.clearTemporaryCache()
         _learningUpdate.value++
         _userMessage.value = "Cache cleared: $repoPurged buffers freed"
@@ -1233,13 +1624,367 @@ class TradingViewModel(
     }
 
     fun explainFuturesSignalWithAi(signal: com.example.data.scanner.FuturesScanSignal) {
-        val query = "Please analyze and explain the current Binance USDT-M Futures signal for ${signal.symbol} ${signal.direction.name}. Quality score is ${signal.qualityScore}% (${signal.qualityRating}). Break down the 4H, 1H, 15M, and 5M timeframe confluences, entry zones, risk parameters, and invalidation rules."
+        val timerNote = signal.entryTimer?.let { "${it.status.label} (${it.statusExplanation})" } ?: signal.lifecycle.label
+        val query = "Please explain the ${signal.symbol} ${signal.direction.name} potential setup (${signal.detectedPattern.label}). Quality score is ${signal.qualityScore}/100 (${signal.qualityRating}). Entry Timer status is $timerNote. Break down 4H/1H/15M confluences, the Pre-Entry Exit Plan (SL ${signal.stopLossFormatted}, TP1 ${signal.tp1Formatted}, TP2 ${signal.tp2Formatted}, TP3 ${signal.tp3Formatted}), invalidation rules, and risks."
         selectTab(NavigationTab.NEXUS_AI)
         sendAiMessage(query)
     }
 
     fun simulateFuturesPaperTrade(signal: com.example.data.scanner.FuturesScanSignal) {
-        _userMessage.value = "Paper trade tracked: ${signal.symbol} ${signal.direction.name} @ ${signal.entryZoneFormatted} (TP2: ${signal.tp2Formatted}, SL: ${signal.stopLossFormatted})"
+        openTradeWorkflow(signal)
+    }
+
+    fun setStrict92ConfidenceMode(enabled: Boolean) {
+        futuresScannerRepo.setStrict92ConfidenceMode(enabled)
+        _userMessage.value = if (enabled) {
+            "Strict >=92% Model Confidence Filter Enabled"
+        } else {
+            "Standard Multi-Timeframe Confluence Filter Restored"
+        }
+        _learningUpdate.value++
+    }
+
+    fun openTradeWorkflow(signal: com.example.data.scanner.FuturesScanSignal) {
+        val newsMatches = repository.news.value.filter { n ->
+            n.affectedAssets.any { it.equals(signal.baseAsset, ignoreCase = true) || it.equals(signal.symbol, ignoreCase = true) } ||
+                n.impactLevel == com.example.data.model.NewsImpactLevel.HIGH ||
+                n.title.contains(signal.baseAsset, ignoreCase = true)
+        }
+        val budgetCfg = futuresScannerRepo.budgetConfig.value
+        val budgetPlan = com.example.data.risk.BudgetManagerEngine.calculatePlanForSignal(
+            signal = signal,
+            budgetConfig = budgetCfg
+        )
+        val riskAssessment = com.example.data.risk.RiskManagerEngine.evaluate(
+            signal = signal,
+            budgetConfig = budgetCfg,
+            budgetPlan = budgetPlan,
+            requestedLeverage = signal.suggestedLeverage,
+            dailyLedger = futuresScannerRepo.dailyRiskLedger.value
+        )
+        val ticket = com.example.data.broker.PaperOrderBrokerEngine.buildProposedTicket(
+            signal = signal,
+            budgetPlan = budgetPlan,
+            mode = _tradeWorkflow.value.executionMode
+        )
+
+        _tradeWorkflow.value = _tradeWorkflow.value.copy(
+            isVisible = true,
+            selectedSignal = signal,
+            relatedNews = newsMatches,
+            isLoadingHistory = true,
+            historyLoadError = null,
+            backtestResult = null,
+            monteCarloResult = null,
+            budgetConfig = budgetCfg,
+            budgetPlan = budgetPlan,
+            riskAssessment = riskAssessment,
+            proposedTicket = ticket,
+            userExplicitlyConfirmed = false,
+            submissionOutcome = null
+        )
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val candles = repository.futuresApiClient.fetchFuturesCandles(
+                    symbol = signal.symbol,
+                    timeframe = signal.primaryTimeframe,
+                    limit = 400
+                )
+                runTimeMachineForWorkflow(
+                    signal = signal,
+                    candles = candles,
+                    btConfig = _tradeWorkflow.value.backtestConfig,
+                    seed = _tradeWorkflow.value.monteCarloSeed
+                )
+            } catch (e: Exception) {
+                _tradeWorkflow.value = _tradeWorkflow.value.copy(
+                    isLoadingHistory = false,
+                    historyLoadError = "Could not fetch Binance OHLCV history: ${e.message ?: "Network unavailable"}"
+                )
+            }
+        }
+    }
+
+    fun openHighRewardDetail(opportunity: com.example.data.scanner.HighRewardOpportunity) {
+        _selectedHighRewardOpportunity.value = opportunity
+        _learningUpdate.value++
+    }
+
+    fun closeHighRewardDetail() {
+        _selectedHighRewardOpportunity.value = null
+        _learningUpdate.value++
+    }
+
+    fun scanHighRewardOpportunitiesNow() {
+        refreshFuturesScannerOnDemand()
+    }
+
+    fun openTradeWorkflowBySymbol(symbol: String, signalId: String? = null, alertTypeName: String? = null) {
+        _currentTab.value = NavigationTab.SCANNER
+        _scannerScreenMode.value = 0
+        val isHighRewardDeepLink = alertTypeName == com.example.data.model.AlertType.OPPORTUNITY_1_TO_5.name ||
+            alertTypeName == com.example.data.model.AlertType.OPPORTUNITY_1_TO_4.name ||
+            signalId?.startsWith("hr_") == true
+
+        val hrMatch = futuresScannerRepo.highRewardState.value.activeOpportunities.firstOrNull {
+            (!signalId.isNullOrBlank() && it.id == signalId) || it.symbol.equals(symbol, ignoreCase = true)
+        }
+        if (hrMatch != null && isHighRewardDeepLink) {
+            openHighRewardDetail(hrMatch)
+            return
+        }
+        if (isHighRewardDeepLink) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val normSym = symbol.uppercase().let { if (it.endsWith("USDT")) it else "${it}USDT" }
+                    val base = normSym.removeSuffix("USDT")
+                    val c15m = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.M15, limit = 50)
+                    val c1h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H1, limit = 50)
+                    val c4h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H4, limit = 30)
+                    val c5m = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.M5, limit = 30)
+                    val price = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m).lastOrNull()?.close ?: 0.0
+                    if (price > 0.0) {
+                        val funding = repository.futuresApiClient.fetchFundingRate(normSym)
+                        val hrResult = com.example.data.scanner.HighRewardOpportunityDetector.scanPair(
+                            symbol = normSym,
+                            baseAsset = base,
+                            currentPrice = price,
+                            candles4h = c4h,
+                            candles1h = c1h,
+                            candles15m = c15m,
+                            candles5m = c5m,
+                            fundingRatePercent = funding,
+                            budgetConfig = futuresScannerRepo.budgetConfig.value
+                        )
+                        futuresScannerRepo.onHighRewardScanEvaluated(
+                            symbol = normSym,
+                            result = hrResult,
+                            playSound = false,
+                            source = "Deep-Link Re-Validation"
+                        )
+                        val liveOpp = hrResult.qualifiedOpportunities.firstOrNull()
+                        if (liveOpp != null) {
+                            openHighRewardDetail(liveOpp)
+                        } else {
+                            _userMessage.value = hrResult.bestDiagnostic.reason
+                        }
+                    }
+                } catch (_: Exception) {
+                    _userMessage.value = "Opened 1:5 Radar for $symbol"
+                }
+            }
+            return
+        }
+        val state = futuresScannerRepo.scannerState.value
+        val allSignals = state.activeSignals + state.watchlistSetups + state.signalHistory
+        val match = (if (!signalId.isNullOrBlank()) allSignals.firstOrNull { it.id == signalId } else null)
+            ?: allSignals.firstOrNull { it.symbol.equals(symbol, ignoreCase = true) }
+
+        if (match != null) {
+            openTradeWorkflow(match)
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val normSym = symbol.uppercase().let { if (it.endsWith("USDT")) it else "${it}USDT" }
+                    val base = normSym.removeSuffix("USDT")
+                    val c15m = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.M15, limit = 60)
+                    val c1h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H1, limit = 60)
+                    val c4h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H4, limit = 30)
+                    val c5m = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.M5, limit = 30)
+                    val price = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m).lastOrNull()?.close ?: 0.0
+                    if (price > 0.0) {
+                        val eval = com.example.data.scanner.BinanceFuturesScannerEngine.evaluatePair(
+                            symbol = normSym,
+                            baseAsset = base,
+                            currentPrice = price,
+                            candles4h = c4h,
+                            candles1h = c1h,
+                            candles15m = c15m,
+                            candles5m = c5m
+                        )
+                        val sig = eval.signal
+                        if (sig != null) {
+                            futuresScannerRepo.onSignalEvaluated(sig)
+                            openTradeWorkflow(sig)
+                        } else {
+                            _userMessage.value = eval.noTradeReason ?: "No qualifying setup currently active on $normSym"
+                        }
+                    }
+                } catch (_: Exception) {
+                    _userMessage.value = "Opened Scanner for $symbol"
+                }
+            }
+        }
+    }
+
+    fun closeTradeWorkflow() {
+        _tradeWorkflow.value = _tradeWorkflow.value.copy(isVisible = false)
+    }
+
+    fun updateWorkflowBudgetConfig(newConfig: com.example.data.risk.BudgetConfig) {
+        futuresScannerRepo.updateBudgetConfig(newConfig)
+        val signal = _tradeWorkflow.value.selectedSignal ?: return
+        val budgetPlan = com.example.data.risk.BudgetManagerEngine.calculatePlanForSignal(
+            signal = signal,
+            budgetConfig = newConfig
+        )
+        val riskAssessment = com.example.data.risk.RiskManagerEngine.evaluate(
+            signal = signal,
+            budgetConfig = newConfig,
+            budgetPlan = budgetPlan,
+            requestedLeverage = signal.suggestedLeverage,
+            dailyLedger = futuresScannerRepo.dailyRiskLedger.value
+        )
+        val ticket = com.example.data.broker.PaperOrderBrokerEngine.buildProposedTicket(
+            signal = signal,
+            budgetPlan = budgetPlan,
+            mode = _tradeWorkflow.value.executionMode
+        )
+        _tradeWorkflow.value = _tradeWorkflow.value.copy(
+            budgetConfig = newConfig,
+            budgetPlan = budgetPlan,
+            riskAssessment = riskAssessment,
+            proposedTicket = ticket,
+            submissionOutcome = null
+        )
+    }
+
+    fun rerunWorkflowTimeMachine(feePctPerSide: Double, slippagePctPerSide: Double, seed: Long) {
+        val signal = _tradeWorkflow.value.selectedSignal ?: return
+        val newBtConfig = _tradeWorkflow.value.backtestConfig.copy(
+            feePercentPerSide = feePctPerSide,
+            slippagePercentPerSide = slippagePctPerSide
+        )
+        _tradeWorkflow.value = _tradeWorkflow.value.copy(
+            backtestConfig = newBtConfig,
+            monteCarloSeed = seed,
+            isLoadingHistory = true,
+            historyLoadError = null
+        )
+
+        val cachedCandles = _tradeWorkflow.value.historicalCandles
+        if (cachedCandles.isNotEmpty()) {
+            runTimeMachineForWorkflow(signal, cachedCandles, newBtConfig, seed)
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val candles = repository.futuresApiClient.fetchFuturesCandles(
+                        symbol = signal.symbol,
+                        timeframe = signal.primaryTimeframe,
+                        limit = 400
+                    )
+                    runTimeMachineForWorkflow(signal, candles, newBtConfig, seed)
+                } catch (e: Exception) {
+                    _tradeWorkflow.value = _tradeWorkflow.value.copy(
+                        isLoadingHistory = false,
+                        historyLoadError = "Could not fetch historical OHLCV data: ${e.message ?: "Network error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun runTimeMachineForWorkflow(
+        signal: com.example.data.scanner.FuturesScanSignal,
+        candles: List<Candle>,
+        btConfig: com.example.data.timemachine.BacktestConfig,
+        seed: Long
+    ) {
+        val btResult = com.example.data.timemachine.TimeMachineEngine.runBacktestForSignal(
+            signal = signal,
+            candles = candles,
+            config = btConfig
+        )
+        val mcResult = com.example.data.timemachine.TimeMachineEngine.runMonteCarlo10000(
+            symbol = signal.symbol,
+            timeframe = signal.primaryTimeframe,
+            direction = signal.direction,
+            slDistancePercent = signal.slDistancePercent.coerceAtLeast(0.25),
+            tpDistancePercent = signal.tp2DistancePercent.coerceAtLeast(0.4),
+            candles = candles,
+            backtestResult = btResult,
+            mcConfig = com.example.data.timemachine.MonteCarloConfig(seed = seed),
+            backtestConfig = btConfig
+        )
+
+        val updatedEvidence = signal.confidenceEvidence?.copy(
+            empiricalHistoricalWinRatePercent = if (btResult.sampleSize > 0) btResult.empiricalWinRateConservativePercent else null,
+            historicalSampleSize = btResult.sampleSize
+        )
+        val enrichedSignal = signal.copy(confidenceEvidence = updatedEvidence ?: signal.confidenceEvidence)
+
+        _tradeWorkflow.value = _tradeWorkflow.value.copy(
+            selectedSignal = enrichedSignal,
+            historicalCandles = candles,
+            isLoadingHistory = false,
+            historyLoadError = if (candles.isEmpty()) "No completed historical OHLCV candles returned for ${signal.symbol}." else null,
+            backtestResult = btResult,
+            monteCarloResult = mcResult
+        )
+    }
+
+    fun setWorkflowExecutionMode(mode: com.example.data.broker.ExecutionMode) {
+        val signal = _tradeWorkflow.value.selectedSignal ?: return
+        val budgetPlan = _tradeWorkflow.value.budgetPlan ?: return
+        val ticket = com.example.data.broker.PaperOrderBrokerEngine.buildProposedTicket(
+            signal = signal,
+            budgetPlan = budgetPlan,
+            mode = mode
+        )
+        _tradeWorkflow.value = _tradeWorkflow.value.copy(
+            executionMode = mode,
+            proposedTicket = ticket,
+            submissionOutcome = null
+        )
+    }
+
+    fun setWorkflowExplicitConfirmation(confirmed: Boolean) {
+        _tradeWorkflow.value = _tradeWorkflow.value.copy(
+            userExplicitlyConfirmed = confirmed,
+            submissionOutcome = null
+        )
+    }
+
+    fun submitWorkflowPaperOrder() {
+        val wf = _tradeWorkflow.value
+        val signal = wf.selectedSignal ?: return
+        val ticket = wf.proposedTicket ?: return
+        val risk = wf.riskAssessment ?: return
+
+        val outcome = com.example.data.broker.PaperOrderBrokerEngine.submitOrder(
+            ticket = ticket,
+            riskAssessment = risk,
+            userExplicitlyConfirmed = wf.userExplicitlyConfirmed,
+            hasSeparateBackendExchangeAuthorization = false
+        )
+
+        if (outcome is com.example.data.broker.OrderSubmissionOutcome.PaperOrderSubmitted) {
+            futuresScannerRepo.recordSubmittedPaperOrder(outcome.order)
+            futuresScannerRepo.markPaperTradeExecuted(signal.id)
+            val rules = com.example.data.alerts.AlertMonitorEngine.createLifecycleRulesForSignal(signal)
+            futuresScannerRepo.addTradeAlertRules(rules)
+
+            val updatedBudgetPlan = wf.budgetPlan
+            val refreshedRisk = if (updatedBudgetPlan != null) {
+                com.example.data.risk.RiskManagerEngine.evaluate(
+                    signal = signal,
+                    budgetConfig = wf.budgetConfig,
+                    budgetPlan = updatedBudgetPlan,
+                    requestedLeverage = signal.suggestedLeverage,
+                    dailyLedger = futuresScannerRepo.dailyRiskLedger.value
+                )
+            } else risk
+
+            _tradeWorkflow.value = wf.copy(
+                riskAssessment = refreshedRisk,
+                submissionOutcome = outcome,
+                registeredAlertRulesCount = rules.size
+            )
+            _userMessage.value = outcome.message
+        } else {
+            _tradeWorkflow.value = wf.copy(submissionOutcome = outcome)
+        }
     }
 
     private data class TabAssetsOverviewSignalsAlerts(

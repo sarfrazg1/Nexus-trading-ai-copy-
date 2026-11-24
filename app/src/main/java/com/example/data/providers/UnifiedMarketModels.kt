@@ -69,8 +69,11 @@ data class NormalizedMarketQuote(
     val fetchedAtMillis: Long,
     val dataStatus: MarketDataStatus
 ) {
+    val timestampPktFormatted: String
+        get() = com.example.util.TimeZoneUtils.formatKarachiFullWithTz(fetchedAtMillis)
+
     val timestampUtcFormatted: String
-        get() = formatUtcTimestamp(fetchedAtMillis)
+        get() = timestampPktFormatted
 }
 
 data class CrossExchangeComparison(
@@ -161,9 +164,15 @@ data class UnifiedHybridMarketState(
     val providerStatuses: Map<String, ProviderMetadata> = emptyMap(),
     val assembledAtMillis: Long = 0L
 ) {
+    val assembledAtPkt: String
+        get() = if (assembledAtMillis > 0L) com.example.util.TimeZoneUtils.formatKarachiFullWithTz(assembledAtMillis) else "Not synced"
+
     val assembledAtUtc: String
-        get() = if (assembledAtMillis > 0L) formatUtcTimestamp(assembledAtMillis) else "Not synced"
+        get() = assembledAtPkt
 }
+
+fun formatPktTimestamp(millis: Long): String =
+    com.example.util.TimeZoneUtils.formatKarachiFullWithTz(millis)
 
 fun formatUtcTimestamp(millis: Long): String {
     val sdf = SimpleDateFormat("HH:mm:ss dd-MMM-yyyy 'UTC'", Locale.US)

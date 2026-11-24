@@ -4,8 +4,7 @@ import com.example.data.model.CandleTimeframe
 import com.example.data.model.Signal
 import com.example.data.model.SignalStatus
 import com.example.data.model.SignalType
-import java.text.SimpleDateFormat
-import java.util.Date
+import com.example.util.TimeZoneUtils
 import java.util.Locale
 
 /**
@@ -127,7 +126,7 @@ data class AiTradingSignal(
     val mtfTotalCount: Int,
     val mtfAgreementPercent: Int,
     val timestamp: Long = System.currentTimeMillis(),
-    val formattedTimestamp: String = SimpleDateFormat("MMM dd, HH:mm:ss", Locale.US).format(Date(timestamp)),
+    val formattedTimestamp: String = TimeZoneUtils.formatKarachiWithSeconds(timestamp),
     val dataSource: String = "Binance Public REST / WebSocket",
     val dataFreshness: String = "LIVE",
     val executionWarning: String = "Manual Execution Only — Nexus AI never places automated trades. Always verify your exchange margin and risk parameters."

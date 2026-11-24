@@ -88,7 +88,16 @@ data class MarketContextSnapshot(
     val coinGeckoGlobalSummary: String? = null,
     val defiLlamaSummary: String? = null,
     val fearGreedSummary: String? = null,
-    val providerHealthSummary: String? = null
+    val providerHealthSummary: String? = null,
+    // Part 1 Trading Reasoning Engine + Entry Timer + Exit Planner + News Separation
+    val reasoningReportSummary: String? = null,
+    val entryTimerSummary: String? = null,
+    val exitPlanSummary: String? = null,
+    val newsFactsVsInterpretationSummary: String? = null,
+    // Part 3 Multi-Asset Comparison + Trade Workflow Grounding + Unavailable Disclosures
+    val comparisonAssetSummary: String? = null,
+    val workflowContextSummary: String? = null,
+    val dataUnavailableDisclosures: List<String> = emptyList()
 ) {
     fun toPromptContext(lang: LearningLanguageMode): String {
         val sb = StringBuilder()
@@ -151,8 +160,21 @@ data class MarketContextSnapshot(
             sb.appendLine(it)
         }
 
+        if (!entryTimerSummary.isNullOrBlank() || !exitPlanSummary.isNullOrBlank()) {
+            sb.appendLine("--- Entry Timer & Pre-Entry Exit Planner ---")
+            entryTimerSummary?.let { sb.appendLine("Entry Timer: $it") }
+            exitPlanSummary?.let { sb.appendLine("Exit Planner: $it") }
+        }
+
+        reasoningReportSummary?.let {
+            sb.appendLine(it)
+        }
+
         sb.appendLine("--- Filtered News Headlines ($newsSourceStatus) ---")
         sb.appendLine("IMPORTANT: Headlines below are unverified potential context, NOT proven causal explanations.")
+        newsFactsVsInterpretationSummary?.let {
+            sb.appendLine(it)
+        }
         if (recentNewsHeadlines.isNotEmpty()) {
             recentNewsHeadlines.forEach { sb.appendLine("• $it") }
         } else {
@@ -161,6 +183,21 @@ data class MarketContextSnapshot(
             if (relevantNewsSummary == null && macroEventSummary == null) {
                 sb.appendLine("No live filtered news items available.")
             }
+        }
+
+        comparisonAssetSummary?.let {
+            sb.appendLine("--- Secondary / Comparison Asset Snapshot ---")
+            sb.appendLine(it)
+        }
+
+        workflowContextSummary?.let {
+            sb.appendLine("--- Trade Workflow, Time Machine Backtest, Monte Carlo & Risk Guard ---")
+            sb.appendLine(it)
+        }
+
+        if (dataUnavailableDisclosures.isNotEmpty()) {
+            sb.appendLine("--- Explicitly Unavailable / Unverified Fields (Do NOT Invent) ---")
+            dataUnavailableDisclosures.forEach { sb.appendLine("• $it") }
         }
 
         providerHealthSummary?.let {

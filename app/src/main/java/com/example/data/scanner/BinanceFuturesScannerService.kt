@@ -153,8 +153,9 @@ class BinanceFuturesScannerService : Service() {
                         val candles4h = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H4, limit = 30)
                         val candles5m = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.M5, limit = 30)
 
+                        val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(candles15m)
                         val currentPrice = pair.currentPrice.takeIf { it > 0 }
-                            ?: candles15m.lastOrNull()?.close
+                            ?: completed15m.lastOrNull()?.close
                             ?: 0.0
 
                         if (currentPrice > 0.0) {
@@ -177,6 +178,31 @@ class BinanceFuturesScannerService : Service() {
                                     val emoji = if (signal.direction == FuturesDirection.LONG) "🟢 LONG" else "🔴 SHORT"
                                     updateNotification("Confirmed Entry: ${signal.symbol}", "$emoji at ${signal.entryZoneFormatted} | Quality: ${signal.qualityScore}%")
                                 }
+                            }
+
+                            // Part 4: Additive >= 1:4 / >= 1:5 High Reward Opportunity scan
+                            val hrResult = HighRewardOpportunityDetector.scanPair(
+                                symbol = pair.symbol,
+                                baseAsset = pair.baseAsset,
+                                currentPrice = currentPrice,
+                                candles4h = candles4h,
+                                candles1h = candles1h,
+                                candles15m = candles15m,
+                                candles5m = candles5m,
+                                fundingRatePercent = fundingRate,
+                                budgetConfig = repository.budgetConfig.value
+                            )
+                            repository.onHighRewardScanEvaluated(
+                                symbol = pair.symbol,
+                                result = hrResult,
+                                playSound = repository.scannerState.value.soundAlertsEnabled,
+                                source = "Foreground Scanner Service"
+                            )
+                            hrResult.qualifiedOpportunities.firstOrNull()?.let { topOpp ->
+                                updateNotification(
+                                    topOpp.alertBannerTitle,
+                                    "Entry ${topOpp.entryFormatted} | SL ${topOpp.stopLossFormatted} | TP ${topOpp.takeProfitFormatted} (${topOpp.entryTriggerTimestampPkt})"
+                                )
                             }
                         }
                     } catch (e: Exception) {

@@ -81,7 +81,7 @@ class ProviderHttpSupport(
                     dataStatus = MarketDataStatus.LIVE,
                     health = ProviderHealthStatus.ACTIVE,
                     fetchedAtMillis = cacheEntry.fetchedAtMillis,
-                    timestampFormatted = formatUtcTimestamp(cacheEntry.fetchedAtMillis),
+                    timestampFormatted = formatPktTimestamp(cacheEntry.fetchedAtMillis),
                     rateLimitNote = "Served from TTL cache (${cacheTtlMillis / 1000}s)",
                     fromCache = true
                 )
@@ -133,7 +133,7 @@ class ProviderHttpSupport(
                                     dataStatus = MarketDataStatus.LIVE,
                                     health = ProviderHealthStatus.ACTIVE,
                                     fetchedAtMillis = fetchedAt,
-                                    timestampFormatted = formatUtcTimestamp(fetchedAt),
+                                    timestampFormatted = formatPktTimestamp(fetchedAt),
                                     rateLimitNote = response.header("X-RateLimit-Remaining")?.let { "Remaining: $it" }
                                 )
                             )
@@ -231,7 +231,7 @@ class ProviderHttpSupport(
                     dataStatus = MarketDataStatus.STALE,
                     health = health,
                     fetchedAtMillis = cacheEntry.fetchedAtMillis,
-                    timestampFormatted = formatUtcTimestamp(cacheEntry.fetchedAtMillis),
+                    timestampFormatted = formatPktTimestamp(cacheEntry.fetchedAtMillis),
                     rateLimitNote = reason,
                     errorMessage = reason,
                     fromCache = true

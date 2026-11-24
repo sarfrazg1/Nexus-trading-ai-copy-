@@ -37,11 +37,12 @@ object MarketScannerEngine {
         candles: List<Candle>,
         timeframe: CandleTimeframe = CandleTimeframe.H1
     ): ScannerItem {
-        val currentPrice = asset.currentPrice ?: candles.lastOrNull()?.close ?: 0.0
+        val completedCandles = com.example.util.TimeZoneUtils.filterCompletedCandles(candles)
+        val currentPrice = asset.currentPrice ?: completedCandles.lastOrNull()?.close ?: 0.0
         val change24hPct = asset.change24hPercent ?: 0.0
 
-        if (candles.size < 15) {
-            // Insufficient candles for full multi-factor scan
+        if (completedCandles.size < 15) {
+            // Insufficient completed candles for full multi-factor scan
             return ScannerItem(
                 id = "scan_${asset.id}_${timeframe.binanceInterval}",
                 symbol = asset.symbol,
@@ -52,7 +53,7 @@ object MarketScannerEngine {
                 emaCondition = "Waiting for data",
                 volumeMultiplier = 1.0,
                 aiScore = 50,
-                matchedCriteria = listOf("Awaiting Candles"),
+                matchedCriteria = listOf("Awaiting Completed Candles"),
                 verifiedPrice = currentPrice,
                 change24hPercent = change24hPct,
                 detectedCondition = "Neutral Baseline",
@@ -62,20 +63,27 @@ object MarketScannerEngine {
             )
         }
 
-        // 1. Run Technical Indicators Engine
+        // 1. Run Technical Indicators Engine on completed candles
         val techAnalysis = TechnicalIndicatorsEngine.analyze(
             symbol = asset.symbol,
             assetName = asset.name,
             timeframe = timeframe,
-            candles = candles
+            candles = completedCandles
         )
 
-        // 2. Run SMC Engine
+        // 2. Run SMC Engine on completed candles
         val smcAnalysis = SmcCalculationEngine.analyze(
             symbol = asset.symbol,
             assetName = asset.name,
             timeframe = timeframe,
-            candles = candles
+            candles = completedCandles
+        )
+
+        // 2b. Run Crypto Chart Pattern Detector
+        val patternDetection = CryptoPatternDetector.detect(
+            candles15m = completedCandles,
+            tech15m = techAnalysis,
+            smc15m = smcAnalysis
         )
 
         val rsiVal = techAnalysis.momentum.rsi14 ?: 50.0
@@ -100,7 +108,7 @@ object MarketScannerEngine {
 
         val rvol = techAnalysis.volume.relativeVolume ?: 1.0
 
-        // 3. Match against the 13 required scan criteria
+        // 3. Match against the 13 required scan criteria + detected chart patterns
         val matched = mutableListOf<String>()
 
         // 1. Strong Bullish Trend
@@ -136,7 +144,7 @@ object MarketScannerEngine {
 
         // 8. High Volatility (ATR)
         val atr = techAnalysis.volatility.atr?.value ?: 0.0
-        val lastCandleRange = if (candles.isNotEmpty()) candles.last().high - candles.last().low else 0.0
+        val lastCandleRange = if (completedCandles.isNotEmpty()) completedCandles.last().high - completedCandles.last().low else 0.0
         if (atr > 0 && lastCandleRange >= 1.7 * atr) {
             matched.add(ScannerConditionFilter.HIGH_VOLATILITY.label)
         }
@@ -169,6 +177,12 @@ object MarketScannerEngine {
         }
         if (isNearResistance) matched.add(ScannerConditionFilter.NEAR_RESISTANCE.label)
 
+        patternDetection?.allDetectedPatterns?.forEach { pat ->
+            if (!matched.contains(pat.label)) {
+                matched.add(pat.label)
+            }
+        }
+
         if (matched.isEmpty()) {
             matched.add("Balanced Range")
         }
@@ -185,9 +199,12 @@ object MarketScannerEngine {
         if (hasSweeps) score += 8
         if (isNearSupport) score += 10
         if (isNearResistance) score -= 8
+        if (patternDetection != null) score += 6
         score = score.coerceIn(15, 98)
 
-        val primaryCondition = matched.firstOrNull { it != "Balanced Range" } ?: matched.first()
+        val primaryCondition = patternDetection?.pattern?.label
+            ?: matched.firstOrNull { it != "Balanced Range" }
+            ?: matched.first()
 
         return ScannerItem(
             id = "scan_${asset.id}_${timeframe.binanceInterval}",
@@ -210,7 +227,6 @@ object MarketScannerEngine {
     }
 
     private fun formatTimestamp(timeMs: Long): String {
-        val sdf = SimpleDateFormat("HH:mm:ss", Locale.US)
-        return sdf.format(Date(timeMs))
+        return com.example.util.TimeZoneUtils.formatKarachiTimeOnly(timeMs)
     }
 }

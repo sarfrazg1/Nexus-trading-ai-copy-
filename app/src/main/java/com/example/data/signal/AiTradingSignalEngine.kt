@@ -20,10 +20,9 @@ import com.example.data.smc.PriceZoneType
 import com.example.data.smc.SmcAnalysisResult
 import com.example.data.smc.SmcCalculationEngine
 import com.example.data.smc.TimeframeSmcSnapshot
+import com.example.util.TimeZoneUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.floor
@@ -51,7 +50,7 @@ object AiTradingSignalEngine {
         mtfSnapshots: List<TimeframeSmcSnapshot> = emptyList()
     ): AiTradingSignal = withContext(Dispatchers.Default) {
         val now = System.currentTimeMillis()
-        val formattedTime = SimpleDateFormat("MMM dd, HH:mm:ss", Locale.US).format(Date(now))
+        val formattedTime = TimeZoneUtils.formatKarachiWithSeconds(now)
         val freshnessSeconds = if (lastUpdatedTime != null && lastUpdatedTime > 0) {
             max(0L, (now - lastUpdatedTime) / 1000L)
         } else 0L

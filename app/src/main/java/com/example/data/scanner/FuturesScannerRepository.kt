@@ -3,7 +3,17 @@ package com.example.data.scanner
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.example.data.alerts.AlertMonitorEngine
+import com.example.data.alerts.AlertRuleCategory
+import com.example.data.alerts.TradeAlertRule
+import com.example.data.broker.ExecutionMode
+import com.example.data.broker.PaperOrderRecord
+import com.example.data.broker.PaperOrderStatus
+import com.example.data.risk.BudgetConfig
+import com.example.data.risk.DailyRiskLedger
+import com.example.data.risk.RiskCurrency
 import com.example.util.NexusNotificationManager
+import com.example.util.TimeZoneUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,11 +34,25 @@ import java.util.concurrent.ConcurrentHashMap
  * 5. Cooldown rules to prevent repeat duplicate notifications.
  */
 class FuturesScannerRepository(
-    private val context: Context? = null,
+    context: Context? = null,
     private val notificationManager: NexusNotificationManager? = null
 ) {
-    private val prefs: SharedPreferences? by lazy {
-        context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private var appContext: Context? = context?.applicationContext ?: context
+
+    private val prefs: SharedPreferences?
+        get() = appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun bindContext(context: Context) {
+        if (appContext == null) {
+            appContext = context.applicationContext ?: context
+            loadWatchlistFromStorage()
+            loadSignalHistoryFromStorage()
+            loadScannerPreferencesFromStorage()
+            loadBudgetConfigFromStorage()
+            loadPaperOrdersFromStorage()
+            loadDailyLedgerFromStorage()
+            loadTradeAlertRulesFromStorage()
+        }
     }
 
     // Default top USDT-M Futures pairs
@@ -53,6 +77,21 @@ class FuturesScannerRepository(
     private val _scannerState = MutableStateFlow(ScannerEngineState())
     val scannerState: StateFlow<ScannerEngineState> = _scannerState.asStateFlow()
 
+    private val _budgetConfig = MutableStateFlow(BudgetConfig())
+    val budgetConfig: StateFlow<BudgetConfig> = _budgetConfig.asStateFlow()
+
+    private val _dailyRiskLedger = MutableStateFlow(DailyRiskLedger())
+    val dailyRiskLedger: StateFlow<DailyRiskLedger> = _dailyRiskLedger.asStateFlow()
+
+    private val _paperOrders = MutableStateFlow<List<PaperOrderRecord>>(emptyList())
+    val paperOrders: StateFlow<List<PaperOrderRecord>> = _paperOrders.asStateFlow()
+
+    private val _tradeAlertRules = MutableStateFlow<List<TradeAlertRule>>(emptyList())
+    val tradeAlertRules: StateFlow<List<TradeAlertRule>> = _tradeAlertRules.asStateFlow()
+
+    private val _highRewardState = MutableStateFlow(HighRewardScanState())
+    val highRewardState: StateFlow<HighRewardScanState> = _highRewardState.asStateFlow()
+
     // Alert cooldown per symbol (45 minutes = 2,700,000 ms)
     private val alertCooldowns = ConcurrentHashMap<String, Long>()
     private val COOLDOWN_DURATION_MS = 45 * 60 * 1000L
@@ -60,6 +99,11 @@ class FuturesScannerRepository(
     init {
         loadWatchlistFromStorage()
         loadSignalHistoryFromStorage()
+        loadScannerPreferencesFromStorage()
+        loadBudgetConfigFromStorage()
+        loadPaperOrdersFromStorage()
+        loadDailyLedgerFromStorage()
+        loadTradeAlertRulesFromStorage()
     }
 
     // ==========================================
@@ -159,6 +203,78 @@ class FuturesScannerRepository(
                     statistics = computeStatistics(state.activeSignals, state.signalHistory)
                 )
             }
+        }
+    }
+
+    /**
+     * Part 4: Ingests HighRewardScanResult for a symbol, notifies via NexusNotificationManager
+     * without duplicate alerts, and prioritizes >= 1:5.0 setups ahead of 1:4.0–4.99.
+     */
+    fun onHighRewardScanEvaluated(
+        symbol: String,
+        result: HighRewardScanResult,
+        playSound: Boolean = _scannerState.value.soundAlertsEnabled,
+        source: String = "NEXUS 1:5 Opportunity Detector"
+    ) {
+        val nowMs = System.currentTimeMillis()
+        result.qualifiedOpportunities.forEach { opp ->
+            if (opp.isQualified && opp.status == OpportunityStatus.ACTIVE) {
+                notificationManager?.notifyHighRewardOpportunity(
+                    opportunity = opp,
+                    playSound = playSound,
+                    source = source
+                )
+            }
+        }
+
+        _highRewardState.update { prev ->
+            val archivedNewly = mutableListOf<HighRewardOpportunity>()
+            val existingRetained = prev.activeOpportunities
+                .filterNot { it.symbol.equals(symbol, ignoreCase = true) }
+                .mapNotNull { existing ->
+                    val evaluated = HighRewardOpportunityDetector.evaluateLifecycle(existing, null, nowMs)
+                    if (evaluated.status == OpportunityStatus.ACTIVE) evaluated
+                    else {
+                        archivedNewly.add(evaluated)
+                        null
+                    }
+                }
+
+            val mergedActive = (result.qualifiedOpportunities + existingRetained)
+                .distinctBy { it.signatureKey }
+                .sortedWith(
+                    compareByDescending<HighRewardOpportunity> { it.tier == OpportunityPriorityTier.HIGHEST_1_TO_5_PLUS }
+                        .thenByDescending { it.netRiskRewardRatio }
+                        .thenByDescending { it.entryTriggerTimestampMs }
+                )
+
+            val updatedDiagnostics = (listOf(result.bestDiagnostic) +
+                prev.diagnostics.filterNot { it.symbol.equals(symbol, ignoreCase = true) }).take(20)
+
+            val bestDiagOverall = updatedDiagnostics.maxByOrNull { it.netRiskRewardRatio }
+            val waitMsg = if (mergedActive.isEmpty()) {
+                if (bestDiagOverall != null && bestDiagOverall.netRiskRewardRatio > 0.0) {
+                    "WAIT — No confirmed >=1:4 setup right now (best observed: ${bestDiagOverall.symbol} net 1:${String.format(Locale.US, "%.2f", bestDiagOverall.netRiskRewardRatio)} — ${bestDiagOverall.reason}). Never widens TP or tightens SL artificially."
+                } else {
+                    "WAIT — Monitoring selected pairs for confirmed entry triggers with >=1:4 net R:R (>=1:5 top priority). Never forces signals."
+                }
+            } else {
+                val top = mergedActive.first()
+                "${mergedActive.size} active high-reward opportunity(s) — Top: ${top.alertBannerTitle}"
+            }
+
+            val updatedArchived = (archivedNewly + prev.archivedOpportunities)
+                .distinctBy { it.signatureKey }
+                .take(25)
+
+            prev.copy(
+                activeOpportunities = mergedActive,
+                archivedOpportunities = updatedArchived,
+                diagnostics = updatedDiagnostics,
+                waitBannerMessage = waitMsg,
+                lastScannedTimestampMs = nowMs,
+                lastScannedPkt = TimeZoneUtils.formatKarachiTimestamp(nowMs)
+            )
         }
     }
 
@@ -273,6 +389,122 @@ class FuturesScannerRepository(
                 statistics = computeStatistics(stillActive, updatedHistory)
             )
         }
+
+        evaluatePaperOrdersAndTradeAlertsOnLivePrices(priceMap)
+        invalidateExpiredHighRewardOpportunities(priceMap)
+    }
+
+    fun invalidateExpiredHighRewardOpportunities(
+        priceMap: Map<String, Double>,
+        nowMs: Long = System.currentTimeMillis()
+    ) {
+        val current = _highRewardState.value
+        if (current.activeOpportunities.isEmpty()) return
+
+        val stillActive = mutableListOf<HighRewardOpportunity>()
+        val newlyArchived = mutableListOf<HighRewardOpportunity>()
+
+        for (opp in current.activeOpportunities) {
+            val evaluated = HighRewardOpportunityDetector.evaluateLifecycle(opp, priceMap[opp.symbol], nowMs)
+            if (evaluated.status == OpportunityStatus.ACTIVE) {
+                stillActive.add(evaluated)
+            } else {
+                newlyArchived.add(evaluated)
+            }
+        }
+
+        if (newlyArchived.isNotEmpty() || stillActive != current.activeOpportunities) {
+            _highRewardState.update { prev ->
+                val combinedArchive = (newlyArchived + prev.archivedOpportunities)
+                    .distinctBy { it.signatureKey }
+                    .take(25)
+                val waitMsg = if (stillActive.isEmpty()) {
+                    "WAIT — Previous opportunity expired/invalidated. Scanning for confirmed >=1:4 / >=1:5 net R:R triggers."
+                } else {
+                    prev.waitBannerMessage
+                }
+                prev.copy(
+                    activeOpportunities = stillActive,
+                    archivedOpportunities = combinedArchive,
+                    waitBannerMessage = waitMsg
+                )
+            }
+        }
+    }
+
+    private fun evaluatePaperOrdersAndTradeAlertsOnLivePrices(priceMap: Map<String, Double>) {
+        // 1. Update open paper order statuses & daily ledger PnL
+        var ledgerChanged = false
+        val updatedOrders = _paperOrders.value.map { order ->
+            if (order.status != PaperOrderStatus.OPEN_PAPER && order.status != PaperOrderStatus.TP1_HIT_PAPER) {
+                order
+            } else {
+                val p = priceMap[order.symbol] ?: return@map order
+                val isLong = order.direction == FuturesDirection.LONG
+                when {
+                    (isLong && p >= order.takeProfit2) || (!isLong && p <= order.takeProfit2) -> {
+                        val grossPnl = if (isLong) (order.takeProfit2 - order.entryPrice) * order.quantity else (order.entryPrice - order.takeProfit2) * order.quantity
+                        val realized = grossPnl - order.estimatedFeesUsdt
+                        ledgerChanged = true
+                        order.copy(
+                            status = PaperOrderStatus.CLOSED_TP_PAPER,
+                            closedPrice = order.takeProfit2,
+                            realizedPnlUsdt = realized
+                        )
+                    }
+                    (isLong && p <= order.stopLoss) || (!isLong && p >= order.stopLoss) -> {
+                        val grossPnl = if (isLong) (order.stopLoss - order.entryPrice) * order.quantity else (order.entryPrice - order.stopLoss) * order.quantity
+                        val realized = grossPnl - order.estimatedFeesUsdt
+                        ledgerChanged = true
+                        order.copy(
+                            status = PaperOrderStatus.CLOSED_SL_PAPER,
+                            closedPrice = order.stopLoss,
+                            realizedPnlUsdt = realized
+                        )
+                    }
+                    order.status == PaperOrderStatus.OPEN_PAPER &&
+                        ((isLong && p >= order.takeProfit1) || (!isLong && p <= order.takeProfit1)) -> {
+                        ledgerChanged = true
+                        order.copy(status = PaperOrderStatus.TP1_HIT_PAPER)
+                    }
+                    else -> order
+                }
+            }
+        }
+        if (ledgerChanged) {
+            _paperOrders.value = updatedOrders
+            savePaperOrdersToStorage(updatedOrders)
+            reconcileDailyLedgerWithOrders()
+        }
+
+        // 2. Evaluate persisted lifecycle alert rules (Entry Trigger, SL, TP, Invalidation, Expiry, Market Change)
+        val rules = _tradeAlertRules.value
+        if (rules.isNotEmpty()) {
+            val state = _scannerState.value
+            val signalsById = (state.activeSignals + state.watchlistSetups + state.signalHistory).associateBy { it.id }
+            val triggered = AlertMonitorEngine.evaluateRules(
+                rules = rules,
+                livePrices = priceMap,
+                signalsById = signalsById,
+                alreadyTriggeredEventIds = notificationManager?.getDeliveredEventIds() ?: emptySet()
+            )
+            triggered.forEach { ev ->
+                val sent = notificationManager?.notifyTradeLifecycleAlert(
+                    eventId = ev.eventId,
+                    symbol = ev.symbol,
+                    signalId = ev.signalId.takeIf { it.isNotBlank() },
+                    alertType = ev.alertType,
+                    title = ev.title,
+                    body = ev.body,
+                    timestampMs = ev.timestampMs,
+                    source = "Live Futures Monitor",
+                    openWorkflow = ev.openWorkflowOnTap
+                ) ?: false
+                if (sent || notificationManager == null) {
+                    markTradeAlertRuleTriggered(ev.ruleId)
+                }
+            }
+        }
     }
 
     fun updateScannerStatus(
@@ -286,7 +518,20 @@ class FuturesScannerRepository(
                 currentlyScanningSymbol = currentlyScanning,
                 errorMessage = errorMessage,
                 lastScanCompletedTimestamp = if (status == ScannerStatus.IDLE) System.currentTimeMillis() else state.lastScanCompletedTimestamp,
-                lastScanFormatted = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                lastScanFormatted = com.example.util.TimeZoneUtils.formatKarachiTimeOnly(System.currentTimeMillis())
+            )
+        }
+    }
+
+    fun markPaperTradeExecuted(signalId: String) {
+        _scannerState.update { state ->
+            state.copy(
+                activeSignals = state.activeSignals.map {
+                    if (it.id == signalId) it.copy(paperTradeExecuted = true) else it
+                },
+                watchlistSetups = state.watchlistSetups.map {
+                    if (it.id == signalId) it.copy(paperTradeExecuted = true) else it
+                }
             )
         }
     }
@@ -306,6 +551,26 @@ class FuturesScannerRepository(
         prefs?.edit()?.putInt("min_quality_score", score)?.apply()
     }
 
+    fun setStrict92ConfidenceMode(enabled: Boolean) {
+        val threshold = if (enabled) 92 else 60
+        _scannerState.update {
+            it.copy(
+                strict92ConfidenceMode = enabled,
+                minQualifyingConfidence = threshold
+            )
+        }
+        prefs?.edit()?.putBoolean(KEY_STRICT_92, enabled)?.apply()
+    }
+
+    fun filterQualifyingSignals(signals: List<FuturesScanSignal>): List<FuturesScanSignal> {
+        val state = _scannerState.value
+        return if (state.strict92ConfidenceMode) {
+            signals.filter { it.qualityScore >= 92 }
+        } else {
+            signals
+        }
+    }
+
     fun setSoundAlerts(enabled: Boolean) {
         _scannerState.update { it.copy(soundAlertsEnabled = enabled) }
         prefs?.edit()?.putBoolean("sound_alerts_enabled", enabled)?.apply()
@@ -315,6 +580,74 @@ class FuturesScannerRepository(
         _scannerState.update { it.copy(vibrationEnabled = enabled) }
         prefs?.edit()?.putBoolean("vibration_alerts_enabled", enabled)?.apply()
     }
+
+    // ==========================================
+    // BUDGET, DAILY RISK LEDGER, PAPER ORDERS & ALERT RULES
+    // ==========================================
+
+    fun updateBudgetConfig(config: BudgetConfig) {
+        _budgetConfig.value = config
+        saveBudgetConfigToStorage(config)
+    }
+
+    fun recordSubmittedPaperOrder(order: PaperOrderRecord) {
+        val updatedOrders = listOf(order) + _paperOrders.value.filterNot { it.orderId == order.orderId }
+        _paperOrders.value = updatedOrders
+        savePaperOrdersToStorage(updatedOrders)
+
+        val todayKey = currentPktDateKey()
+        val base = _dailyRiskLedger.value.let { if (it.dateKeyPkt == todayKey) it else DailyRiskLedger(dateKeyPkt = todayKey) }
+        val openOrders = updatedOrders.filter { it.status == PaperOrderStatus.OPEN_PAPER || it.status == PaperOrderStatus.TP1_HIT_PAPER }
+        val updatedLedger = base.copy(
+            dateKeyPkt = todayKey,
+            tradesTakenToday = base.tradesTakenToday + 1,
+            existingOpenMarginUsdt = openOrders.sumOf { it.estimatedMarginUsdt },
+            openOrderSymbols = openOrders.map { it.symbol }.distinct()
+        )
+        _dailyRiskLedger.value = updatedLedger
+        saveDailyLedgerToStorage(updatedLedger)
+    }
+
+    private fun reconcileDailyLedgerWithOrders() {
+        val todayKey = currentPktDateKey()
+        val openOrders = _paperOrders.value.filter { it.status == PaperOrderStatus.OPEN_PAPER || it.status == PaperOrderStatus.TP1_HIT_PAPER }
+        val realizedToday = _paperOrders.value
+            .filter { TimeZoneUtils.formatKarachiShort(it.createdTimestampMs).substringBefore(",") == todayKey }
+            .sumOf { it.realizedPnlUsdt ?: 0.0 }
+        val base = _dailyRiskLedger.value.let { if (it.dateKeyPkt == todayKey) it else DailyRiskLedger(dateKeyPkt = todayKey) }
+        val updatedLedger = base.copy(
+            dateKeyPkt = todayKey,
+            realizedPnlUsdtToday = realizedToday,
+            existingOpenMarginUsdt = openOrders.sumOf { it.estimatedMarginUsdt },
+            openOrderSymbols = openOrders.map { it.symbol }.distinct()
+        )
+        _dailyRiskLedger.value = updatedLedger
+        saveDailyLedgerToStorage(updatedLedger)
+    }
+
+    fun addTradeAlertRules(newRules: List<TradeAlertRule>) {
+        if (newRules.isEmpty()) return
+        val existingIds = _tradeAlertRules.value.map { it.ruleId }.toSet()
+        val merged = newRules.filter { it.ruleId !in existingIds } + _tradeAlertRules.value
+        val trimmed = merged.take(120)
+        _tradeAlertRules.value = trimmed
+        saveTradeAlertRulesToStorage(trimmed)
+    }
+
+    fun getActiveTradeAlertRules(): List<TradeAlertRule> {
+        return _tradeAlertRules.value.filter { it.isActive && !it.isTriggered }
+    }
+
+    fun markTradeAlertRuleTriggered(ruleId: String) {
+        val updated = _tradeAlertRules.value.map { r ->
+            if (r.ruleId == ruleId) r.copy(isTriggered = true, isActive = false) else r
+        }
+        _tradeAlertRules.value = updated
+        saveTradeAlertRulesToStorage(updated)
+    }
+
+    private fun currentPktDateKey(): String =
+        TimeZoneUtils.formatKarachiShort(System.currentTimeMillis()).substringBefore(",")
 
     // ==========================================
     // NOTIFICATION TRIGGER
@@ -327,7 +660,8 @@ class FuturesScannerRepository(
             entryZone = signal.entryZoneFormatted,
             sl = signal.stopLossFormatted,
             tp1 = signal.tp1Formatted,
-            qualityScore = signal.qualityScore
+            qualityScore = signal.qualityScore,
+            signalId = signal.id
         )
     }
 
@@ -500,11 +834,256 @@ class FuturesScannerRepository(
         }
     }
 
+    private fun loadScannerPreferencesFromStorage() {
+        val strict92 = prefs?.getBoolean(KEY_STRICT_92, false) ?: false
+        val paperEnabled = prefs?.getBoolean("paper_trading_enabled", false) ?: false
+        val interval = prefs?.getInt("scan_interval_seconds", 30) ?: 30
+        _scannerState.update {
+            it.copy(
+                strict92ConfidenceMode = strict92,
+                minQualifyingConfidence = if (strict92) 92 else 60,
+                paperTradingEnabled = paperEnabled,
+                scanIntervalSeconds = interval
+            )
+        }
+    }
+
+    private fun saveBudgetConfigToStorage(config: BudgetConfig) {
+        try {
+            val obj = JSONObject().apply {
+                put("balance", config.accountBalanceUsdt)
+                put("riskAmt", config.maxRiskPerTradeAmount)
+                put("currency", config.riskCurrency.name)
+                put("pkrRate", config.pkrPerUsdtRate)
+                put("maxRiskPct", config.maxRiskPercent)
+                put("levLimit", config.leverageLimit)
+                put("feePct", config.feeRatePercentPerSide)
+                put("slipPct", config.slippagePercentPerSide)
+                put("dailyLossPct", config.dailyLossLimitPercent)
+                put("maxTrades", config.maxTradesPerDay)
+                put("minRr", config.minRiskRewardRatio)
+                put("maxExposurePct", config.maxOpenExposurePercentOfBalance)
+            }
+            prefs?.edit()?.putString(KEY_BUDGET_CONFIG, obj.toString())?.apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadBudgetConfigFromStorage() {
+        val raw = prefs?.getString(KEY_BUDGET_CONFIG, null) ?: return
+        try {
+            val obj = JSONObject(raw)
+            val curr = RiskCurrency.entries.firstOrNull { it.name == obj.optString("currency") } ?: RiskCurrency.USDT
+            _budgetConfig.value = BudgetConfig(
+                accountBalanceUsdt = obj.optDouble("balance", 1000.0),
+                maxRiskPerTradeAmount = obj.optDouble("riskAmt", 20.0),
+                riskCurrency = curr,
+                pkrPerUsdtRate = obj.optDouble("pkrRate", 278.5),
+                maxRiskPercent = obj.optDouble("maxRiskPct", 2.0),
+                leverageLimit = obj.optInt("levLimit", 5),
+                feeRatePercentPerSide = obj.optDouble("feePct", 0.05),
+                slippagePercentPerSide = obj.optDouble("slipPct", 0.03),
+                dailyLossLimitPercent = obj.optDouble("dailyLossPct", 5.0),
+                maxTradesPerDay = obj.optInt("maxTrades", 5),
+                minRiskRewardRatio = obj.optDouble("minRr", 1.5),
+                maxOpenExposurePercentOfBalance = obj.optDouble("maxExposurePct", 80.0)
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun savePaperOrdersToStorage(orders: List<PaperOrderRecord>) {
+        try {
+            val arr = JSONArray()
+            orders.take(50).forEach { o ->
+                arr.put(
+                    JSONObject().apply {
+                        put("orderId", o.orderId)
+                        put("signalId", o.signalId)
+                        put("symbol", o.symbol)
+                        put("direction", o.direction.name)
+                        put("qty", o.quantity)
+                        put("qtyFmt", o.quantityFormatted)
+                        put("entry", o.entryPrice)
+                        put("sl", o.stopLoss)
+                        put("tp1", o.takeProfit1)
+                        put("tp2", o.takeProfit2)
+                        put("tp3", o.takeProfit3)
+                        put("lev", o.leverage)
+                        put("margin", o.estimatedMarginUsdt)
+                        put("fees", o.estimatedFeesUsdt)
+                        put("maxLoss", o.maxPlannedLossUsdt)
+                        put("status", o.status.name)
+                        put("confirmed", o.userConfirmedExplicitly)
+                        put("mode", o.executionMode.name)
+                        put("ts", o.createdTimestampMs)
+                        put("tsPkt", o.createdTimestampPkt)
+                        o.closedPrice?.let { put("closedPrice", it) }
+                        o.realizedPnlUsdt?.let { put("realizedPnl", it) }
+                    }
+                )
+            }
+            prefs?.edit()?.putString(KEY_PAPER_ORDERS, arr.toString())?.apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadPaperOrdersFromStorage() {
+        val raw = prefs?.getString(KEY_PAPER_ORDERS, null) ?: return
+        try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<PaperOrderRecord>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val dir = FuturesDirection.entries.firstOrNull { it.name == o.optString("direction") } ?: FuturesDirection.LONG
+                val st = PaperOrderStatus.entries.firstOrNull { it.name == o.optString("status") } ?: PaperOrderStatus.OPEN_PAPER
+                val mode = ExecutionMode.entries.firstOrNull { it.name == o.optString("mode") } ?: ExecutionMode.PAPER_TRADING
+                list.add(
+                    PaperOrderRecord(
+                        orderId = o.optString("orderId"),
+                        signalId = o.optString("signalId"),
+                        symbol = o.optString("symbol"),
+                        direction = dir,
+                        quantity = o.optDouble("qty", 0.0),
+                        quantityFormatted = o.optString("qtyFmt", "0"),
+                        entryPrice = o.optDouble("entry", 0.0),
+                        stopLoss = o.optDouble("sl", 0.0),
+                        takeProfit1 = o.optDouble("tp1", 0.0),
+                        takeProfit2 = o.optDouble("tp2", 0.0),
+                        takeProfit3 = o.optDouble("tp3", 0.0),
+                        leverage = o.optInt("lev", 3),
+                        estimatedMarginUsdt = o.optDouble("margin", 0.0),
+                        estimatedFeesUsdt = o.optDouble("fees", 0.0),
+                        maxPlannedLossUsdt = o.optDouble("maxLoss", 0.0),
+                        status = st,
+                        userConfirmedExplicitly = o.optBoolean("confirmed", true),
+                        executionMode = mode,
+                        createdTimestampMs = o.optLong("ts", 0L),
+                        createdTimestampPkt = o.optString("tsPkt"),
+                        closedPrice = if (o.has("closedPrice")) o.optDouble("closedPrice") else null,
+                        realizedPnlUsdt = if (o.has("realizedPnl")) o.optDouble("realizedPnl") else null
+                    )
+                )
+            }
+            _paperOrders.value = list
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun saveDailyLedgerToStorage(ledger: DailyRiskLedger) {
+        try {
+            val obj = JSONObject().apply {
+                put("date", ledger.dateKeyPkt)
+                put("trades", ledger.tradesTakenToday)
+                put("pnl", ledger.realizedPnlUsdtToday)
+                put("margin", ledger.existingOpenMarginUsdt)
+                put("symbols", JSONArray(ledger.openOrderSymbols))
+            }
+            prefs?.edit()?.putString(KEY_DAILY_LEDGER, obj.toString())?.apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadDailyLedgerFromStorage() {
+        val raw = prefs?.getString(KEY_DAILY_LEDGER, null)
+        val todayKey = currentPktDateKey()
+        if (raw == null) {
+            _dailyRiskLedger.value = DailyRiskLedger(dateKeyPkt = todayKey)
+            return
+        }
+        try {
+            val obj = JSONObject(raw)
+            val savedDate = obj.optString("date", todayKey)
+            val openOrders = _paperOrders.value.filter { it.status == PaperOrderStatus.OPEN_PAPER || it.status == PaperOrderStatus.TP1_HIT_PAPER }
+            if (savedDate != todayKey) {
+                _dailyRiskLedger.value = DailyRiskLedger(
+                    dateKeyPkt = todayKey,
+                    tradesTakenToday = 0,
+                    realizedPnlUsdtToday = 0.0,
+                    existingOpenMarginUsdt = openOrders.sumOf { it.estimatedMarginUsdt },
+                    openOrderSymbols = openOrders.map { it.symbol }.distinct()
+                )
+            } else {
+                _dailyRiskLedger.value = DailyRiskLedger(
+                    dateKeyPkt = savedDate,
+                    tradesTakenToday = obj.optInt("trades", 0),
+                    realizedPnlUsdtToday = obj.optDouble("pnl", 0.0),
+                    existingOpenMarginUsdt = openOrders.sumOf { it.estimatedMarginUsdt }.takeIf { it > 0.0 }
+                        ?: obj.optDouble("margin", 0.0),
+                    openOrderSymbols = openOrders.map { it.symbol }.distinct()
+                )
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun saveTradeAlertRulesToStorage(rules: List<TradeAlertRule>) {
+        try {
+            val arr = JSONArray()
+            rules.take(120).forEach { r ->
+                arr.put(
+                    JSONObject().apply {
+                        put("ruleId", r.ruleId)
+                        put("signalId", r.signalId)
+                        put("symbol", r.symbol)
+                        put("direction", r.direction.name)
+                        put("category", r.category.name)
+                        r.triggerPrice?.let { put("triggerPrice", it) }
+                        r.expiryTimestampMs?.let { put("expiryMs", it) }
+                        put("desc", r.conditionDescription)
+                        put("active", r.isActive)
+                        put("triggered", r.isTriggered)
+                        put("createdMs", r.createdAtMs)
+                        put("createdPkt", r.createdAtPkt)
+                    }
+                )
+            }
+            prefs?.edit()?.putString(KEY_TRADE_ALERT_RULES, arr.toString())?.apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadTradeAlertRulesFromStorage() {
+        val raw = prefs?.getString(KEY_TRADE_ALERT_RULES, null) ?: return
+        try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<TradeAlertRule>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val dir = FuturesDirection.entries.firstOrNull { it.name == o.optString("direction") } ?: FuturesDirection.LONG
+                val cat = AlertRuleCategory.entries.firstOrNull { it.name == o.optString("category") } ?: AlertRuleCategory.PRICE_TARGET
+                list.add(
+                    TradeAlertRule(
+                        ruleId = o.optString("ruleId"),
+                        signalId = o.optString("signalId"),
+                        symbol = o.optString("symbol"),
+                        direction = dir,
+                        category = cat,
+                        triggerPrice = if (o.has("triggerPrice")) o.optDouble("triggerPrice") else null,
+                        expiryTimestampMs = if (o.has("expiryMs")) o.optLong("expiryMs") else null,
+                        conditionDescription = o.optString("desc"),
+                        isActive = o.optBoolean("active", true),
+                        isTriggered = o.optBoolean("triggered", false),
+                        createdAtMs = o.optLong("createdMs", 0L),
+                        createdAtPkt = o.optString("createdPkt")
+                    )
+                )
+            }
+            _tradeAlertRules.value = list
+        } catch (_: Exception) {
+        }
+    }
+
     companion object {
         private const val TAG = "FuturesScannerRepo"
         private const val PREFS_NAME = "nexus_futures_scanner_prefs"
         private const val KEY_WATCHLIST = "futures_watchlist_json"
         private const val KEY_HISTORY = "futures_history_json"
+        private const val KEY_STRICT_92 = "strict_92_confidence_mode"
+        private const val KEY_BUDGET_CONFIG = "budget_config_json"
+        private const val KEY_PAPER_ORDERS = "paper_orders_json"
+        private const val KEY_DAILY_LEDGER = "daily_risk_ledger_json"
+        private const val KEY_TRADE_ALERT_RULES = "trade_alert_rules_json"
 
         // Singleton instance holder for service and UI coordination
         @Volatile
