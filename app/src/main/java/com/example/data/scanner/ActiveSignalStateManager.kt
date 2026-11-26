@@ -1,3 +1,4 @@
+
 package com.example.data.scanner
 
 import com.example.util.TimeZoneUtils
@@ -16,7 +17,10 @@ enum class ManagedSignalState(val label: String) {
         get() = this == CONFIRMED || this == ACTIVE
 
     val isTerminal: Boolean
-        get() = this == TARGET_HIT || this == STOP_LOSS_HIT || this == INVALIDATED || this == EXPIRED
+        get() = this == TARGET_HIT ||
+            this == STOP_LOSS_HIT ||
+            this == INVALIDATED ||
+            this == EXPIRED
 }
 
 data class SignalTransitionRecord(
@@ -27,7 +31,8 @@ data class SignalTransitionRecord(
     val toState: ManagedSignalState,
     val reason: String,
     val timestampMs: Long,
-    val timestampPkt: String = TimeZoneUtils.formatKarachiTimestamp(timestampMs)
+    val timestampPkt: String =
+        TimeZoneUtils.formatKarachiTimestamp(timestampMs)
 )
 
 data class ManagedSignalEntry(
@@ -57,41 +62,42 @@ data class SignalIntakeOutcome(
     val isDuplicateSuppressed: Boolean = false
 )
 
-/**
- * Part 3 Active Signal State Manager.
- * Tracks every signal through:
- * WATCHING -> CONFIRMED -> ACTIVE -> TARGET_HIT / STOP_LOSS_HIT / INVALIDATED / EXPIRED.
- *
- * Key integrity rules:
- * - Deterministic unique signal ID per symbol, direction, and 15M candle close window.
- * - Strictly BLOCKS silent LONG <-> SHORT reversal while an ACTIVE/CONFIRMED signal exists for the symbol.
- * - Allows opposite direction ONLY after prior signal reaches a terminal state AND passes all filters.
- * - Prevents duplicate entries and suppresses alert spam via per-symbol/direction cooldowns.
- */
 class ActiveSignalStateManager(
-    private val defaultNotificationCooldownMs: Long = 45 * 60 * 1000L
+    private val defaultNotificationCooldownMs: Long =
+        45 * 60 * 1000L
 ) {
-    private val entriesBySymbol = LinkedHashMap<String, ManagedSignalEntry>()
-    private val transitionHistory = mutableListOf<SignalTransitionRecord>()
-    private val lastNotifiedByKey = HashMap<String, Long>()
+    private val entriesBySymbol =
+        LinkedHashMap<String, ManagedSignalEntry>()
+
+    private val transitionHistory =
+        mutableListOf<SignalTransitionRecord>()
+
+    private val lastNotifiedByKey =
+        HashMap<String, Long>()
 
     @Synchronized
     fun getActiveSignals(): List<ManagedSignalEntry> =
-        entriesBySymbol.values.filter { it.state.isOpenOrLive }.sortedByDescending { it.lastUpdatedMs }
+        entriesBySymbol.values
+            .filter { it.state.isOpenOrLive }
+            .sortedByDescending { it.lastUpdatedMs }
 
     @Synchronized
     fun getWatchingSignals(): List<ManagedSignalEntry> =
-        entriesBySymbol.values.filter { it.state == ManagedSignalState.WATCHING }.sortedByDescending { it.lastUpdatedMs }
+        entriesBySymbol.values
+            .filter { it.state == ManagedSignalState.WATCHING }
+            .sortedByDescending { it.lastUpdatedMs }
 
     @Synchronized
-    fun getAllEntries(): List<ManagedSignalEntry> = entriesBySymbol.values.toList()
+    fun getAllEntries(): List<ManagedSignalEntry> =
+        entriesBySymbol.values.toList()
 
     @Synchronized
-    fun getTransitionHistory(): List<SignalTransitionRecord> = transitionHistory.toList()
+    fun getTransitionHistory(): List<SignalTransitionRecord> =
+        transitionHistory.toList()
 
     @Synchronized
     fun getEntryForSymbol(symbol: String): ManagedSignalEntry? =
-        entriesBySymbol[symbol.uppercase(Locale.US)]
+        entriesBySymbol[symbol.uppercase(Locale.US).trim()]
 
     @Synchronized
     fun submitCandidate(
@@ -111,12 +117,32 @@ class ActiveSignalStateManager(
         nowMs: Long = System.currentTimeMillis(),
         preferredSignalId: String? = null
     ): SignalIntakeOutcome {
-        val normSymbol = symbol.uppercase(Locale.US).trim()
+
+        val normSymbol =
+            symbol.uppercase(Locale.US).trim()
+
         val existing = entriesBySymbol[normSymbol]
 
-        // 1. Hard guard against silent LONG <-> SHORT flip while an active signal exists
-        if (existing != null && existing.state.isOpenOrLive && existing.direction != direction) {
-            val blockMsg = "Blocked silent ${existing.direction.name}->${direction.name} reversal on $normSymbol: active signal ${existing.signalId} (${existing.state.label}) must hit target, stop loss, invalidate, or expire first."
+        // Check whether an existing signal is still valid.
+        val existingIsExpired =
+            existing != null &&
+            existing.expiresAtMs > 0L &&
+            nowMs >= existing.expiresAtMs
+
+        // 1. Protect existing signals against silent LONG/SHORT reversal.
+        // This now protects WATCHING signals too.
+        if (
+            existing != null &&
+            !existing.state.isTerminal &&
+            !existingIsExpired &&
+            existing.direction != direction
+        ) {
+            val blockMsg =
+                "Blocked opposite ${direction.name} signal for $normSymbol. " +
+                "Existing ${existing.direction.name} signal " +
+                "${existing.signalId} is still ${existing.state.label}. " +
+                "The existing setup must expire or reach a terminal state first."
+
             val blockedTransition = SignalTransitionRecord(
                 signalId = existing.signalId,
                 symbol = normSymbol,
@@ -126,7 +152,9 @@ class ActiveSignalStateManager(
                 reason = blockMsg,
                 timestampMs = nowMs
             )
+
             appendTransition(blockedTransition)
+
             return SignalIntakeOutcome(
                 accepted = false,
                 entry = existing,
@@ -135,80 +163,126 @@ class ActiveSignalStateManager(
             )
         }
 
-        val detId = preferredSignalId?.takeIf { it.isNotBlank() }
-            ?: buildDeterministicId(normSymbol, direction, confirmationCandleCloseMs)
+        val detId =
+            preferredSignalId?.takeIf { it.isNotBlank() }
+                ?: buildDeterministicId(
+                    normSymbol,
+                    direction,
+                    confirmationCandleCloseMs
+                )
 
-        // 2. If same-direction active/confirmed signal already exists, update in place (no duplicate)
-        if (existing != null && existing.state.isOpenOrLive && existing.direction == direction) {
+        // 2. Update an existing same-direction ACTIVE signal.
+        if (
+            existing != null &&
+            !existingIsExpired &&
+            existing.state.isOpenOrLive &&
+            existing.direction == direction
+        ) {
             if (!isConfirmed) {
                 return SignalIntakeOutcome(
                     accepted = false,
                     entry = existing,
                     transition = null,
-                    rejectionReason = "Active ${existing.direction.name} signal ${existing.signalId} remains live; unconfirmed watching tick ignored.",
+                    rejectionReason =
+                        "Existing ${existing.direction.name} signal remains live. " +
+                        "Unconfirmed update ignored.",
                     isDuplicateSuppressed = true
                 )
             }
+
             val updated = existing.copy(
                 entryPrice = entryPrice,
                 stopLoss = stopLoss,
                 takeProfit1 = takeProfit1,
                 takeProfit2 = takeProfit2,
                 netRiskReward = netRiskReward,
-                qualityScore = maxOf(existing.qualityScore, qualityScore),
+                qualityScore = maxOf(
+                    existing.qualityScore,
+                    qualityScore
+                ),
                 lastUpdatedMs = nowMs,
-                statusReason = "Updated existing active signal in-place ($setupReason)"
+                statusReason =
+                    "Updated existing active signal: $setupReason"
             )
+
             entriesBySymbol[normSymbol] = updated
+
             return SignalIntakeOutcome(
                 accepted = true,
                 entry = updated,
                 transition = null,
-                isDuplicateSuppressed = existing.signalId == detId || (nowMs - existing.lastUpdatedMs < defaultNotificationCooldownMs)
+                isDuplicateSuppressed =
+                    existing.signalId == detId ||
+                    (nowMs - existing.lastUpdatedMs <
+                        defaultNotificationCooldownMs)
             )
         }
 
-        // 3. New setup intake: WATCHING or CONFIRMED -> ACTIVE
-        val fromState = existing?.state
-        val newEntry = if (isConfirmed) {
-            ManagedSignalEntry(
-                signalId = detId,
-                symbol = normSymbol,
-                direction = direction,
-                state = ManagedSignalState.ACTIVE,
+        // 3. Keep an existing same-direction WATCHING setup.
+        if (
+            existing != null &&
+            !existingIsExpired &&
+            existing.state == ManagedSignalState.WATCHING &&
+            existing.direction == direction &&
+            !isConfirmed
+        ) {
+            val updated = existing.copy(
                 entryPrice = entryPrice,
                 stopLoss = stopLoss,
                 takeProfit1 = takeProfit1,
                 takeProfit2 = takeProfit2,
                 netRiskReward = netRiskReward,
-                qualityScore = qualityScore,
-                dataSourceName = dataSourceName,
-                setupReason = setupReason,
-                confirmationCandleCloseMs = confirmationCandleCloseMs,
-                expiresAtMs = expiresAtMs,
+                qualityScore = maxOf(
+                    existing.qualityScore,
+                    qualityScore
+                ),
                 lastUpdatedMs = nowMs,
-                statusReason = "Confirmed on 15M close ($setupReason)"
+                statusReason =
+                    "Watching same-direction setup: $setupReason"
             )
-        } else {
-            ManagedSignalEntry(
-                signalId = detId,
-                symbol = normSymbol,
-                direction = direction,
-                state = ManagedSignalState.WATCHING,
-                entryPrice = entryPrice,
-                stopLoss = stopLoss,
-                takeProfit1 = takeProfit1,
-                takeProfit2 = takeProfit2,
-                netRiskReward = netRiskReward,
-                qualityScore = qualityScore,
-                dataSourceName = dataSourceName,
-                setupReason = setupReason,
-                confirmationCandleCloseMs = confirmationCandleCloseMs,
-                expiresAtMs = expiresAtMs,
-                lastUpdatedMs = nowMs,
-                statusReason = "Developing setup ($setupReason)"
+
+            entriesBySymbol[normSymbol] = updated
+
+            return SignalIntakeOutcome(
+                accepted = true,
+                entry = updated,
+                transition = null,
+                isDuplicateSuppressed = true
             )
         }
+
+        // 4. Create a new WATCHING or ACTIVE setup.
+        // Opposite direction is allowed only after the previous
+        // setup has expired or reached a terminal state.
+        val fromState = existing?.state
+
+        val newEntry = ManagedSignalEntry(
+            signalId = detId,
+            symbol = normSymbol,
+            direction = direction,
+            state = if (isConfirmed) {
+                ManagedSignalState.ACTIVE
+            } else {
+                ManagedSignalState.WATCHING
+            },
+            entryPrice = entryPrice,
+            stopLoss = stopLoss,
+            takeProfit1 = takeProfit1,
+            takeProfit2 = takeProfit2,
+            netRiskReward = netRiskReward,
+            qualityScore = qualityScore,
+            dataSourceName = dataSourceName,
+            setupReason = setupReason,
+            confirmationCandleCloseMs =
+                confirmationCandleCloseMs,
+            expiresAtMs = expiresAtMs,
+            lastUpdatedMs = nowMs,
+            statusReason = if (isConfirmed) {
+                "Confirmed on 15M close: $setupReason"
+            } else {
+                "Developing setup: $setupReason"
+            }
+        )
 
         entriesBySymbol[normSymbol] = newEntry
 
@@ -219,23 +293,29 @@ class ActiveSignalStateManager(
                 direction = direction,
                 fromState = fromState ?: ManagedSignalState.WATCHING,
                 toState = ManagedSignalState.CONFIRMED,
-                reason = "15M candle close + mandatory filters passed ($setupReason)",
+                reason =
+                    "15M candle close and mandatory filters passed: $setupReason",
                 timestampMs = nowMs
             )
+
             appendTransition(watchToConfirmed)
+
             val confirmedToActive = SignalTransitionRecord(
                 signalId = detId,
                 symbol = normSymbol,
                 direction = direction,
                 fromState = ManagedSignalState.CONFIRMED,
                 toState = ManagedSignalState.ACTIVE,
-                reason = "Signal promoted to ACTIVE tracking (Net R:R 1:${String.format(Locale.US, "%.2f", netRiskReward)})",
+                reason =
+                    "Signal promoted to ACTIVE tracking. Net R:R 1:" +
+                    String.format(Locale.US, "%.2f", netRiskReward),
                 timestampMs = nowMs
             )
+
             appendTransition(confirmedToActive)
             confirmedToActive
         } else {
-            val rec = SignalTransitionRecord(
+            val record = SignalTransitionRecord(
                 signalId = detId,
                 symbol = normSymbol,
                 direction = direction,
@@ -244,8 +324,9 @@ class ActiveSignalStateManager(
                 reason = setupReason,
                 timestampMs = nowMs
             )
-            appendTransition(rec)
-            rec
+
+            appendTransition(record)
+            record
         }
 
         return SignalIntakeOutcome(
@@ -264,29 +345,61 @@ class ActiveSignalStateManager(
         invalidatedByStructure: Boolean = false,
         invalidationReason: String? = null
     ): SignalTransitionRecord? {
-        val normSymbol = symbol.uppercase(Locale.US).trim()
-        val entry = entriesBySymbol[normSymbol] ?: return null
-        if (!entry.state.isOpenOrLive || !currentPrice.isFinite() || currentPrice <= 0.0) return null
 
-        val isLong = entry.direction == FuturesDirection.LONG
-        val newStateAndReason: Pair<ManagedSignalState, String>? = when {
-            invalidatedByStructure -> ManagedSignalState.INVALIDATED to (invalidationReason ?: "Market structure invalidated setup")
-            entry.expiresAtMs > 0L && nowMs >= entry.expiresAtMs ->
-                ManagedSignalState.EXPIRED to "Setup setup validity window expired without target completion"
-            (isLong && currentPrice <= entry.stopLoss) || (!isLong && currentPrice >= entry.stopLoss) ->
-                ManagedSignalState.STOP_LOSS_HIT to "Price ($currentPrice) breached Stop Loss (${entry.stopLoss})"
-            (isLong && currentPrice >= entry.takeProfit2) || (!isLong && currentPrice <= entry.takeProfit2) ->
-                ManagedSignalState.TARGET_HIT to "Final target (${entry.takeProfit2}) reached at $currentPrice"
-            else -> null
-        }
+        val normSymbol =
+            symbol.uppercase(Locale.US).trim()
 
-        val (targetState, reason) = newStateAndReason ?: return null
+        val entry = entriesBySymbol[normSymbol]
+            ?: return null
+
+        if (
+            entry.state.isTerminal ||
+            !currentPrice.isFinite() ||
+            currentPrice <= 0.0
+        ) return null
+
+        val isLong =
+            entry.direction == FuturesDirection.LONG
+
+        val newStateAndReason:
+            Pair<ManagedSignalState, String>? = when {
+
+                invalidatedByStructure ->
+                    ManagedSignalState.INVALIDATED to
+                        (invalidationReason
+                            ?: "Market structure invalidated setup")
+
+                entry.expiresAtMs > 0L &&
+                    nowMs >= entry.expiresAtMs ->
+                    ManagedSignalState.EXPIRED to
+                        "Setup validity window expired"
+
+                entry.state.isOpenOrLive &&
+                    ((isLong && currentPrice <= entry.stopLoss) ||
+                     (!isLong && currentPrice >= entry.stopLoss)) ->
+                    ManagedSignalState.STOP_LOSS_HIT to
+                        "Price ($currentPrice) breached Stop Loss (${entry.stopLoss})"
+
+                entry.state.isOpenOrLive &&
+                    ((isLong && currentPrice >= entry.takeProfit2) ||
+                     (!isLong && currentPrice <= entry.takeProfit2)) ->
+                    ManagedSignalState.TARGET_HIT to
+                        "Final target (${entry.takeProfit2}) reached at $currentPrice"
+
+                else -> null
+            }
+
+        val (targetState, reason) =
+            newStateAndReason ?: return null
+
         val updated = entry.copy(
             state = targetState,
             lastUpdatedMs = nowMs,
             statusReason = reason
         )
+
         entriesBySymbol[normSymbol] = updated
+
         val record = SignalTransitionRecord(
             signalId = entry.signalId,
             symbol = normSymbol,
@@ -296,6 +409,7 @@ class ActiveSignalStateManager(
             reason = reason,
             timestampMs = nowMs
         )
+
         appendTransition(record)
         return record
     }
@@ -307,14 +421,21 @@ class ActiveSignalStateManager(
         reason: String,
         nowMs: Long = System.currentTimeMillis()
     ): SignalTransitionRecord? {
-        val normSymbol = symbol.uppercase(Locale.US).trim()
-        val entry = entriesBySymbol[normSymbol] ?: return null
+
+        val normSymbol =
+            symbol.uppercase(Locale.US).trim()
+
+        val entry = entriesBySymbol[normSymbol]
+            ?: return null
+
         val updated = entry.copy(
             state = toState,
             lastUpdatedMs = nowMs,
             statusReason = reason
         )
+
         entriesBySymbol[normSymbol] = updated
+
         val record = SignalTransitionRecord(
             signalId = entry.signalId,
             symbol = normSymbol,
@@ -324,6 +445,7 @@ class ActiveSignalStateManager(
             reason = reason,
             timestampMs = nowMs
         )
+
         appendTransition(record)
         return record
     }
@@ -335,10 +457,22 @@ class ActiveSignalStateManager(
         direction: FuturesDirection,
         nowMs: Long = System.currentTimeMillis()
     ): Boolean {
-        val norm = "${symbol.uppercase(Locale.US)}_${direction.name}"
-        if (lastNotifiedByKey.containsKey("id:$signalId")) return false
-        val lastSymTime = lastNotifiedByKey[norm] ?: 0L
-        if (nowMs - lastSymTime < defaultNotificationCooldownMs) return false
+
+        val norm =
+            "${symbol.uppercase(Locale.US)}_${direction.name}"
+
+        if (lastNotifiedByKey.containsKey("id:$signalId")) {
+            return false
+        }
+
+        val lastSymTime =
+            lastNotifiedByKey[norm] ?: 0L
+
+        if (
+            nowMs - lastSymTime <
+            defaultNotificationCooldownMs
+        ) return false
+
         return true
     }
 
@@ -349,15 +483,23 @@ class ActiveSignalStateManager(
         direction: FuturesDirection,
         nowMs: Long = System.currentTimeMillis()
     ) {
-        val norm = "${symbol.uppercase(Locale.US)}_${direction.name}"
+
+        val norm =
+            "${symbol.uppercase(Locale.US)}_${direction.name}"
+
         lastNotifiedByKey["id:$signalId"] = nowMs
         lastNotifiedByKey[norm] = nowMs
     }
 
-    private fun appendTransition(record: SignalTransitionRecord) {
+    private fun appendTransition(
+        record: SignalTransitionRecord
+    ) {
         transitionHistory.add(0, record)
+
         if (transitionHistory.size > MAX_TRANSITION_LOG) {
-            transitionHistory.removeAt(transitionHistory.lastIndex)
+            transitionHistory.removeAt(
+                transitionHistory.lastIndex
+            )
         }
     }
 
@@ -369,7 +511,14 @@ class ActiveSignalStateManager(
             direction: FuturesDirection,
             confirmationCandleCloseMs: Long
         ): String {
-            val bucket = if (confirmationCandleCloseMs > 0L) confirmationCandleCloseMs else 0L
+
+            val bucket =
+                if (confirmationCandleCloseMs > 0L) {
+                    confirmationCandleCloseMs
+                } else {
+                    0L
+                }
+
             return "sig_${symbol.uppercase(Locale.US)}_${direction.name}_$bucket"
         }
     }
