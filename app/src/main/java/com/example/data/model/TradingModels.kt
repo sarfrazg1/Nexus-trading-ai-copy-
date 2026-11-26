@@ -237,6 +237,7 @@ enum class NavigationTab(val title: String) {
     MARKETS("Markets"),
     ANALYSIS("Technical Analysis"),
     AI_SIGNALS("AI Signals"),
+    PAPER_TRADING("Paper Trade"),
     NEXUS_AI("NEXUS AI"),
     SCANNER("Scanner"),
     NEWS("News"),

@@ -49,6 +49,13 @@ object StrictSignalQualityEngine {
     const val SCORE_THRESHOLD_HIGH_QUALITY = 92
     const val MIN_NET_RR = 4.0
 
+    fun meetsStrictProQualification(
+        report: StrictSignalQualityReport,
+        minScore: Int = SCORE_THRESHOLD_HIGH_QUALITY
+    ): Boolean = report.qualificationTier != StrictQualificationTier.NO_TRADE &&
+        report.allMandatoryFiltersPassed &&
+        report.totalScore >= minScore
+
     suspend fun evaluateSetup(
         symbol: String,
         assetName: String,
@@ -474,23 +481,25 @@ object StrictSignalQualityEngine {
             structPts += 2
         }
 
-        // 2. EMA (20/50/200 price location + slope) & Close-Confirmed Supertrend MERGED (Max 5 pts)
+        // 2. EMA (20/50/100/200 price location + slope) & Close-Confirmed Supertrend MERGED (Max 5 pts)
         var trendOverlayPts = 0
-        val slope = ta.trend.emaSet.slopeEvaluation
-        val emaLocSlopeMatch = if (isLong) slope?.isBullishAlignedWithSlope == true else slope?.isBearishAlignedWithSlope == true
+        val emaSet = ta.trend.emaSet
+        val slope = emaSet.slopeEvaluation
+        val ema100Aligned = emaSet.ema100?.let { if (isLong) currentPrice > it else currentPrice < it } ?: true
+        val emaLocSlopeMatch = (if (isLong) slope?.isBullishAlignedWithSlope == true else slope?.isBearishAlignedWithSlope == true) && ema100Aligned
         val stMatch = ta.trend.supertrend?.let { it.isCloseConfirmed && it.isBullish == isLong } ?: false
         when {
             emaLocSlopeMatch && stMatch -> {
                 trendOverlayPts = 5
-                passed.add("EMA 20/50/200 location + positive slope & close-confirmed Supertrend agree (merged cluster 5/5)")
+                passed.add("EMA 20/50/100/200 location + slope & close-confirmed Supertrend agree (merged cluster 5/5)")
             }
             emaLocSlopeMatch || stMatch -> {
                 trendOverlayPts = 3
-                passed.add(if (emaLocSlopeMatch) "EMA 20/50/200 price location + slope aligned" else "Close-confirmed Supertrend aligned")
-                missing.add(if (!emaLocSlopeMatch) "EMA 20/50/200 stack + slope not aligned" else "Supertrend opposing")
+                passed.add(if (emaLocSlopeMatch) "EMA 20/50/100/200 price location + slope aligned" else "Close-confirmed Supertrend aligned")
+                missing.add(if (!emaLocSlopeMatch) "EMA 20/50/100/200 stack + slope not aligned" else "Supertrend opposing")
             }
             else -> {
-                missing.add("Neither EMA location/slope nor Supertrend aligns")
+                missing.add("Neither EMA 20/50/100/200 location/slope nor Supertrend aligns")
             }
         }
 
@@ -588,25 +597,32 @@ object StrictSignalQualityEngine {
         val fib = smc.fibonacci
         val fibReport = fib?.validationReport
         if (fib != null && fibReport != null && fib.isUptrendSwing == isLong) {
+            val nearRetrace0382To0786 = fib.retracementLevels.any {
+                it.ratio in 0.38..0.79 && abs(currentPrice - it.price) / currentPrice <= 0.015
+            }
             when {
                 fibReport.isStrictlyValid -> {
                     fibPts = 7
-                    passed.add("7-Gate Fibonacci Golden Zone (0.500–0.618) + confluence strictly validated")
+                    passed.add("7-Gate Fibonacci Golden Zone (0.500–0.618 / 0.382–0.786) + 1.272/1.618 ext & S/R confluence")
                 }
                 fibReport.isInGoldenZone0500To0618 && fibReport.hasSrOrOrderBlockConfluence -> {
                     fibPts = 5
-                    passed.add("Fib Golden Zone overlaps structural S/R / OB")
+                    passed.add("Fib Golden Zone (0.500–0.618) overlaps structural S/R / OB")
+                }
+                nearRetrace0382To0786 && (nearZone || nearOb) -> {
+                    fibPts = 5
+                    passed.add("Fib retracement (0.382/0.786) aligns with S/R or Order Block")
                 }
                 fibReport.isInGoldenZone0500To0618 -> {
                     fibPts = 2
                     missing.add("Fibonacci Golden Zone touch alone without S/R + candle reaction confluence")
                 }
-                fib.extensionLevels.any { abs(it.ratio - 1.272) < 0.01 } && (nearZone || nearOb) -> {
+                fib.extensionLevels.any { abs(it.ratio - 1.272) < 0.01 || abs(it.ratio - 1.618) < 0.01 } && (nearZone || nearOb) -> {
                     fibPts = 5
                     passed.add("Valid Fibonacci swing + 1.272/1.618 extension room aligned with S/R")
                 }
                 else -> {
-                    missing.add("Outside Golden Zone / Fibonacci gates incomplete (${fibReport.passedGatesCount}/7)")
+                    missing.add("Outside Fib 0.382–0.786 / Golden Zone gates incomplete (${fibReport.passedGatesCount}/7)")
                 }
             }
         } else if (nearZone || nearOb) {
@@ -681,7 +697,14 @@ object StrictSignalQualityEngine {
             missing.add("Latest completed bar lacks decisive directional candle close")
         }
 
-        if (pts == 0) {
+        val fakeBreakoutAgainst = entrySmc.breakoutRetests.any {
+            (isLong && it.type == BreakoutRetestType.FAILED_BREAKOUT_BULL_TRAP) ||
+                (!isLong && it.type == BreakoutRetestType.FAILED_BREAKOUT_BEAR_TRAP)
+        }
+        if (fakeBreakoutAgainst) {
+            pts = (pts - 5).coerceAtLeast(0)
+            missing.add("Fake breakout / liquidity trap detected against ${if (isLong) "LONG" else "SHORT"} entry")
+        } else if (pts == 0) {
             missing.add("No confirmed candlestick reaction, breakout-retest, or sweep trigger")
         }
 
@@ -1268,8 +1291,16 @@ object StrictSignalQualityEngine {
         entryCandles: List<Candle>,
         entrySmc: SmcAnalysisResult
     ): Boolean {
+        val fakeBreakoutTrapAgainst = entrySmc.breakoutRetests.any {
+            (isLong && it.type == BreakoutRetestType.FAILED_BREAKOUT_BULL_TRAP) ||
+                (!isLong && it.type == BreakoutRetestType.FAILED_BREAKOUT_BEAR_TRAP)
+        }
+        if (fakeBreakoutTrapAgainst) return false
         if (entrySmc.priceActionPatterns.any { it.isCandleClosedConfirmed && it.type.isBullish == isLong }) return true
-        if (entrySmc.breakoutRetests.any { it.type.isBullish == isLong }) return true
+        if (entrySmc.breakoutRetests.any {
+                (isLong && (it.type == BreakoutRetestType.CONFIRMED_BREAKOUT_RETEST_BULLISH || it.type == BreakoutRetestType.FAILED_BREAKOUT_BEAR_TRAP)) ||
+                    (!isLong && (it.type == BreakoutRetestType.CONFIRMED_BREAKOUT_RETEST_BEARISH || it.type == BreakoutRetestType.FAILED_BREAKOUT_BULL_TRAP))
+            }) return true
         if (entryCandles.size < 2) return false
         val last = entryCandles.last()
         val prev = entryCandles[entryCandles.size - 2]

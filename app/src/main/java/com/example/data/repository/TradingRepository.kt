@@ -43,6 +43,7 @@ import com.example.data.remote.MarketApiService
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,9 +55,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 class TradingRepository(
     private val binanceClient: BinanceClient = BinanceClient(),
@@ -203,7 +206,39 @@ class TradingRepository(
     private val _lastMarketDataUpdateMillis = MutableStateFlow(System.currentTimeMillis())
     val lastMarketDataUpdateMillis: StateFlow<Long> = _lastMarketDataUpdateMillis.asStateFlow()
 
-    private val candleCache = mutableMapOf<String, Pair<Long, List<Candle>>>()
+    private val candleCache = ConcurrentHashMap<String, Pair<Long, List<Candle>>>()
+
+    private data class CachedAiSignal(
+        val timestampMs: Long,
+        val signal: AiTradingSignal
+    )
+
+    private val aiSignalCache = ConcurrentHashMap<String, CachedAiSignal>()
+    private val inFlightAiSignals = ConcurrentHashMap<String, CompletableDeferred<AiTradingSignal>>()
+    val aiSignalStateManager = com.example.data.scanner.ActiveSignalStateManager()
+
+    fun getCachedAiSignalIfFresh(
+        symbol: String,
+        timeframe: CandleTimeframe,
+        maxAgeMs: Long = 45_000L
+    ): AiTradingSignal? {
+        val key = "${normalizeAssetLookupId(symbol)}_${timeframe.name}"
+        val cached = aiSignalCache[key] ?: return null
+        return if (System.currentTimeMillis() - cached.timestampMs <= maxAgeMs) cached.signal else null
+    }
+
+    fun getLastCachedAiSignal(
+        symbol: String,
+        timeframe: CandleTimeframe
+    ): AiTradingSignal? {
+        val key = "${normalizeAssetLookupId(symbol)}_${timeframe.name}"
+        return aiSignalCache[key]?.signal
+    }
+
+    fun clearSignalCache() {
+        aiSignalCache.clear()
+        candleCache.clear()
+    }
 
     init {
         // Cache initial asset templates
@@ -1514,20 +1549,22 @@ class TradingRepository(
         timeframe: CandleTimeframe,
         limit: Int = 250
     ): List<Candle> {
-        val effectiveLimit = if (_isLowPerformanceMode.value) minOf(limit, 45) else limit
+        val effectiveLimit = if (_isLowPerformanceMode.value) minOf(limit, 60) else limit
         val cacheKey = "${symbol}_${timeframe.name}_$effectiveLimit"
         val now = System.currentTimeMillis()
+        val ttlMs = if (_isDataSavingMode.value) 60_000L else 20_000L
 
-        if (_isDataSavingMode.value) {
-            val cached = candleCache[cacheKey]
-            if (cached != null && (now - cached.first) < 60_000L) {
-                return cached.second
-            }
+        val cached = candleCache[cacheKey]
+        if (cached != null && (now - cached.first) < ttlMs && cached.second.isNotEmpty()) {
+            return cached.second
         }
 
         val candles = candleService.fetchCandles(symbol, timeframe, effectiveLimit)
-        candleCache[cacheKey] = Pair(now, candles)
-        return candles
+        if (candles.isNotEmpty()) {
+            candleCache[cacheKey] = Pair(now, candles)
+            return candles
+        }
+        return cached?.second ?: emptyList()
     }
 
     suspend fun calculateTechnicalAnalysis(
@@ -1608,34 +1645,107 @@ class TradingRepository(
     suspend fun calculateAiSignal(
         symbol: String,
         assetName: String,
-        timeframe: CandleTimeframe = CandleTimeframe.H1
+        timeframe: CandleTimeframe = CandleTimeframe.H1,
+        forceRefresh: Boolean = false
     ): AiTradingSignal = withContext(Dispatchers.IO) {
+        val canonical = normalizeAssetLookupId(symbol)
+        val cacheKey = "${canonical}_${timeframe.name}"
+
+        if (!forceRefresh) {
+            aiSignalCache[cacheKey]?.let { cached ->
+                if (System.currentTimeMillis() - cached.timestampMs <= 45_000L) {
+                    return@withContext cached.signal
+                }
+            }
+        }
+
+        // In-flight deduplication so rapid re-taps share a single network calculation
+        val existingDeferred = inFlightAiSignals[cacheKey]
+        if (existingDeferred != null && !forceRefresh) {
+            return@withContext existingDeferred.await()
+        }
+
+        val newDeferred = CompletableDeferred<AiTradingSignal>()
+        val raced = inFlightAiSignals.putIfAbsent(cacheKey, newDeferred)
+        if (raced != null && !forceRefresh) {
+            return@withContext raced.await()
+        }
+
+        try {
+            val computed = computeAiSignalUncached(symbol, assetName, timeframe)
+            aiSignalCache[cacheKey] = CachedAiSignal(System.currentTimeMillis(), computed)
+            newDeferred.complete(computed)
+            computed
+        } catch (e: Throwable) {
+            val staleFallback = aiSignalCache[cacheKey]?.signal
+            if (staleFallback != null) {
+                newDeferred.complete(staleFallback)
+                staleFallback
+            } else {
+                newDeferred.completeExceptionally(e)
+                throw e
+            }
+        } finally {
+            inFlightAiSignals.remove(cacheKey, newDeferred)
+        }
+    }
+
+    private suspend fun computeAiSignalUncached(
+        symbol: String,
+        assetName: String,
+        timeframe: CandleTimeframe
+    ): AiTradingSignal = withContext(Dispatchers.IO) {
+        val canonical = normalizeAssetLookupId(symbol)
         var asset = findAssetBySymbol(symbol)
         if (asset == null || asset.currentPrice == null || asset.currentPrice <= 0.0 || asset.dataStatus == MarketDataStatus.UNAVAILABLE) {
-            val canonical = normalizeAssetLookupId(symbol)
             val spec = com.example.data.providers.MultiMarketInstrumentCatalog.resolve(canonical)
-            when (spec?.category) {
-                AssetCategory.COMMODITIES -> {
-                    val commoditiesKey = _apiConfigs.value.firstOrNull { it.id == "commodities_feed" }?.apiKey ?: ""
-                    runCatching {
-                        val quotes = commoditiesService.fetchCommodityQuotes(commoditiesKey)
-                        updateCommoditiesState(quotes)
+            withTimeoutOrNull(3_500L) {
+                when (spec?.category) {
+                    AssetCategory.COMMODITIES -> {
+                        val commoditiesKey = _apiConfigs.value.firstOrNull { it.id == "commodities_feed" }?.apiKey ?: ""
+                        runCatching {
+                            val quotes = commoditiesService.fetchCommodityQuotes(commoditiesKey)
+                            updateCommoditiesState(quotes)
+                        }
                     }
-                }
-                AssetCategory.STOCKS, AssetCategory.FOREX, AssetCategory.INDICES -> {
-                    runCatching {
-                        val quotes = commoditiesService.fetchStocksAndMacroQuotes()
-                        updateCommoditiesState(quotes)
+                    AssetCategory.STOCKS, AssetCategory.FOREX, AssetCategory.INDICES -> {
+                        runCatching {
+                            val quotes = commoditiesService.fetchStocksAndMacroQuotes()
+                            updateCommoditiesState(quotes)
+                        }
                     }
+                    else -> runCatching { fetchCryptoRestTickers() }
                 }
-                else -> runCatching { fetchCryptoRestTickers() }
             }
             asset = findAssetBySymbol(symbol)
         }
 
-        val candles = getCandles(symbol, timeframe, 250)
-        val candleSource = candleService.lastDataSourceForSymbol(symbol)
         val spec = com.example.data.providers.MultiMarketInstrumentCatalog.resolve(symbol)
+        val coreTimeframes = linkedSetOf(
+            timeframe,
+            CandleTimeframe.M15,
+            CandleTimeframe.H1,
+            CandleTimeframe.H4,
+            CandleTimeframe.D1
+        )
+
+        // Single parallel candle batch with bounded 4.5s timeout per timeframe
+        val candlesByTf: Map<CandleTimeframe, List<Candle>> = coroutineScope {
+            coreTimeframes.map { tf ->
+                async(Dispatchers.IO) {
+                    val limit = if (tf == timeframe) 250 else 120
+                    tf to (withTimeoutOrNull(4_500L) { getCandles(symbol, tf, limit) } ?: emptyList())
+                }
+            }.awaitAll().toMap()
+        }
+
+        val candles = candlesByTf[timeframe].orEmpty()
+        val candles15m = candlesByTf[CandleTimeframe.M15].orEmpty()
+        val candles1h = candlesByTf[CandleTimeframe.H1].orEmpty()
+        val candles4h = candlesByTf[CandleTimeframe.H4].orEmpty()
+        val candles1d = candlesByTf[CandleTimeframe.D1].orEmpty()
+
+        val candleSource = candleService.lastDataSourceForSymbol(symbol)
         val currentPrice = asset?.currentPrice
         val dataStatus = asset?.dataStatus ?: MarketDataStatus.UNAVAILABLE
         val dataSourceName = candleSource?.takeIf { !it.startsWith("DATA UNAVAILABLE") }
@@ -1644,23 +1754,68 @@ class TradingRepository(
             ?: "DATA UNAVAILABLE"
         val lastUpdated = asset?.lastUpdated
 
-        val ta = if (candles.size >= 30) {
-            TechnicalIndicatorsEngine.analyze(symbol, assetName, timeframe, candles)
-        } else null
-        val smc = if (candles.size >= 30) {
-            calculateSmcAnalysisForCandles(symbol, assetName, timeframe, candles)
-        } else null
+        val mtfSnapshots: List<TimeframeSmcSnapshot> = withContext(Dispatchers.Default) {
+            listOf(CandleTimeframe.D1, CandleTimeframe.H4, CandleTimeframe.H1, CandleTimeframe.M15)
+                .mapNotNull { tf ->
+                    val tfCandles = candlesByTf[tf].orEmpty()
+                    if (tfCandles.size >= 20) {
+                        val tempResult = SmcCalculationEngine.analyze(symbol, assetName, tf, tfCandles)
+                        val isBullish = tempResult.marketStructure.trendState == MarketTrendState.BULLISH_UPTREND ||
+                            tempResult.marketStructure.isBullishBOSPresent ||
+                            tempResult.marketStructure.isBullishCHoCHPresent
+                        TimeframeSmcSnapshot(
+                            timeframe = tf,
+                            trend = tempResult.marketStructure.trendState,
+                            lastBreakType = tempResult.marketStructure.latestBreak?.type,
+                            unmitigatedOBCount = tempResult.orderBlocks.count { it.status == OrderBlockStatus.UNMITIGATED },
+                            unfilledFvgCount = tempResult.fairValueGaps.count { it.status == FvgStatus.UNFILLED },
+                            nearestSupport = tempResult.priceZones.firstOrNull {
+                                it.type == PriceZoneType.SUPPORT || it.type == PriceZoneType.DEMAND
+                            }?.centralPrice,
+                            nearestResistance = tempResult.priceZones.firstOrNull {
+                                it.type == PriceZoneType.RESISTANCE || it.type == PriceZoneType.SUPPLY
+                            }?.centralPrice,
+                            isBullishBias = isBullish
+                        )
+                    } else null
+                }
+        }
+
+        val (ta, smc) = withContext(Dispatchers.Default) {
+            val taRes = if (candles.size >= 30) {
+                TechnicalIndicatorsEngine.analyze(symbol, assetName, timeframe, candles)
+            } else null
+            val smcRes = if (candles.size >= 30) {
+                SmcCalculationEngine.analyze(symbol, assetName, timeframe, candles, mtfSnapshots)
+            } else null
+            taRes to smcRes
+        }
 
         val futuresLiq = if (spec?.isBinanceFuturesEligible == true && candles.isNotEmpty()) {
-            buildFuturesLiquiditySnapshot(symbol, candles)
+            withTimeoutOrNull(3_000L) { buildFuturesLiquiditySnapshot(symbol, candles) }
         } else null
 
-        val candles15m = if (timeframe == CandleTimeframe.M15) candles else getCandles(symbol, CandleTimeframe.M15, 120)
-        val candles1h = if (timeframe == CandleTimeframe.H1) candles else getCandles(symbol, CandleTimeframe.H1, 120)
-        val candles4h = if (timeframe == CandleTimeframe.H4) candles else getCandles(symbol, CandleTimeframe.H4, 100)
-        val candles1d = if (timeframe == CandleTimeframe.D1) candles else getCandles(symbol, CandleTimeframe.D1, 80)
+        val strictReportPrecheck = if (candles.size >= 30 && currentPrice != null && currentPrice > 0.0) {
+            com.example.data.signal.StrictSignalQualityEngine.evaluateSetup(
+                symbol = symbol,
+                assetName = assetName,
+                currentPrice = currentPrice,
+                dataStatus = dataStatus,
+                primaryTimeframe = timeframe,
+                candles = candles,
+                candles15m = candles15m,
+                candles1h = candles1h,
+                candles4h = candles4h,
+                candles1d = candles1d,
+                technicalAnalysis = ta,
+                smcAnalysis = smc,
+                mtfSnapshots = mtfSnapshots,
+                futuresLiquidity = futuresLiq,
+                hybridState = _hybridMarketState.value
+            )
+        } else null
 
-        val baseSignal = AiTradingSignalEngine.generateSignal(
+        val gatedSignal = AiTradingSignalEngine.generateSignal(
             symbol = symbol,
             assetName = assetName,
             currentPrice = currentPrice,
@@ -1671,32 +1826,94 @@ class TradingRepository(
             candles = candles,
             technicalAnalysis = ta,
             smcAnalysis = smc,
-            mtfSnapshots = smc?.multiTimeframe?.snapshots ?: emptyList()
+            mtfSnapshots = mtfSnapshots,
+            strictQualityReportOverride = strictReportPrecheck,
+            enforceStrictQualificationGate = true,
+            strictMinScore = com.example.data.signal.StrictSignalQualityEngine.SCORE_THRESHOLD_HIGH_QUALITY
         )
 
-        val strictReport = com.example.data.signal.StrictSignalQualityEngine.evaluateSetup(
-            symbol = symbol,
-            assetName = assetName,
-            currentPrice = currentPrice,
-            dataStatus = dataStatus,
-            primaryTimeframe = timeframe,
-            candles = candles,
-            candles15m = candles15m,
-            candles1h = candles1h,
-            candles4h = candles4h,
-            candles1d = candles1d,
-            technicalAnalysis = ta,
-            smcAnalysis = smc,
-            mtfSnapshots = smc?.multiTimeframe?.snapshots ?: emptyList(),
-            futuresLiquidity = futuresLiq,
-            hybridState = _hybridMarketState.value,
-            proposedEntryPrice = baseSignal.riskPlan?.entryPrice,
-            proposedStopLoss = baseSignal.riskPlan?.stopLoss,
-            proposedTargetPrice = baseSignal.riskPlan?.takeProfit3,
-            candidateDirectionOverride = baseSignal.decision.takeIf { it != SignalDecision.NO_TRADE }
-        )
+        // Enforce ActiveSignalStateManager: cooldown, duplicate prevention & anti-flip protection
+        if (currentPrice != null && currentPrice > 0.0) {
+            aiSignalStateManager.evaluateMarketUpdate(canonical, currentPrice, System.currentTimeMillis())
+        }
 
-        baseSignal.copy(strictQualityReport = strictReport)
+        if (gatedSignal.decision != SignalDecision.NO_TRADE && gatedSignal.riskPlan != null) {
+            val dir = if (gatedSignal.decision == SignalDecision.LONG) {
+                com.example.data.scanner.FuturesDirection.LONG
+            } else {
+                com.example.data.scanner.FuturesDirection.SHORT
+            }
+            val lastCloseMs = candles15m.lastOrNull()?.closeTime ?: candles.lastOrNull()?.closeTime ?: System.currentTimeMillis()
+            val intake = aiSignalStateManager.submitCandidate(
+                symbol = canonical,
+                direction = dir,
+                isConfirmed = true,
+                entryPrice = gatedSignal.riskPlan.entryPrice,
+                stopLoss = gatedSignal.riskPlan.stopLoss,
+                takeProfit1 = gatedSignal.riskPlan.takeProfit1,
+                takeProfit2 = gatedSignal.riskPlan.takeProfit3,
+                netRiskReward = gatedSignal.strictQualityReport?.netRiskRewardSummary?.netRiskReward ?: gatedSignal.riskPlan.riskRewardRatio,
+                qualityScore = gatedSignal.strictQualityReport?.totalScore ?: gatedSignal.confidence.totalScore,
+                dataSourceName = dataSourceName,
+                setupReason = "Strict ${gatedSignal.strictQualityReport?.totalScore ?: gatedSignal.confidence.totalScore}/100",
+                confirmationCandleCloseMs = lastCloseMs,
+                expiresAtMs = lastCloseMs + (4 * 3_600_000L)
+            )
+            if (!intake.accepted) {
+                return@withContext gatedSignal.copy(
+                    decision = SignalDecision.NO_TRADE,
+                    riskPlan = null,
+                    noTradeReason = com.example.data.signal.NoTradeReason(
+                        code = "ANTI_FLIP_COOLDOWN_GUARD",
+                        headline = "WAIT / NO TRADE — Active Opposite Signal Guard",
+                        detailedExplanation = intake.rejectionReason
+                            ?: "Blocked silent direction flip while prior setup remains live.",
+                        conflictingFactors = listOfNotNull(
+                            intake.rejectionReason,
+                            "Anti-noise guard prevents flip-flopping between LONG and SHORT before SL/TP/Expiry"
+                        ),
+                        recommendedAction = "Wait until active signal closes or expires cleanly."
+                    )
+                )
+            }
+        }
+
+        gatedSignal
+    }
+
+    suspend fun fetchBacktestInputsForSymbols(
+        symbols: List<String>,
+        lookbackDays: Int = 180,
+        onProgress: (String) -> Unit = {}
+    ): List<com.example.data.timemachine.SingleCoinHistoricalInput> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val startMs = now - (lookbackDays.coerceIn(7, 210).toLong() * 86_400_000L)
+        val normalizedList = symbols.map {
+            val up = it.uppercase(Locale.US).trim()
+            if (up.endsWith("USDT")) up else "${up}USDT"
+        }.distinct()
+
+        val results = mutableListOf<com.example.data.timemachine.SingleCoinHistoricalInput>()
+        for ((idx, pair) in normalizedList.withIndex()) {
+            onProgress("Fetching ${idx + 1}/${normalizedList.size}: $pair (${lookbackDays}d 15M/HTF & funding)...")
+            val input = coroutineScope {
+                val c15Deferred = async { futuresApiClient.fetchHistoricalCandlesPaginated(pair, CandleTimeframe.M15, startMs, now) }
+                val c1hDeferred = async { futuresApiClient.fetchHistoricalCandlesPaginated(pair, CandleTimeframe.H1, startMs, now, maxBars = 5000) }
+                val c4hDeferred = async { futuresApiClient.fetchHistoricalCandlesPaginated(pair, CandleTimeframe.H4, startMs, now, maxBars = 1500) }
+                val c1dDeferred = async { futuresApiClient.fetchHistoricalCandlesPaginated(pair, CandleTimeframe.D1, startMs - (120L * 86_400_000L), now, maxBars = 400) }
+                val fundDeferred = async { futuresApiClient.fetchHistoricalFundingRatesPaginated(pair, startMs, now) }
+                com.example.data.timemachine.SingleCoinHistoricalInput(
+                    symbol = pair,
+                    candles15m = c15Deferred.await(),
+                    candles1h = c1hDeferred.await(),
+                    candles4h = c4hDeferred.await(),
+                    candles1d = c1dDeferred.await(),
+                    fundingHistory = fundDeferred.await()
+                )
+            }
+            results.add(input)
+        }
+        results
     }
 
     suspend fun refreshAiSignals(): List<AiTradingSignal> = withContext(Dispatchers.IO) {
@@ -1715,7 +1932,9 @@ class TradingRepository(
             symbolsToScan.map { (sym, name) ->
                 async {
                     try {
-                        calculateAiSignal(sym, name, CandleTimeframe.H1)
+                        withTimeoutOrNull(8_000L) {
+                            calculateAiSignal(sym, name, CandleTimeframe.H1)
+                        }
                     } catch (e: Exception) {
                         Log.w("TradingRepo", "Failed to generate AI signal for $sym: ${e.message}")
                         null

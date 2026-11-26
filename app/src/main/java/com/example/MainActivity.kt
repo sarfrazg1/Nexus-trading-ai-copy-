@@ -66,6 +66,7 @@ import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.LearningCenterScreen
 import com.example.ui.screens.MarketsScreen
 import com.example.ui.screens.NewsScreen
+import com.example.ui.screens.PaperTradingScreen
 import com.example.ui.screens.ScannerScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SignalsScreen
@@ -464,7 +465,9 @@ fun NexusTradingApp(
                             clipboard.setPrimaryClip(clip)
                             viewModel.createAlert(signal.assetSymbol, signal.assetName, 0.0, com.example.data.model.AlertDirection.ABOVE, "Copied signal levels")
                         },
-                        onToggleFavorite = { id -> viewModel.toggleFavorite(id) }
+                        onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
+                        paperEquityUsdt = uiState.paperPortfolio.equityUsdt,
+                        paperNetPnlUsdt = uiState.paperPortfolio.totalNetPnlUsdt
                     )
                 }
 
@@ -540,7 +543,10 @@ fun NexusTradingApp(
                                 "${signal.assetSymbol} ${signal.type.label}\nEntry: ${signal.entryPrice}\nTarget: ${signal.targetPrice}\nStop: ${signal.stopLoss}"
                             )
                             clipboard.setPrimaryClip(clip)
-                        }
+                        },
+                        errorMessage = uiState.signalAnalysisError,
+                        onRetryClick = { viewModel.retryAiSignal() },
+                        onPaperTradeClick = { aiSignal -> viewModel.openPaperTradeFromAiSignal(aiSignal) }
                     )
                 }
 
@@ -626,7 +632,7 @@ fun NexusTradingApp(
                         onIntervalSelected = { sec -> viewModel.setFuturesScannerInterval(sec) },
                         onTogglePaperTrading = { enabled -> viewModel.setFuturesScannerPaperTrading(enabled) },
                         onExplainSignalWithAi = { signal -> viewModel.explainFuturesSignalWithAi(signal) },
-                        onSimulatePaperTrade = { signal -> viewModel.simulateFuturesPaperTrade(signal) },
+                        onSimulatePaperTrade = { signal -> viewModel.openPaperTradeFromFuturesSignal(signal) },
                         strict92ConfidenceMode = uiState.strict92ConfidenceMode,
                         onToggleStrict92Mode = { enabled -> viewModel.setStrict92ConfidenceMode(enabled) },
                         onOpenWorkflow = { signal -> viewModel.openTradeWorkflow(signal) },
@@ -661,6 +667,41 @@ fun NexusTradingApp(
                         onToggleBookmark = { id -> viewModel.toggleNewsBookmark(id) },
                         onRefreshNews = { viewModel.refreshNews() },
                         onOpenGlossaryTerm = { term -> viewModel.openEconomicGlossary(term) }
+                    )
+                }
+
+                NavigationTab.PAPER_TRADING -> {
+                    PaperTradingScreen(
+                        portfolio = uiState.paperPortfolio,
+                        prefill = uiState.paperTradePrefill,
+                        assets = uiState.assets,
+                        feedbackMessage = uiState.paperOrderFeedback,
+                        managedSignals = uiState.managedSignals,
+                        transitionLog = uiState.signalTransitionLog,
+                        backtestReport = uiState.strategyBacktestReport,
+                        isRunningBacktest = uiState.isRunningStrategyBacktest,
+                        backtestProgress = uiState.strategyBacktestProgress,
+                        backtestError = uiState.strategyBacktestError,
+                        onResetWallet = { balance -> viewModel.resetPaperWallet(balance) },
+                        onSubmitMarketOrder = { sym, side, qty, lev, sl, tp ->
+                            viewModel.submitPaperMarketOrder(sym, side, qty, lev, sl, tp)
+                        },
+                        onSubmitLimitOrder = { sym, side, limit, qty, lev, sl, tp ->
+                            viewModel.submitPaperLimitOrder(sym, side, limit, qty, lev, sl, tp)
+                        },
+                        onEditPendingOrder = { orderId, limit, qty, sl, tp ->
+                            viewModel.editPendingPaperOrder(orderId, limit, qty, sl, tp)
+                        },
+                        onCancelPendingOrder = { orderId -> viewModel.cancelPendingPaperOrder(orderId) },
+                        onUpdatePositionSlTp = { posId, sl, tp ->
+                            viewModel.updatePaperPositionSlTp(posId, sl, tp)
+                        },
+                        onClosePosition = { posId -> viewModel.closePaperPosition(posId) },
+                        onClearPrefill = { viewModel.clearPaperTradePrefill() },
+                        onDismissFeedback = { viewModel.dismissPaperOrderFeedback() },
+                        onRunSixMonthBacktest = { syms, days ->
+                            viewModel.runSixMonthStrategyBacktest(syms, days)
+                        }
                     )
                 }
 

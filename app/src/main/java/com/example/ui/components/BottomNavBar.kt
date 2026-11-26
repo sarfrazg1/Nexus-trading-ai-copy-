@@ -3,6 +3,7 @@ package com.example.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,14 +11,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
@@ -38,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.learning.LearningLanguageMode
@@ -53,11 +59,13 @@ fun BottomNavBar(
     modifier: Modifier = Modifier
 ) {
     val colors = NexusTheme.colors
+    val scrollState = rememberScrollState()
 
     val tabs = listOf(
         TabItem(NavigationTab.DASHBOARD, NexusLocalization.tabDashboard(languageMode), Icons.Default.Dashboard),
         TabItem(NavigationTab.MARKETS, NexusLocalization.tabMarkets(languageMode), Icons.Default.ShowChart),
         TabItem(NavigationTab.AI_SIGNALS, NexusLocalization.tabSignals(languageMode), Icons.Default.Bolt),
+        TabItem(NavigationTab.PAPER_TRADING, NexusLocalization.tabPaperTrading(languageMode), Icons.Default.AccountBalanceWallet),
         TabItem(NavigationTab.NEXUS_AI, NexusLocalization.tabNexusAi(languageMode), Icons.Default.AutoAwesome),
         TabItem(NavigationTab.LEARNING, NexusLocalization.tabAcademy(languageMode), Icons.Default.School),
         TabItem(NavigationTab.SCANNER, NexusLocalization.tabScanner(languageMode), Icons.Default.FilterAlt),
@@ -76,8 +84,9 @@ fun BottomNavBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
+                .horizontalScroll(scrollState)
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             tabs.forEach { item ->
@@ -85,25 +94,27 @@ fun BottomNavBar(
 
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                     modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .widthIn(min = 56.dp)
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .clickable(onClick = { onTabSelected(item.tab) })
-                        .padding(vertical = 4.dp)
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
                         .testTag("nav_tab_${item.tab.name.lowercase()}")
                 ) {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (isSelected) colors.surfaceVariant else Color.Transparent)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = item.icon,
                             contentDescription = item.label,
                             tint = if (isSelected) colors.gold else colors.textMuted,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
@@ -116,7 +127,8 @@ fun BottomNavBar(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 9.sp
                         ),
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

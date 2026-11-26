@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -79,6 +81,8 @@ fun DashboardScreen(
     onNavigateTab: (NavigationTab) -> Unit,
     onCopySignalLevels: (Signal) -> Unit,
     onToggleFavorite: (String) -> Unit = {},
+    paperEquityUsdt: Double? = null,
+    paperNetPnlUsdt: Double? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = NexusTheme.colors
@@ -105,6 +109,60 @@ fun DashboardScreen(
             Spacer(modifier = Modifier.height(8.dp))
             // Dashboard Title & Overview Banner
             MarketOverviewHeader(overview = overview, onConfigureFeeds = { onNavigateTab(NavigationTab.SETTINGS) })
+        }
+
+        // Paper Trading & 6M Backtest Quick Access Card
+        item {
+            val eqText = paperEquityUsdt?.let { String.format(Locale.US, "$%,.2f", it) } ?: "Open Terminal"
+            val pnlValue = paperNetPnlUsdt ?: 0.0
+            val pnlColor = if (pnlValue >= 0.0) colors.bullishGreen else colors.bearishRed
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateTab(NavigationTab.PAPER_TRADING) }
+                    .testTag("dashboard_paper_trading_cta"),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
+                border = BorderStroke(1.dp, colors.gold.copy(alpha = 0.45f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp)
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = "Paper Trading Wallet",
+                            tint = colors.gold,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "PAPER TRADING & 6M BACKTEST",
+                                color = colors.gold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = "Equity: $eqText • Net PnL: ${if (pnlValue >= 0) "+" else ""}${String.format(Locale.US, "%.2f", pnlValue)} USDT",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ArrowForward,
+                        contentDescription = "Open Paper Trading",
+                        tint = pnlColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
 
         // Priority Watchlist Carousel (if any favorited)

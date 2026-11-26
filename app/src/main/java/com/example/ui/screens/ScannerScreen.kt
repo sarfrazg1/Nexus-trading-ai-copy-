@@ -185,7 +185,8 @@ fun ScannerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(colors.background)
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp)
+            .testTag("scanner_main_list"),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {

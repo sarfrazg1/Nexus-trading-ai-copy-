@@ -519,4 +519,208 @@ class BinanceFuturesApiClient(
             connectWebSocket(symbols)
         }
     }
+
+    data class HistoricalFundingEntry(
+        val symbol: String,
+        val fundingTimeMs: Long,
+        val fundingRateFraction: Double
+    )
+
+    internal fun parseKlinesJson(jsonBody: String): List<Candle> {
+        val array = try {
+            JSONArray(jsonBody)
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        val candles = ArrayList<Candle>(array.length())
+        for (i in 0 until array.length()) {
+            val item = array.optJSONArray(i) ?: continue
+            val openTime = item.optLong(0, 0L)
+            val open = item.optString(1).toDoubleOrNull() ?: continue
+            val high = item.optString(2).toDoubleOrNull() ?: continue
+            val low = item.optString(3).toDoubleOrNull() ?: continue
+            val close = item.optString(4).toDoubleOrNull() ?: continue
+            val volume = item.optString(5).toDoubleOrNull() ?: 0.0
+            val closeTime = item.optLong(6, openTime)
+            val quoteVolume = item.optString(7).toDoubleOrNull() ?: 0.0
+            val tradesCount = item.optInt(8, 0)
+            val takerBuyBase = item.optString(9).toDoubleOrNull() ?: 0.0
+            val takerBuyQuote = item.optString(10).toDoubleOrNull() ?: 0.0
+            if (openTime <= 0L || !open.isFinite() || !high.isFinite() || !low.isFinite() || !close.isFinite()) {
+                continue
+            }
+            candles.add(
+                Candle(
+                    openTime = openTime,
+                    open = open,
+                    high = high,
+                    low = low,
+                    close = close,
+                    volume = volume,
+                    closeTime = closeTime,
+                    quoteVolume = quoteVolume,
+                    tradesCount = tradesCount,
+                    takerBuyBaseVolume = takerBuyBase,
+                    takerBuyQuoteVolume = takerBuyQuote
+                )
+            )
+        }
+        return candles
+    }
+
+    internal fun parseFundingRatesJson(symbol: String, jsonBody: String): List<HistoricalFundingEntry> {
+        val array = try {
+            JSONArray(jsonBody)
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        val result = ArrayList<HistoricalFundingEntry>(array.length())
+        val norm = symbol.uppercase().trim()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val timeMs = obj.optLong("fundingTime", 0L)
+            val rate = obj.optString("fundingRate").toDoubleOrNull()
+            if (timeMs > 0L && rate != null && rate.isFinite()) {
+                result.add(
+                    HistoricalFundingEntry(
+                        symbol = norm,
+                        fundingTimeMs = timeMs,
+                        fundingRateFraction = rate
+                    )
+                )
+            }
+        }
+        return result.sortedBy { it.fundingTimeMs }
+    }
+
+    /**
+     * Paginated historical candle fetcher supporting up to 6 months (~18,000+ 15M bars)
+     * from public Binance Futures /fapi/v1/klines (with Spot /api/v3/klines fallback).
+     */
+    suspend fun fetchHistoricalCandlesPaginated(
+        symbol: String,
+        timeframe: CandleTimeframe,
+        startTimeMs: Long,
+        endTimeMs: Long = System.currentTimeMillis(),
+        maxBars: Int = 18_500
+    ): List<Candle> = withContext(Dispatchers.IO) {
+        val normalizedSymbol = symbol.uppercase().trim()
+        val intervalStr = when (timeframe) {
+            CandleTimeframe.M5 -> "5m"
+            CandleTimeframe.M15 -> "15m"
+            CandleTimeframe.H1 -> "1h"
+            CandleTimeframe.H4 -> "4h"
+            CandleTimeframe.D1 -> "1d"
+            else -> timeframe.binanceInterval
+        }
+
+        val endpoints = listOf(
+            "$FUTURES_BASE_URL/fapi/v1/klines",
+            "$SPOT_FALLBACK_URL/api/v3/klines"
+        )
+
+        for (endpoint in endpoints) {
+            val isFutures = endpoint.contains("fapi")
+            val pageLimit = if (isFutures) 1500 else 1000
+            val collected = LinkedHashMap<Long, Candle>()
+            var cursorStart = startTimeMs
+            var consecutiveFailures = 0
+
+            while (cursorStart < endTimeMs && collected.size < maxBars && consecutiveFailures < 3) {
+                val url = "$endpoint?symbol=$normalizedSymbol&interval=$intervalStr&startTime=$cursorStart&endTime=$endTimeMs&limit=$pageLimit"
+                var batch: List<Candle> = emptyList()
+                try {
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("Accept", "application/json")
+                        .header("User-Agent", "Mozilla/5.0 (Android; NexusTradingAI)")
+                        .build()
+
+                    client.newCall(request).execute().use { response ->
+                        if (response.code == 429 || response.code == 418) {
+                            consecutiveFailures++
+                            delay(1500L)
+                            return@use
+                        }
+                        if (!response.isSuccessful) {
+                            consecutiveFailures++
+                            return@use
+                        }
+                        val body = response.body?.string() ?: return@use
+                        batch = parseKlinesJson(body)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Paginated fetch error ($endpoint $normalizedSymbol): ${e.message}")
+                    consecutiveFailures++
+                }
+
+                if (batch.isEmpty()) {
+                    if (consecutiveFailures > 0) continue else break
+                }
+
+                consecutiveFailures = 0
+                batch.forEach { candle ->
+                    if (candle.openTime in startTimeMs..endTimeMs) {
+                        collected[candle.openTime] = candle
+                    }
+                }
+
+                val lastOpen = batch.last().openTime
+                val step = lastOpen + 1L
+                if (step <= cursorStart || batch.size < pageLimit) break
+                cursorStart = step
+                delay(45L)
+            }
+
+            if (collected.isNotEmpty()) {
+                return@withContext collected.values.sortedBy { it.openTime }
+            }
+        }
+
+        emptyList()
+    }
+
+    /**
+     * Fetches paginated historical 8-hour funding rate events from Binance USDT-M Futures
+     * (/fapi/v1/fundingRate) for realistic backtest carry cost calculation.
+     */
+    suspend fun fetchHistoricalFundingRatesPaginated(
+        symbol: String,
+        startTimeMs: Long,
+        endTimeMs: Long = System.currentTimeMillis()
+    ): List<HistoricalFundingEntry> = withContext(Dispatchers.IO) {
+        val normalizedSymbol = symbol.uppercase().trim()
+        val collected = LinkedHashMap<Long, HistoricalFundingEntry>()
+        var cursor = startTimeMs
+        var pageCount = 0
+
+        while (cursor < endTimeMs && pageCount < 8) {
+            pageCount++
+            val url = "$FUTURES_BASE_URL/fapi/v1/fundingRate?symbol=$normalizedSymbol&startTime=$cursor&endTime=$endTimeMs&limit=1000"
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "Mozilla/5.0 (Android; NexusTradingAI)")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext collected.values.sortedBy { it.fundingTimeMs }
+                    val body = response.body?.string() ?: return@withContext collected.values.sortedBy { it.fundingTimeMs }
+                    val batch = parseFundingRatesJson(normalizedSymbol, body)
+                    if (batch.isEmpty()) return@withContext collected.values.sortedBy { it.fundingTimeMs }
+                    batch.forEach { collected[it.fundingTimeMs] = it }
+                    val nextCursor = batch.last().fundingTimeMs + 1L
+                    if (nextCursor <= cursor || batch.size < 1000) {
+                        return@withContext collected.values.sortedBy { it.fundingTimeMs }
+                    }
+                    cursor = nextCursor
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Historical funding fetch skipped for $normalizedSymbol: ${e.message}")
+                break
+            }
+            delay(40L)
+        }
+        collected.values.sortedBy { it.fundingTimeMs }
+    }
 }

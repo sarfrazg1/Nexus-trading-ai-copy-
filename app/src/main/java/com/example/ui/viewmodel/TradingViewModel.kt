@@ -34,14 +34,18 @@ import com.example.data.settings.AppSettingsRepository
 import com.example.data.settings.AppThemeMode
 import com.example.data.settings.RefreshRatePreference
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 enum class AnalysisMode(val title: String) {
     SMC_FIBONACCI("Smart Money & Fib"),
@@ -179,7 +183,16 @@ data class TradingUiState(
     val managedSignals: List<com.example.data.scanner.ManagedSignalEntry> = emptyList(),
     val signalTransitionLog: List<com.example.data.scanner.SignalTransitionRecord> = emptyList(),
     val budgetConfig: com.example.data.risk.BudgetConfig = com.example.data.risk.BudgetConfig(),
-    val dailyRiskLedger: com.example.data.risk.DailyRiskLedger = com.example.data.risk.DailyRiskLedger()
+    val dailyRiskLedger: com.example.data.risk.DailyRiskLedger = com.example.data.risk.DailyRiskLedger(),
+
+    // Final Master Upgrade: Complete Paper Trading & 6-Month Historical Backtesting
+    val paperPortfolio: com.example.data.paper.PaperPortfolioSnapshot = com.example.data.paper.PaperPortfolioSnapshot(),
+    val paperTradePrefill: com.example.data.paper.PaperTradePrefill? = null,
+    val paperOrderFeedback: String? = null,
+    val strategyBacktestReport: com.example.data.timemachine.MultiCoinBacktestReport? = null,
+    val isRunningStrategyBacktest: Boolean = false,
+    val strategyBacktestProgress: String? = null,
+    val strategyBacktestError: String? = null
 ) {
     val selectedAssetDetail: MarketAsset?
         get() = selectedAssetId?.let { id -> assets.firstOrNull { it.id == id } }
@@ -267,6 +280,22 @@ class TradingViewModel(
     private val _isScanningMultiMarketStrict = MutableStateFlow(false)
     private val _multiMarketSetupBacktestSummary = MutableStateFlow<String?>(null)
     private val _multiMarketSetupDirectionalReport = MutableStateFlow<com.example.data.timemachine.DirectionalSetupBacktestReport?>(null)
+
+    // Signals request cancellation & sequence guard
+    private var signalLoadJob: Job? = null
+    private val signalRequestSeq = AtomicLong(0L)
+
+    // Paper Trading & 6M Strategy Backtest State
+    private var paperTradingRepo = com.example.data.paper.PaperTradingRepository()
+    private var paperCollectorJob: Job? = null
+    private val _paperPortfolio = MutableStateFlow(paperTradingRepo.portfolio.value)
+    private val _paperTradePrefill = MutableStateFlow<com.example.data.paper.PaperTradePrefill?>(null)
+    private val _paperOrderFeedback = MutableStateFlow<String?>(null)
+    private var strategyBacktestJob: Job? = null
+    private val _strategyBacktestReport = MutableStateFlow<com.example.data.timemachine.MultiCoinBacktestReport?>(null)
+    private val _isRunningStrategyBacktest = MutableStateFlow(false)
+    private val _strategyBacktestProgress = MutableStateFlow<String?>(null)
+    private val _strategyBacktestError = MutableStateFlow<String?>(null)
 
     val uiState: StateFlow<TradingUiState> = combine(
         combine(
@@ -356,6 +385,7 @@ class TradingViewModel(
             selectedSignalAssetSymbol = _selectedSignalAssetSymbol.value,
             selectedSignalTimeframe = _selectedSignalTimeframe.value,
             isSignalExpanded = _isSignalExpanded.value,
+            signalAnalysisError = _signalAnalysisError.value,
             learningLanguageMode = appSettingsRepo.languageMode.value,
             selectedLessonCategory = _selectedLessonCategory.value,
             learningSearchQuery = _learningSearchQuery.value,
@@ -423,7 +453,14 @@ class TradingViewModel(
             managedSignals = futuresScannerRepo.managedSignals.value,
             signalTransitionLog = futuresScannerRepo.signalTransitionLog.value,
             budgetConfig = futuresScannerRepo.budgetConfig.value,
-            dailyRiskLedger = futuresScannerRepo.dailyRiskLedger.value
+            dailyRiskLedger = futuresScannerRepo.dailyRiskLedger.value,
+            paperPortfolio = _paperPortfolio.value,
+            paperTradePrefill = _paperTradePrefill.value,
+            paperOrderFeedback = _paperOrderFeedback.value,
+            strategyBacktestReport = _strategyBacktestReport.value,
+            isRunningStrategyBacktest = _isRunningStrategyBacktest.value,
+            strategyBacktestProgress = _strategyBacktestProgress.value,
+            strategyBacktestError = _strategyBacktestError.value
         )
     }.stateIn(
         scope = viewModelScope,
@@ -494,6 +531,44 @@ class TradingViewModel(
                 _learningUpdate.value++
             }
         }
+        startPaperPortfolioCollector()
+        viewModelScope.launch {
+            repository.assets.collect { assets ->
+                val priceMap = buildLivePriceMap(assets)
+                if (priceMap.isNotEmpty()) {
+                    paperTradingRepo.onLivePricesUpdated(priceMap)
+                }
+            }
+        }
+    }
+
+    private fun startPaperPortfolioCollector() {
+        paperCollectorJob?.cancel()
+        paperCollectorJob = viewModelScope.launch {
+            paperTradingRepo.portfolio.collect { snap ->
+                _paperPortfolio.value = snap
+                _learningUpdate.value++
+            }
+        }
+    }
+
+    private fun buildLivePriceMap(assets: List<MarketAsset>): Map<String, Double> {
+        if (assets.isEmpty()) return emptyMap()
+        val map = HashMap<String, Double>(assets.size * 2)
+        assets.forEach { asset ->
+            val p = asset.currentPrice
+            if (p != null && p.isFinite() && p > 0.0) {
+                val idUpper = asset.id.uppercase()
+                val symClean = asset.symbol.uppercase().replace("/", "")
+                map[symClean] = p
+                if (!idUpper.endsWith("USDT")) {
+                    map["${idUpper}USDT"] = p
+                } else {
+                    map[idUpper] = p
+                }
+            }
+        }
+        return map
     }
 
     fun selectTab(tab: NavigationTab) {
@@ -567,27 +642,66 @@ class TradingViewModel(
 
     fun loadAiSignal(
         symbol: String = _selectedSignalAssetSymbol.value,
-        timeframe: CandleTimeframe = _selectedSignalTimeframe.value
+        timeframe: CandleTimeframe = _selectedSignalTimeframe.value,
+        forceRefresh: Boolean = false,
+        debounceMs: Long = 0L
     ) {
         _selectedSignalAssetSymbol.value = symbol
         _selectedSignalTimeframe.value = timeframe
-        _isAnalyzingSignal.value = true
         _signalAnalysisError.value = null
 
-        viewModelScope.launch {
+        val cachedFresh = if (!forceRefresh) repository.getCachedAiSignalIfFresh(symbol, timeframe) else null
+        if (cachedFresh != null) {
+            signalLoadJob?.cancel()
+            _currentAiSignal.value = cachedFresh
+            _isAnalyzingSignal.value = false
+            return
+        }
+
+        // Optimistically display last cached stale snapshot for same pair/TF if present so UI doesn't blank
+        if (!forceRefresh) {
+            repository.getLastCachedAiSignal(symbol, timeframe)?.let { stale ->
+                _currentAiSignal.value = stale
+            }
+        }
+
+        val reqSeq = signalRequestSeq.incrementAndGet()
+        signalLoadJob?.cancel()
+        _isAnalyzingSignal.value = true
+
+        signalLoadJob = viewModelScope.launch {
             try {
+                if (debounceMs > 0L) delay(debounceMs)
                 val assetName = repository.assets.value.firstOrNull {
                     it.symbol.equals(symbol, ignoreCase = true) || it.id.equals(symbol, ignoreCase = true)
                 }?.name ?: symbol
 
-                val signal = repository.calculateAiSignal(symbol, assetName, timeframe)
-                _currentAiSignal.value = signal
+                val signal = repository.calculateAiSignal(symbol, assetName, timeframe, forceRefresh = forceRefresh)
+                if (reqSeq == signalRequestSeq.get()) {
+                    _currentAiSignal.value = signal
+                    _signalAnalysisError.value = null
+                }
+            } catch (ce: CancellationException) {
+                throw ce
             } catch (e: Exception) {
-                _signalAnalysisError.value = e.message ?: "Failed to generate AI signal"
+                if (reqSeq == signalRequestSeq.get()) {
+                    _signalAnalysisError.value = e.message ?: "Failed to evaluate AI signal for $symbol (${timeframe.label})"
+                }
             } finally {
-                _isAnalyzingSignal.value = false
+                if (reqSeq == signalRequestSeq.get()) {
+                    _isAnalyzingSignal.value = false
+                }
             }
         }
+    }
+
+    fun retryAiSignal() {
+        loadAiSignal(
+            symbol = _selectedSignalAssetSymbol.value,
+            timeframe = _selectedSignalTimeframe.value,
+            forceRefresh = true,
+            debounceMs = 0L
+        )
     }
 
     fun refreshAllAiSignals() {
@@ -604,13 +718,19 @@ class TradingViewModel(
     }
 
     fun setSignalAsset(symbol: String) {
+        if (_selectedSignalAssetSymbol.value.equals(symbol, ignoreCase = true) && _currentAiSignal.value != null && _signalAnalysisError.value == null) {
+            return
+        }
         _selectedSignalAssetSymbol.value = symbol
-        loadAiSignal(symbol, _selectedSignalTimeframe.value)
+        loadAiSignal(symbol, _selectedSignalTimeframe.value, debounceMs = 90L)
     }
 
     fun setSignalTimeframe(timeframe: CandleTimeframe) {
+        if (_selectedSignalTimeframe.value == timeframe && _currentAiSignal.value != null && _signalAnalysisError.value == null) {
+            return
+        }
         _selectedSignalTimeframe.value = timeframe
-        loadAiSignal(_selectedSignalAssetSymbol.value, timeframe)
+        loadAiSignal(_selectedSignalAssetSymbol.value, timeframe, debounceMs = 90L)
     }
 
     fun toggleSignalExpanded() {
@@ -978,6 +1098,12 @@ class TradingViewModel(
         )
         nexusAiRepo = com.example.data.ai.NexusAiRepository(appContext)
         newsTranslationService = com.example.data.news.NewsTranslationService(appContext)
+        paperTradingRepo = com.example.data.paper.PaperTradingRepository(appContext)
+        startPaperPortfolioCollector()
+        val initialPrices = buildLivePriceMap(repository.assets.value)
+        if (initialPrices.isNotEmpty()) {
+            paperTradingRepo.onLivePricesUpdated(initialPrices)
+        }
         _aiConversations.value = nexusAiRepo.loadConversations()
         val activeId = _aiConversations.value.firstOrNull()?.id ?: "default_session"
         _currentAiConversationId.value = activeId
@@ -2134,6 +2260,272 @@ class TradingViewModel(
             _userMessage.value = outcome.message
         } else {
             _tradeWorkflow.value = wf.copy(submissionOutcome = outcome)
+        }
+    }
+
+    // =========================================================================
+    // COMPLETE PAPER TRADING & 6-MONTH BACKTEST WORKSTREAMS
+    // =========================================================================
+
+    fun openPaperTradeFromAiSignal(signal: AiTradingSignal) {
+        val plan = signal.riskPlan ?: return
+        if (signal.decision == SignalDecision.NO_TRADE) return
+        val side = if (signal.decision == SignalDecision.LONG) {
+            com.example.data.paper.PaperOrderSide.LONG
+        } else {
+            com.example.data.paper.PaperOrderSide.SHORT
+        }
+        val pair = com.example.data.paper.PaperTradingEngine.normalizePairSymbol(signal.symbol)
+        val base = com.example.data.paper.PaperTradingEngine.extractBaseAsset(pair)
+        val netRr = signal.strictQualityReport?.netRiskRewardSummary?.netRiskReward ?: plan.riskRewardRatio
+        _paperTradePrefill.value = com.example.data.paper.PaperTradePrefill(
+            symbol = pair,
+            baseAsset = base,
+            side = side,
+            suggestedOrderType = com.example.data.paper.PaperOrderType.MARKET,
+            entryPrice = plan.entryPrice,
+            stopLoss = plan.stopLoss,
+            takeProfit = plan.takeProfit3,
+            leverage = plan.suggestedMaxLeverage.coerceIn(1, 10),
+            riskRewardLabel = plan.riskRewardFormatted,
+            netRiskRewardRatio = netRr,
+            setupQualityScore = signal.strictQualityReport?.totalScore ?: signal.confidence.totalScore,
+            sourceSignalId = signal.id,
+            sourceLabel = "AI Signal (${signal.primaryTimeframe.label})"
+        )
+        _currentTab.value = NavigationTab.PAPER_TRADING
+        _paperOrderFeedback.value = "Prefilled ${pair} ${side.name} from AI Signal"
+    }
+
+    fun openPaperTradeFromFuturesSignal(signal: com.example.data.scanner.FuturesScanSignal) {
+        val side = com.example.data.paper.PaperOrderSide.fromFuturesDirection(signal.direction)
+        val pair = com.example.data.paper.PaperTradingEngine.normalizePairSymbol(signal.symbol)
+        val base = com.example.data.paper.PaperTradingEngine.extractBaseAsset(pair)
+        val netRr = signal.riskRewardRatio
+        _paperTradePrefill.value = com.example.data.paper.PaperTradePrefill(
+            symbol = pair,
+            baseAsset = base,
+            side = side,
+            suggestedOrderType = com.example.data.paper.PaperOrderType.LIMIT,
+            entryPrice = signal.entryPrice,
+            stopLoss = signal.stopLoss,
+            takeProfit = signal.takeProfit2,
+            leverage = signal.suggestedLeverage.coerceIn(1, 10),
+            riskRewardLabel = "1:${String.format(java.util.Locale.US, "%.2f", netRr)}",
+            netRiskRewardRatio = netRr,
+            setupQualityScore = signal.qualityScore,
+            sourceSignalId = signal.id,
+            sourceLabel = "Scanner (${signal.detectedPattern.label})"
+        )
+        _currentTab.value = NavigationTab.PAPER_TRADING
+        _paperOrderFeedback.value = "Prefilled $pair ${side.name} from Scanner"
+    }
+
+    fun clearPaperTradePrefill() {
+        _paperTradePrefill.value = null
+    }
+
+    fun dismissPaperOrderFeedback() {
+        _paperOrderFeedback.value = null
+    }
+
+    fun resetPaperWallet(initialBalanceUsdt: Double) {
+        val snap = paperTradingRepo.resetWallet(initialBalanceUsdt)
+        _paperPortfolio.value = snap
+        _paperOrderFeedback.value = snap.lastActionMessage
+    }
+
+    fun submitPaperMarketOrder(
+        symbol: String,
+        side: com.example.data.paper.PaperOrderSide,
+        quantity: Double,
+        leverage: Int,
+        stopLoss: Double?,
+        takeProfit: Double?
+    ) {
+        val pair = com.example.data.paper.PaperTradingEngine.normalizePairSymbol(symbol)
+        val base = com.example.data.paper.PaperTradingEngine.extractBaseAsset(pair)
+        val livePrice = findLivePriceForPaperSymbol(pair, base)
+        if (livePrice == null || livePrice <= 0.0) {
+            _paperOrderFeedback.value = "Live verified price for $pair is unavailable. Refresh Markets first."
+            return
+        }
+        val prefill = _paperTradePrefill.value?.takeIf { it.symbol == pair }
+        val result = paperTradingRepo.placeMarketOrder(
+            symbol = pair,
+            side = side,
+            currentMarketPrice = livePrice,
+            quantity = quantity,
+            leverage = leverage,
+            stopLoss = stopLoss,
+            takeProfit = takeProfit,
+            sourceSignalId = prefill?.sourceSignalId,
+            rrLabel = prefill?.riskRewardLabel
+        )
+        when (result) {
+            is com.example.data.paper.PaperOrderActionResult.Success -> {
+                _paperPortfolio.value = result.snapshot
+                _paperOrderFeedback.value = result.message
+                _paperTradePrefill.value = null
+            }
+            is com.example.data.paper.PaperOrderActionResult.Rejected -> {
+                _paperOrderFeedback.value = result.reason
+            }
+        }
+    }
+
+    fun submitPaperLimitOrder(
+        symbol: String,
+        side: com.example.data.paper.PaperOrderSide,
+        limitPrice: Double,
+        quantity: Double,
+        leverage: Int,
+        stopLoss: Double?,
+        takeProfit: Double?
+    ) {
+        val pair = com.example.data.paper.PaperTradingEngine.normalizePairSymbol(symbol)
+        val prefill = _paperTradePrefill.value?.takeIf { it.symbol == pair }
+        val result = paperTradingRepo.placeLimitOrder(
+            symbol = pair,
+            side = side,
+            limitPrice = limitPrice,
+            quantity = quantity,
+            leverage = leverage,
+            stopLoss = stopLoss,
+            takeProfit = takeProfit,
+            sourceSignalId = prefill?.sourceSignalId,
+            rrLabel = prefill?.riskRewardLabel
+        )
+        when (result) {
+            is com.example.data.paper.PaperOrderActionResult.Success -> {
+                _paperPortfolio.value = result.snapshot
+                _paperOrderFeedback.value = result.message
+                _paperTradePrefill.value = null
+                // Immediately check against current live price if already crossed
+                val live = findLivePriceForPaperSymbol(pair, com.example.data.paper.PaperTradingEngine.extractBaseAsset(pair))
+                if (live != null && live > 0.0) {
+                    paperTradingRepo.onLivePricesUpdated(mapOf(pair to live))
+                }
+            }
+            is com.example.data.paper.PaperOrderActionResult.Rejected -> {
+                _paperOrderFeedback.value = result.reason
+            }
+        }
+    }
+
+    fun editPendingPaperOrder(
+        orderId: String,
+        newLimitPrice: Double,
+        newQuantity: Double,
+        newStopLoss: Double?,
+        newTakeProfit: Double?
+    ) {
+        val result = paperTradingRepo.editPendingOrder(
+            orderId = orderId,
+            newLimitPrice = newLimitPrice,
+            newQuantity = newQuantity,
+            newStopLoss = newStopLoss,
+            newTakeProfit = newTakeProfit
+        )
+        when (result) {
+            is com.example.data.paper.PaperOrderActionResult.Success -> {
+                _paperPortfolio.value = result.snapshot
+                _paperOrderFeedback.value = result.message
+            }
+            is com.example.data.paper.PaperOrderActionResult.Rejected -> {
+                _paperOrderFeedback.value = result.reason
+            }
+        }
+    }
+
+    fun cancelPendingPaperOrder(orderId: String) {
+        val result = paperTradingRepo.cancelPendingOrder(orderId)
+        when (result) {
+            is com.example.data.paper.PaperOrderActionResult.Success -> {
+                _paperPortfolio.value = result.snapshot
+                _paperOrderFeedback.value = result.message
+            }
+            is com.example.data.paper.PaperOrderActionResult.Rejected -> {
+                _paperOrderFeedback.value = result.reason
+            }
+        }
+    }
+
+    fun updatePaperPositionSlTp(
+        positionId: String,
+        newStopLoss: Double?,
+        newTakeProfit: Double?
+    ) {
+        val result = paperTradingRepo.updatePositionSlTp(positionId, newStopLoss, newTakeProfit)
+        when (result) {
+            is com.example.data.paper.PaperOrderActionResult.Success -> {
+                _paperPortfolio.value = result.snapshot
+                _paperOrderFeedback.value = result.message
+            }
+            is com.example.data.paper.PaperOrderActionResult.Rejected -> {
+                _paperOrderFeedback.value = result.reason
+            }
+        }
+    }
+
+    fun closePaperPosition(positionId: String) {
+        val pos = _paperPortfolio.value.openPositions.firstOrNull { it.id == positionId } ?: return
+        val live = findLivePriceForPaperSymbol(pos.symbol, pos.baseAsset) ?: pos.currentMarkPrice
+        val result = paperTradingRepo.closePositionManually(positionId, live)
+        when (result) {
+            is com.example.data.paper.PaperOrderActionResult.Success -> {
+                _paperPortfolio.value = result.snapshot
+                _paperOrderFeedback.value = result.message
+            }
+            is com.example.data.paper.PaperOrderActionResult.Rejected -> {
+                _paperOrderFeedback.value = result.reason
+            }
+        }
+    }
+
+    private fun findLivePriceForPaperSymbol(pairSymbol: String, baseAsset: String): Double? {
+        val assets = repository.assets.value
+        return assets.firstOrNull { asset ->
+            asset.id.equals(baseAsset, ignoreCase = true) ||
+                asset.symbol.replace("/", "").equals(pairSymbol, ignoreCase = true)
+        }?.currentPrice?.takeIf { it.isFinite() && it > 0.0 }
+    }
+
+    fun runSixMonthStrategyBacktest(
+        symbols: List<String> = listOf("BTCUSDT", "ETHUSDT", "SOLUSDT", "LINKUSDT"),
+        lookbackDays: Int = 180
+    ) {
+        if (_isRunningStrategyBacktest.value) return
+        strategyBacktestJob?.cancel()
+        _isRunningStrategyBacktest.value = true
+        _strategyBacktestError.value = null
+        _strategyBacktestProgress.value = "Preparing 6-month paginated Binance Futures download..."
+
+        strategyBacktestJob = viewModelScope.launch {
+            try {
+                val inputs = repository.fetchBacktestInputsForSymbols(symbols, lookbackDays) { progressMsg ->
+                    _strategyBacktestProgress.value = progressMsg
+                }
+                _strategyBacktestProgress.value = "Running causal strict 15M/1H/4H/1D simulation & Walk-Forward audit..."
+                val report = kotlinx.coroutines.withContext(Dispatchers.Default) {
+                    com.example.data.timemachine.StrategyBacktestEngine.runMultiCoinBacktest(
+                        inputs = inputs,
+                        config = com.example.data.timemachine.MultiCoinBacktestConfig(
+                            lookbackDays = lookbackDays,
+                            startingCapitalUsdt = _paperPortfolio.value.config.initialBalanceUsdt
+                        )
+                    )
+                }
+                _strategyBacktestReport.value = report
+                _strategyBacktestProgress.value = null
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _strategyBacktestError.value = e.message ?: "Historical 6-month backtest failed"
+                _strategyBacktestProgress.value = null
+            } finally {
+                _isRunningStrategyBacktest.value = false
+            }
         }
     }
 

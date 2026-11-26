@@ -48,7 +48,9 @@ object AiTradingSignalEngine {
         technicalAnalysis: OverallAnalysisResult?,
         smcAnalysis: SmcAnalysisResult?,
         mtfSnapshots: List<TimeframeSmcSnapshot> = emptyList(),
-        strictQualityReportOverride: StrictSignalQualityReport? = null
+        strictQualityReportOverride: StrictSignalQualityReport? = null,
+        enforceStrictQualificationGate: Boolean = false,
+        strictMinScore: Int = StrictSignalQualityEngine.SCORE_THRESHOLD_HIGH_QUALITY
     ): AiTradingSignal = withContext(Dispatchers.Default) {
         val now = System.currentTimeMillis()
         val formattedTime = TimeZoneUtils.formatKarachiWithSeconds(now)
@@ -589,26 +591,57 @@ object AiTradingSignalEngine {
         // 5. NO TRADE DECISION CHECK
         // ----------------------------------------------------
         if (!isBullishDominant && !isBearishDominant) {
+            val strictWaitReport = if (enforceStrictQualificationGate) {
+                strictQualityReportOverride ?: StrictSignalQualityEngine.evaluateSetup(
+                    symbol = symbol,
+                    assetName = assetName,
+                    currentPrice = currentPrice,
+                    dataStatus = dataStatus,
+                    primaryTimeframe = primaryTimeframe,
+                    candles = candles,
+                    technicalAnalysis = ta,
+                    smcAnalysis = smc,
+                    mtfSnapshots = mtfSnapshots,
+                    referenceTimeMs = now
+                )
+            } else strictQualityReportOverride
+
+            val failedFiltersList = strictWaitReport?.mandatoryFilters?.filter { !it.passed }?.map {
+                "Filter #${it.filterNumber} (${it.name}): ${it.reason}"
+            }.orEmpty()
+
             return@withContext createNoTradeSignal(
                 symbol = symbol,
                 assetName = assetName,
                 primaryTimeframe = primaryTimeframe,
-                code = "CONFLICTING_INDICATORS",
-                headline = "Conflicting Indicators & Lack of Edge",
-                explanation = "Bullish score ($bullishPoints pts) vs Bearish score ($bearishPoints pts) lacks required confluence (>=60 pts with >=18 pt edge). Market has no clear directional setup.",
-                conflictingFactors = conflicts.ifEmpty {
-                    listOf(
-                        "Directional margin ($pointEdge pts) or total score ($rawConfidence%) is below the actionable threshold",
-                        "Indicators are not in unified multi-factor alignment"
-                    )
+                code = if (enforceStrictQualificationGate) "STRICT_WAIT_NO_TRADE" else "CONFLICTING_INDICATORS",
+                headline = if (enforceStrictQualificationGate) {
+                    "WAIT / NO TRADE (Quality ${strictWaitReport?.totalScore ?: rawConfidence}/100 < $strictMinScore)"
+                } else {
+                    "Conflicting Indicators & Lack of Edge"
                 },
-                recommendedAction = "Wait for a confirmed Break of Structure (BOS), cleaner EMA alignment, or liquidity sweep.",
+                explanation = if (enforceStrictQualificationGate) {
+                    "NEXUS Strict Validator rejected entry: Setup Quality Score is ${strictWaitReport?.totalScore ?: rawConfidence}/100 (requires >= $strictMinScore/100 setup quality, NOT win rate) and all 8 institutional gates must pass."
+                } else {
+                    "Bullish score ($bullishPoints pts) vs Bearish score ($bearishPoints pts) lacks required confluence (>=60 pts with >=18 pt edge). Market has no clear directional setup."
+                },
+                conflictingFactors = (failedFiltersList + conflicts + strictWaitReport?.missingConfirmations.orEmpty())
+                    .distinct()
+                    .take(8)
+                    .ifEmpty {
+                        listOf(
+                            "Directional margin ($pointEdge pts) or quality score is below threshold",
+                            "Indicators are not in unified multi-factor alignment"
+                        )
+                    },
+                recommendedAction = "Wait for a confirmed closed-candle MTF setup scoring >= $strictMinScore/100 with NET R:R >= 1:4.0.",
                 dataSource = dataSourceName,
                 freshness = dataStatus.label,
                 timestamp = now,
                 formattedTime = formattedTime,
                 confidence = confidenceBreakdown,
-                timeframeConditions = tfConditions
+                timeframeConditions = tfConditions,
+                strictQualityReport = strictWaitReport
             )
         }
 
@@ -666,7 +699,7 @@ object AiTradingSignalEngine {
         }
 
         // ----------------------------------------------------
-        // 8. FINAL VALID TRADING SIGNAL
+        // 8. FINAL VALID TRADING SIGNAL (OR STRICT >=92 GATE DOWNGRADE)
         // ----------------------------------------------------
         val strictReport = strictQualityReportOverride ?: StrictSignalQualityEngine.evaluateSetup(
             symbol = symbol,
@@ -684,6 +717,40 @@ object AiTradingSignalEngine {
             candidateDirectionOverride = decision,
             referenceTimeMs = now
         )
+
+        if (enforceStrictQualificationGate &&
+            !StrictSignalQualityEngine.meetsStrictProQualification(strictReport, strictMinScore)
+        ) {
+            val failedReasons = buildList {
+                if (strictReport.totalScore < strictMinScore) {
+                    add("Setup Quality Score ${strictReport.totalScore}/100 < mandatory $strictMinScore/100 threshold (quality score, NOT win rate)")
+                }
+                strictReport.mandatoryFilters.filter { !it.passed }.forEach { f ->
+                    add("Filter #${f.filterNumber} (${f.name}) Failed: ${f.reason}")
+                }
+                addAll(strictReport.missingConfirmations.take(4))
+            }.distinct()
+
+            return@withContext createNoTradeSignal(
+                symbol = symbol,
+                assetName = assetName,
+                primaryTimeframe = primaryTimeframe,
+                code = "STRICT_QUALITY_GATE_REJECTED",
+                headline = "WAIT / NO TRADE — Setup Quality ${strictReport.totalScore}/100 (< $strictMinScore)",
+                explanation = "Candidate ${decision.label} setup on $symbol was rejected by the NEXUS Strict Institutional Gate. " +
+                    "Score ${strictReport.totalScore}/100 (${strictReport.passedFilterCount}/8 filters passed; Net R:R ${strictReport.netRiskRewardSummary?.netRiskRewardFormatted ?: "N/A"}). " +
+                    "Note: $strictMinScore/100 measures multi-layer confluence quality, NOT guaranteed win probability.",
+                conflictingFactors = failedReasons,
+                recommendedAction = "Stay in WAIT / NO TRADE until all 8 mandatory filters pass (incl. NET R:R >= 1:4.0) and Setup Quality Score >= $strictMinScore/100.",
+                dataSource = dataSourceName,
+                freshness = dataStatus.label,
+                timestamp = now,
+                formattedTime = formattedTime,
+                confidence = confidenceBreakdown,
+                timeframeConditions = tfConditions,
+                strictQualityReport = strictReport
+            )
+        }
 
         val signalId = "SIG_${symbol.replace("/", "_")}_${System.currentTimeMillis()}"
 
@@ -964,7 +1031,8 @@ object AiTradingSignalEngine {
         timestamp: Long,
         formattedTime: String,
         confidence: ConfidenceScoreBreakdown? = null,
-        timeframeConditions: List<TimeframeCondition> = emptyList()
+        timeframeConditions: List<TimeframeCondition> = emptyList(),
+        strictQualityReport: StrictSignalQualityReport? = null
     ): AiTradingSignal {
         val defaultConfidence = confidence ?: ConfidenceScoreBreakdown(
             trendScore = 5,
@@ -1005,7 +1073,8 @@ object AiTradingSignalEngine {
             timestamp = timestamp,
             formattedTimestamp = formattedTime,
             dataSource = dataSource,
-            dataFreshness = freshness
+            dataFreshness = freshness,
+            strictQualityReport = strictQualityReport
         )
     }
 

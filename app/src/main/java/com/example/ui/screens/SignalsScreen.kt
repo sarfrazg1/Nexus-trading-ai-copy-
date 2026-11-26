@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +33,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AddAlert
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Block
@@ -98,6 +100,9 @@ fun SignalsScreen(
     onFilterSelected: (String) -> Unit,
     onSetAlertClick: (symbol: String) -> Unit,
     onCopyLevelsClick: (Signal) -> Unit,
+    errorMessage: String? = null,
+    onRetryClick: () -> Unit = {},
+    onPaperTradeClick: (AiTradingSignal) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = NexusTheme.colors
@@ -256,6 +261,70 @@ fun SignalsScreen(
                     }
                 }
             }
+
+            if (isAnalyzing) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(modifier = Modifier.fillMaxWidth().testTag("signal_updating_indicator")) {
+                    LinearProgressIndicator(
+                        color = colors.gold,
+                        trackColor = colors.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Updating $selectedSymbol (${selectedTimeframe.label}) strictly on closed candles...",
+                        color = colors.textMuted,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            if (!errorMessage.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("signal_error_card"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.bearishRedBg),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.bearishRed.copy(alpha = 0.6f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Signal Update Issue",
+                                color = colors.bearishRed,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = errorMessage,
+                                color = colors.textPrimary,
+                                fontSize = 11.sp
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = onRetryClick,
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.bearishRed),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("signal_retry_button")
+                        ) {
+                            Text("Retry", color = colors.bearishRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
         }
 
         // ----------------------------------------------------
@@ -297,13 +366,14 @@ fun SignalsScreen(
                                     "TP2: ${plan.takeProfit2Formatted} (+${String.format(Locale.US, "%.1f", plan.takeProfit2DistancePercent)}%)\n" +
                                     "TP3: ${plan.takeProfit3Formatted} (+${String.format(Locale.US, "%.1f", plan.takeProfit3DistancePercent)}%)\n" +
                                     "R:R: ${plan.riskRewardFormatted} | Max Leverage: ${plan.suggestedMaxLeverage}x\n" +
-                                    "Confidence: ${currentAiSignal.confidence.totalScore}%\n" +
+                                    "Setup Quality: ${currentAiSignal.strictQualityReport?.totalScore ?: currentAiSignal.confidence.totalScore}/100 (Not Win %)\n" +
                                     "Invalidation: ${plan.invalidationCondition}"
                         } ?: "${currentAiSignal.symbol} NO TRADE: ${currentAiSignal.noTradeReason?.headline}"
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("NEXUS Signal", clip))
                     },
-                    onSetAlertClick = { onSetAlertClick(currentAiSignal.symbol) }
+                    onSetAlertClick = { onSetAlertClick(currentAiSignal.symbol) },
+                    onPaperTradeClick = { onPaperTradeClick(currentAiSignal) }
                 )
             }
         }
@@ -463,7 +533,8 @@ fun SignalsScreen(
                     signal = sig,
                     isSelected = sig.symbol.equals(selectedSymbol, ignoreCase = true),
                     onSelect = { onAssetSelected(sig.symbol) },
-                    onInfoClick = onInfoClick
+                    onInfoClick = onInfoClick,
+                    onPaperTradeClick = { onPaperTradeClick(sig) }
                 )
             }
         }
@@ -487,6 +558,7 @@ fun HeroSignalCard(
     onInfoClick: (String) -> Unit,
     onCopyLevelsClick: () -> Unit,
     onSetAlertClick: () -> Unit,
+    onPaperTradeClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = NexusTheme.colors
@@ -624,16 +696,17 @@ fun HeroSignalCard(
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val qualityScore = signal.strictQualityReport?.totalScore ?: signal.confidence.totalScore
                     Text(
-                        text = "Confidence: ",
+                        text = "Quality: ",
                         color = colors.textSecondary,
                         fontSize = 11.sp
                     )
                     Text(
-                        text = "${signal.confidence.totalScore}%",
+                        text = "$qualityScore/100 (Not Win%)",
                         color = accentColor,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
+                        fontSize = 11.sp
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
@@ -950,6 +1023,33 @@ fun HeroSignalCard(
                     Icon(imageVector = Icons.Default.AddAlert, contentDescription = "Alert", tint = colors.gold, modifier = Modifier.size(15.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = "Set Price Alert", color = colors.gold, fontSize = 11.sp)
+                }
+            }
+
+            if (!isNoTrade && signal.riskPlan != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = onPaperTradeClick,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("hero_paper_trade_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccountBalanceWallet,
+                        contentDescription = "Paper Trade",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "PAPER TRADE THIS ${signal.decision.label} SETUP",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         }
@@ -1500,7 +1600,8 @@ fun CompactAiSignalRow(
     signal: AiTradingSignal,
     isSelected: Boolean,
     onSelect: () -> Unit,
-    onInfoClick: (String) -> Unit
+    onInfoClick: (String) -> Unit,
+    onPaperTradeClick: () -> Unit = {}
 ) {
     val colors = NexusTheme.colors
     val isLong = signal.decision == SignalDecision.LONG
@@ -1532,7 +1633,7 @@ fun CompactAiSignalRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = signal.symbol,
@@ -1559,7 +1660,26 @@ fun CompactAiSignalRow(
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (signal.decision != SignalDecision.NO_TRADE && signal.riskPlan != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.gold.copy(alpha = 0.16f))
+                            .border(1.dp, colors.gold.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .clickable { onPaperTradeClick() }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                            .testTag("compact_paper_trade_btn_${signal.symbol}")
+                    ) {
+                        Text(
+                            text = "PAPER",
+                            color = colors.gold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .background(
@@ -1580,13 +1700,11 @@ fun CompactAiSignalRow(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
-
                 Text(
-                    text = "${signal.confidence.totalScore}%",
+                    text = "${signal.strictQualityReport?.totalScore ?: signal.confidence.totalScore}/100",
                     color = accentColor,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                 )
             }
         }

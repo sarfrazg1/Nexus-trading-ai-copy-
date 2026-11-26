@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.alerts.AlertMonitorEngine
 import com.example.data.alerts.AlertRuleCategory
@@ -605,6 +606,7 @@ class MasterUpgradePart2Test {
         }
 
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("scanner_main_list").performScrollToNode(hasTestTag("no_qualifying_setup_card"))
         composeTestRule.onNodeWithTag("no_qualifying_setup_card").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("No qualifying setup available.").assertIsDisplayed()
     }

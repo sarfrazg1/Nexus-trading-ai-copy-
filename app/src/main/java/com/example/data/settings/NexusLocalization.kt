@@ -30,6 +30,7 @@ object NexusLocalization {
     fun tabDashboard(lang: LearningLanguageMode) = tr(lang, "Dashboard", "Dashboard", "ڈیش بورڈ")
     fun tabMarkets(lang: LearningLanguageMode) = tr(lang, "Markets", "Market", "مارکیٹس")
     fun tabSignals(lang: LearningLanguageMode) = tr(lang, "Signals", "Signals", "سگنلز")
+    fun tabPaperTrading(lang: LearningLanguageMode) = tr(lang, "Paper", "Paper", "پیپر ٹریڈ")
     fun tabNexusAi(lang: LearningLanguageMode) = tr(lang, "NEXUS AI", "NEXUS AI", "نیکسس اے آئی")
     fun tabAcademy(lang: LearningLanguageMode) = tr(lang, "Academy", "Academy (Taleem)", "اکیڈمی")
     fun tabScanner(lang: LearningLanguageMode) = tr(lang, "Scanner", "Scanner", "اسکینر")
