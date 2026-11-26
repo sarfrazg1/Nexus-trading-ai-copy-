@@ -41,15 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.ApiFeedConfig
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun ApiConfigDialog(
@@ -58,6 +50,7 @@ fun ApiConfigDialog(
     onConnect: (apiKey: String) -> Unit,
     onDisconnect: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     var apiKeyText by remember { mutableStateOf(if (config.apiKey == "Public (No Key Required)") "" else config.apiKey) }
     var inputError by remember { mutableStateOf<String?>(null) }
 
@@ -68,8 +61,8 @@ fun ApiConfigDialog(
                 .padding(16.dp)
                 .testTag("api_config_dialog"),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = NavyCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+            colors = CardDefaults.cardColors(containerColor = colors.card),
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
         ) {
             Column(
                 modifier = Modifier
@@ -81,13 +74,13 @@ fun ApiConfigDialog(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(NavySurfaceVariant),
+                            .background(colors.surfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Cable,
                             contentDescription = null,
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -96,14 +89,14 @@ fun ApiConfigDialog(
                         Text(
                             text = config.providerName,
                             style = MaterialTheme.typography.titleMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
                             text = "Asset: ${config.assetCovered}",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontSize = 11.sp
                             )
                         )
@@ -117,19 +110,19 @@ fun ApiConfigDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurfaceVariant)
+                        .background(colors.surfaceVariant)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Connection Status",
-                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp)
                     )
                     Text(
                         text = if (config.isConnected) "CONNECTED" else "NOT CONNECTED",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (config.isConnected) BullishGreen else TextMuted,
+                            color = if (config.isConnected) colors.bullishGreen else colors.textMuted,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp
                         )
@@ -143,21 +136,21 @@ fun ApiConfigDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.5f))
+                        .background(colors.surfaceVariant.copy(alpha = 0.7f))
                         .padding(10.dp),
                     verticalAlignment = Alignment.Top
                 ) {
                     Icon(
                         imageVector = Icons.Default.Info,
                         contentDescription = null,
-                        tint = TextSecondary,
+                        tint = colors.textSecondary,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "NEXUS enforces strict data integrity: no simulated numbers are displayed. To stream real quotes for commodities and indices, provide your provider API key below or enter sandbox credentials.",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextSecondary,
+                            color = colors.textSecondary,
                             fontSize = 11.sp,
                             lineHeight = 15.sp
                         )
@@ -177,16 +170,16 @@ fun ApiConfigDialog(
                     placeholder = { Text("e.g. nx_live_sec_key_4892") },
                     singleLine = true,
                     leadingIcon = {
-                        Icon(imageVector = Icons.Default.Key, contentDescription = null, tint = NexusGold, modifier = Modifier.size(18.dp))
+                        Icon(imageVector = Icons.Default.Key, contentDescription = null, tint = colors.gold, modifier = Modifier.size(18.dp))
                     },
                     modifier = Modifier.fillMaxWidth().testTag("api_key_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NexusGold,
-                        unfocusedBorderColor = NavyBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedContainerColor = NavySurfaceVariant,
-                        unfocusedContainerColor = NavySurfaceVariant
+                        focusedBorderColor = colors.gold,
+                        unfocusedBorderColor = colors.border,
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary,
+                        focusedContainerColor = colors.surfaceVariant,
+                        unfocusedContainerColor = colors.surfaceVariant
                     )
                 )
 
@@ -194,7 +187,7 @@ fun ApiConfigDialog(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = inputError ?: "",
-                        style = MaterialTheme.typography.bodySmall.copy(color = BearishRed, fontSize = 11.sp)
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.bearishRed, fontSize = 11.sp)
                     )
                 }
 
@@ -210,7 +203,7 @@ fun ApiConfigDialog(
                         OutlinedButton(
                             onClick = onDisconnect,
                             shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BearishRed),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.bearishRed),
                             modifier = Modifier.testTag("disconnect_feed_btn")
                         ) {
                             Icon(imageVector = Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -221,7 +214,7 @@ fun ApiConfigDialog(
                         OutlinedButton(
                             onClick = onDismiss,
                             shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textSecondary)
                         ) {
                             Text("Cancel", fontSize = 11.sp)
                         }
@@ -237,7 +230,7 @@ fun ApiConfigDialog(
                         },
                         modifier = Modifier.testTag("connect_api_submit_btn"),
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = NexusGold, contentColor = NavyCard)
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.gold, contentColor = colors.onGold)
                     ) {
                         Text(if (config.isConnected) "Update Key" else "Connect & Test", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }

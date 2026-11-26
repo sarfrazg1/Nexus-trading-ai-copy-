@@ -21,17 +21,28 @@ object TechnicalIndicatorsEngine {
         symbol: String,
         assetName: String,
         timeframe: CandleTimeframe,
-        candles: List<Candle>
+        candles: List<Candle>,
+        referenceTimeMs: Long = System.currentTimeMillis()
     ): OverallAnalysisResult = withContext(Dispatchers.Default) {
         val warnings = mutableListOf<String>()
-        val count = candles.size
+        val completedCandles = com.example.util.TimeZoneUtils.filterCompletedCandles(candles, referenceTimeMs)
+        val count = completedCandles.size
 
         if (count == 0) {
             return@withContext createEmptyAnalysis(symbol, assetName, timeframe)
         }
+        if (candles.size > count) {
+            warnings.add("Excluded ${candles.size - count} unclosed/invalid bar(s) to prevent repainting and future leakage.")
+        }
 
-        val closes = DoubleArray(count) { candles[it].close }
-        val volumes = DoubleArray(count) { candles[it].volume }
+        val closes = DoubleArray(count) { completedCandles[it].close }
+        val volumes = DoubleArray(count) { completedCandles[it].volume }
+        val positiveVolBars = completedCandles.count { it.volume > 0.0 }
+        val hasReliableVolume = positiveVolBars >= min(5, count) && volumes.sum() > 0.0
+
+        if (!hasReliableVolume) {
+            warnings.add("Volume data unavailable on feed. Volume & money-flow indicators disabled (never invented).")
+        }
 
         val currentClose = closes.last()
         val prevClose = if (count > 1) closes[count - 2] else currentClose
@@ -52,7 +63,8 @@ object TechnicalIndicatorsEngine {
         val ema50 = calculateEma(closes, 50)
         val ema100 = calculateEma(closes, 100)
         val ema200 = calculateEma(closes, 200)
-        val emaSet = EmaSet(ema9, ema20, ema50, ema100, ema200)
+        val slopeEvaluation = evaluateEmaSlopes(closes, currentClose)
+        val emaSet = EmaSet(ema9, ema20, ema50, ema100, ema200, slopeEvaluation)
 
         val sma20 = calculateSma(closes, 20)
         val sma50 = calculateSma(closes, 50)
@@ -60,7 +72,7 @@ object TechnicalIndicatorsEngine {
         val sma200 = calculateSma(closes, 200)
         val smaSet = SmaSet(sma20, sma50, sma100, sma200)
 
-        val vwap = calculateVwap(candles)
+        val vwap = if (hasReliableVolume) calculateVwap(completedCandles, timeframe) else null
         val vwapStance = when {
             vwap == null -> IndicatorStance.INSUFFICIENT_DATA
             currentClose > vwap * 1.002 -> IndicatorStance.BULLISH
@@ -68,9 +80,9 @@ object TechnicalIndicatorsEngine {
             else -> IndicatorStance.NEUTRAL
         }
 
-        val supertrend = calculateSupertrend(candles, 10, 3.0)
-        val adx = calculateAdx(candles, 14)
-        val ichimoku = calculateIchimoku(candles)
+        val supertrend = calculateSupertrend(completedCandles, 10, 3.0)
+        val adx = calculateAdx(completedCandles, 14)
+        val ichimoku = calculateIchimoku(completedCandles)
 
         val trend = TrendIndicators(
             emaSet = emaSet,
@@ -91,8 +103,8 @@ object TechnicalIndicatorsEngine {
 
         val macd = calculateMacd(closes, 12, 26, 9)
         val stochRsi = calculateStochRsi(closes, 14, 14, 3, 3)
-        val stochastic = calculateStochastic(candles, 14, 3, 3)
-        val cci = calculateCci(candles, 20)
+        val stochastic = calculateStochastic(completedCandles, 14, 3, 3)
+        val cci = calculateCci(completedCandles, 20)
         val cciStance = when {
             cci == null -> IndicatorStance.INSUFFICIENT_DATA
             cci > 100.0 -> IndicatorStance.OVERBOUGHT
@@ -101,7 +113,7 @@ object TechnicalIndicatorsEngine {
             else -> IndicatorStance.BEARISH
         }
 
-        val williamsR = calculateWilliamsR(candles, 14)
+        val williamsR = calculateWilliamsR(completedCandles, 14)
         val williamsRStance = when {
             williamsR == null -> IndicatorStance.INSUFFICIENT_DATA
             williamsR > -20.0 -> IndicatorStance.OVERBOUGHT
@@ -118,6 +130,8 @@ object TechnicalIndicatorsEngine {
             else -> IndicatorStance.NEUTRAL
         }
 
+        val rsiDivergence = detectNonRepaintingRsiDivergence(completedCandles, 14)
+
         val momentum = MomentumIndicators(
             rsi7 = rsi7,
             rsi7Stance = stanceForRsi(rsi7),
@@ -133,29 +147,48 @@ object TechnicalIndicatorsEngine {
             williamsR = williamsR,
             williamsRStance = williamsRStance,
             roc = roc,
-            rocStance = rocStance
+            rocStance = rocStance,
+            rsiDivergence = rsiDivergence
         )
 
         // ==========================================
         // 3. VOLATILITY INDICATORS
         // ==========================================
         val bollinger = calculateBollingerBands(closes, 20, 2.0)
-        val atr = calculateAtr(candles, 14, currentClose)
-        val keltner = calculateKeltnerChannels(candles, 20, 10, 2.0)
-        val donchian = calculateDonchianChannels(candles, 20)
+        val atr = calculateAtr(completedCandles, 14, currentClose)
+        val keltner = calculateKeltnerChannels(completedCandles, 20, 10, 2.0)
+        val donchian = calculateDonchianChannels(completedCandles, 20)
+        val pivotPoints = calculatePivotPoints(completedCandles)
+
+        val isBbInsideKeltnerSqueeze = bollinger != null && keltner != null &&
+            bollinger.upper < keltner.upper && bollinger.lower > keltner.lower
+        val lastBarRangeRatio = if (atr != null && atr.value > 0.0) {
+            (completedCandles.last().high - completedCandles.last().low) / atr.value
+        } else 1.0
+        val volatilityRegime = when {
+            (atr != null && atr.percentOfPrice > 6.5) || lastBarRangeRatio > 4.0 -> VolatilityRegime.EXTREME_UNSTABLE
+            isBbInsideKeltnerSqueeze || bollinger?.isSqueeze == true -> VolatilityRegime.SQUEEZE
+            bollinger != null && keltner != null &&
+                (bollinger.upper > keltner.upper * 1.004 || currentClose > bollinger.upper || currentClose < bollinger.lower) ->
+                VolatilityRegime.EXPANSION
+            else -> VolatilityRegime.NORMAL
+        }
 
         val volatility = VolatilityIndicators(
             bollingerBands = bollinger,
             atr = atr,
             keltnerChannels = keltner,
-            donchianChannels = donchian
+            donchianChannels = donchian,
+            volatilityRegime = volatilityRegime,
+            isBbInsideKeltnerSqueeze = isBbInsideKeltnerSqueeze,
+            pivotPoints = pivotPoints
         )
 
         // ==========================================
         // 4. VOLUME INDICATORS
         // ==========================================
-        val obv = calculateObv(candles)
-        val mfi = calculateMfi(candles, 14)
+        val obv = if (hasReliableVolume) calculateObv(completedCandles) else null
+        val mfi = if (hasReliableVolume) calculateMfi(completedCandles, 14) else null
         val mfiStance = when {
             mfi == null -> IndicatorStance.INSUFFICIENT_DATA
             mfi > 80.0 -> IndicatorStance.OVERBOUGHT
@@ -164,7 +197,7 @@ object TechnicalIndicatorsEngine {
             else -> IndicatorStance.BEARISH
         }
 
-        val cmf = calculateCmf(candles, 20)
+        val cmf = if (hasReliableVolume) calculateCmf(completedCandles, 20) else null
         val cmfStance = when {
             cmf == null -> IndicatorStance.INSUFFICIENT_DATA
             cmf > 0.05 -> IndicatorStance.STRONG_BULLISH
@@ -174,7 +207,7 @@ object TechnicalIndicatorsEngine {
             else -> IndicatorStance.NEUTRAL
         }
 
-        val rvol = calculateRvol(volumes, 20)
+        val rvol = if (hasReliableVolume) calculateRvol(volumes, 20) else null
         val rvolStance = when {
             rvol == null -> IndicatorStance.INSUFFICIENT_DATA
             rvol >= 2.0 -> IndicatorStance.STRONG_BULLISH
@@ -183,7 +216,7 @@ object TechnicalIndicatorsEngine {
             else -> IndicatorStance.NEUTRAL
         }
 
-        val volumeDelta = calculateVolumeDelta(candles)
+        val volumeDelta = calculateVolumeDelta(completedCandles)
 
         val volume = VolumeIndicators(
             obv = obv,
@@ -193,7 +226,8 @@ object TechnicalIndicatorsEngine {
             cmfStance = cmfStance,
             relativeVolume = rvol,
             relativeVolumeStance = rvolStance,
-            volumeDelta = volumeDelta
+            volumeDelta = volumeDelta,
+            hasReliableVolume = hasReliableVolume
         )
 
         val cards = buildCardsList(
@@ -311,12 +345,80 @@ object TechnicalIndicatorsEngine {
         return result
     }
 
-    fun calculateVwap(candles: List<Candle>): Double? {
+    fun evaluateEmaSlopes(
+        closes: DoubleArray,
+        currentClose: Double,
+        lookback: Int = 5
+    ): EmaSlopeEvaluation {
+        val series20 = calculateEmaSeries(closes, 20)
+        val series50 = calculateEmaSeries(closes, 50)
+        val series200 = calculateEmaSeries(closes, 200)
+
+        fun slopePct(series: DoubleArray?): Double? {
+            if (series == null || series.size <= lookback) return null
+            val curr = series.last()
+            val prev = series[series.size - 1 - lookback]
+            if (!curr.isFinite() || !prev.isFinite() || prev <= 0.0) return null
+            return ((curr - prev) / prev) * 100.0
+        }
+
+        val s20 = slopePct(series20)
+        val s50 = slopePct(series50)
+        val s200 = slopePct(series200)
+
+        val e20 = series20?.lastOrNull()
+        val e50 = series50?.lastOrNull()
+        val e200 = series200?.lastOrNull()
+
+        val bullLocAndSlope = e20 != null && e50 != null &&
+            currentClose > e20 && e20 > e50 &&
+            (e200 == null || e50 > e200) &&
+            (s20 ?: 0.0) > 0.0 && (s50 ?: 0.0) >= 0.0
+
+        val bearLocAndSlope = e20 != null && e50 != null &&
+            currentClose < e20 && e20 < e50 &&
+            (e200 == null || e50 < e200) &&
+            (s20 ?: 0.0) < 0.0 && (s50 ?: 0.0) <= 0.0
+
+        val summary = when {
+            bullLocAndSlope -> "Bullish stack + positive EMA20/50 slope"
+            bearLocAndSlope -> "Bearish stack + negative EMA20/50 slope"
+            else -> "EMA slopes flat or mixed with price location"
+        }
+
+        return EmaSlopeEvaluation(
+            ema20SlopePercent = s20,
+            ema50SlopePercent = s50,
+            ema200SlopePercent = s200,
+            isBullishAlignedWithSlope = bullLocAndSlope,
+            isBearishAlignedWithSlope = bearLocAndSlope,
+            summary = summary
+        )
+    }
+
+    fun calculateVwap(candles: List<Candle>): Double? = calculateVwap(candles, null)
+
+    fun calculateVwap(candles: List<Candle>, timeframe: CandleTimeframe?): Double? {
         if (candles.isEmpty()) return null
+        val isIntraday = timeframe != null && timeframe in listOf(
+            CandleTimeframe.M1, CandleTimeframe.M3, CandleTimeframe.M5,
+            CandleTimeframe.M15, CandleTimeframe.M30, CandleTimeframe.H1,
+            CandleTimeframe.H2, CandleTimeframe.H4
+        )
+        val sessionSlice = if (isIntraday && candles.last().openTime > 0L) {
+            val latestDay = candles.last().openTime / 86_400_000L
+            val dayBars = candles.filter { (it.openTime / 86_400_000L) == latestDay && it.volume > 0.0 }
+            if (dayBars.size >= 2) dayBars else candles
+        } else {
+            candles
+        }
+
         var cumVolPrice = 0.0
         var cumVol = 0.0
-        for (c in candles) {
+        for (c in sessionSlice) {
+            if (!c.volume.isFinite() || c.volume <= 0.0) continue
             val tp = c.typicalPrice
+            if (!tp.isFinite()) continue
             cumVolPrice += tp * c.volume
             cumVol += c.volume
         }
@@ -440,12 +542,28 @@ object TechnicalIndicatorsEngine {
         val lastPlusDI = if (smoothTr > 0.0) (smoothPlusDm / smoothTr) * 100.0 else 0.0
         val lastMinusDI = if (smoothTr > 0.0) (smoothMinusDm / smoothTr) * 100.0 else 0.0
 
+        val dmiDirection = when {
+            lastPlusDI > lastMinusDI + 1.0 -> IndicatorStance.BULLISH
+            lastMinusDI > lastPlusDI + 1.0 -> IndicatorStance.BEARISH
+            else -> IndicatorStance.NEUTRAL
+        }
+
+        // ADX measures trend strength; DMI separates directional dominance.
+        val isTrending = adx >= 20.0
+        val isStrongTrend = adx >= 25.0
         val (stance, desc) = when {
-            adx >= 25.0 && lastPlusDI > lastMinusDI -> Pair(IndicatorStance.STRONG_BULLISH, "Strong Bullish Trend")
-            adx >= 25.0 && lastMinusDI > lastPlusDI -> Pair(IndicatorStance.STRONG_BEARISH, "Strong Bearish Trend")
-            adx < 20.0 -> Pair(IndicatorStance.NEUTRAL, "Ranging / Weak Trend")
-            lastPlusDI > lastMinusDI -> Pair(IndicatorStance.BULLISH, "Mild Bullish Trend")
-            else -> Pair(IndicatorStance.BEARISH, "Mild Bearish Trend")
+            isStrongTrend && dmiDirection == IndicatorStance.BULLISH ->
+                Pair(IndicatorStance.STRONG_BULLISH, "Strong Trend (ADX ${String.format(Locale.US, "%.1f", adx)}) • +DI Leading")
+            isStrongTrend && dmiDirection == IndicatorStance.BEARISH ->
+                Pair(IndicatorStance.STRONG_BEARISH, "Strong Trend (ADX ${String.format(Locale.US, "%.1f", adx)}) • -DI Leading")
+            !isTrending ->
+                Pair(IndicatorStance.NEUTRAL, "Weak / Ranging Regime (ADX ${String.format(Locale.US, "%.1f", adx)} < 20)")
+            dmiDirection == IndicatorStance.BULLISH ->
+                Pair(IndicatorStance.BULLISH, "Trending (ADX ${String.format(Locale.US, "%.1f", adx)}) • +DI > -DI")
+            dmiDirection == IndicatorStance.BEARISH ->
+                Pair(IndicatorStance.BEARISH, "Trending (ADX ${String.format(Locale.US, "%.1f", adx)}) • -DI > +DI")
+            else ->
+                Pair(IndicatorStance.NEUTRAL, "Trending Strength Balanced (ADX ${String.format(Locale.US, "%.1f", adx)})")
         }
 
         return AdxResult(
@@ -453,7 +571,10 @@ object TechnicalIndicatorsEngine {
             plusDI = lastPlusDI,
             minusDI = lastMinusDI,
             stance = stance,
-            strengthDescription = desc
+            strengthDescription = desc,
+            isTrending = isTrending,
+            isStrongTrend = isStrongTrend,
+            dmiDirection = dmiDirection
         )
     }
 
@@ -476,17 +597,23 @@ object TechnicalIndicatorsEngine {
         val senkouSpanA = (tenkanSen + kijunSen) / 2.0
         val senkouSpanB = midPrice(count - 52, count - 1)
         val chikouSpan = candles.last().close
+        val laggingRefBar = candles[count - 27]
+        val isTenkanAboveKijun = tenkanSen > kijunSen
+        val isChikouBull = chikouSpan > laggingRefBar.close
+        val isChikouBear = chikouSpan < laggingRefBar.close
 
         val currentClose = candles.last().close
+        val cloudTop = max(senkouSpanA, senkouSpanB)
+        val cloudBottom = min(senkouSpanA, senkouSpanB)
         val (stance, desc) = when {
-            currentClose > senkouSpanA && currentClose > senkouSpanB && senkouSpanA > senkouSpanB ->
-                Pair(IndicatorStance.STRONG_BULLISH, "Above Green Cloud (Kumo Breakout)")
-            currentClose < senkouSpanA && currentClose < senkouSpanB && senkouSpanA < senkouSpanB ->
-                Pair(IndicatorStance.STRONG_BEARISH, "Below Red Cloud (Bearish Dominance)")
-            currentClose > max(senkouSpanA, senkouSpanB) ->
-                Pair(IndicatorStance.BULLISH, "Above Cloud")
-            currentClose < min(senkouSpanA, senkouSpanB) ->
-                Pair(IndicatorStance.BEARISH, "Below Cloud")
+            currentClose > cloudTop && isTenkanAboveKijun && isChikouBull && senkouSpanA >= senkouSpanB ->
+                Pair(IndicatorStance.STRONG_BULLISH, "Full Ichimoku Bullish: Above Cloud, Tenkan > Kijun & Chikou Confirmed")
+            currentClose < cloudBottom && !isTenkanAboveKijun && isChikouBear && senkouSpanA <= senkouSpanB ->
+                Pair(IndicatorStance.STRONG_BEARISH, "Full Ichimoku Bearish: Below Cloud, Tenkan < Kijun & Chikou Confirmed")
+            currentClose > cloudTop ->
+                Pair(IndicatorStance.BULLISH, "Above Cloud (Awaiting full Tenkan/Chikou alignment)")
+            currentClose < cloudBottom ->
+                Pair(IndicatorStance.BEARISH, "Below Cloud (Awaiting full Tenkan/Chikou alignment)")
             else ->
                 Pair(IndicatorStance.NEUTRAL, "Inside Cloud (Consolidation)")
         }
@@ -498,9 +625,128 @@ object TechnicalIndicatorsEngine {
             senkouSpanB = senkouSpanB,
             chikouSpan = chikouSpan,
             stance = stance,
-            cloudDescription = desc
+            cloudDescription = desc,
+            isTenkanAboveKijun = isTenkanAboveKijun,
+            isChikouConfirmedBullish = isChikouBull,
+            isChikouConfirmedBearish = isChikouBear
         )
     }
+
+    /**
+     * Non-repainting RSI divergence evaluated exclusively on confirmed 5-bar closed swing pivots.
+     * Index i is only eligible when i + 2 <= candles.lastIndex so the right shoulder is already closed.
+     */
+    fun detectNonRepaintingRsiDivergence(
+        candles: List<Candle>,
+        period: Int = 14
+    ): RsiDivergenceResult? {
+        if (candles.size < period + 12) return null
+        val closes = DoubleArray(candles.size) { candles[it].close }
+        val rsiSeries = calculateRsiSeries(closes, period) ?: return null
+
+        val confirmedSwingLows = mutableListOf<Int>()
+        val confirmedSwingHighs = mutableListOf<Int>()
+        val startIdx = max(period + 2, 2)
+        val endExclusive = candles.size - 2 // Strictly excludes forming/right-unconfirmed bars
+
+        for (i in startIdx until endExclusive) {
+            val l = candles[i].low
+            if (l < candles[i - 1].low && l <= candles[i - 2].low &&
+                l < candles[i + 1].low && l <= candles[i + 2].low
+            ) {
+                confirmedSwingLows.add(i)
+            }
+            val h = candles[i].high
+            if (h > candles[i - 1].high && h >= candles[i - 2].high &&
+                h > candles[i + 1].high && h >= candles[i + 2].high
+            ) {
+                confirmedSwingHighs.add(i)
+            }
+        }
+
+        var bullDiv: RsiDivergenceResult? = null
+        if (confirmedSwingLows.size >= 2) {
+            val s2 = confirmedSwingLows.last()
+            val s1 = confirmedSwingLows[confirmedSwingLows.size - 2]
+            if (s2 - s1 >= 3 && candles[s2].low < candles[s1].low &&
+                rsiSeries[s2] > rsiSeries[s1] + 1.5 && rsiSeries[s1] <= 48.0
+            ) {
+                bullDiv = RsiDivergenceResult(
+                    type = RsiDivergenceType.BULLISH_REGULAR,
+                    swing1Index = s1,
+                    swing2Index = s2,
+                    swing1Price = candles[s1].low,
+                    swing2Price = candles[s2].low,
+                    swing1Rsi = rsiSeries[s1],
+                    swing2Rsi = rsiSeries[s2],
+                    isConfirmedClosedSwings = true,
+                    description = "Confirmed closed-swing Bullish RSI Divergence (LL price vs HL RSI)"
+                )
+            }
+        }
+
+        var bearDiv: RsiDivergenceResult? = null
+        if (confirmedSwingHighs.size >= 2) {
+            val s2 = confirmedSwingHighs.last()
+            val s1 = confirmedSwingHighs[confirmedSwingHighs.size - 2]
+            if (s2 - s1 >= 3 && candles[s2].high > candles[s1].high &&
+                rsiSeries[s2] < rsiSeries[s1] - 1.5 && rsiSeries[s1] >= 52.0
+            ) {
+                bearDiv = RsiDivergenceResult(
+                    type = RsiDivergenceType.BEARISH_REGULAR,
+                    swing1Index = s1,
+                    swing2Index = s2,
+                    swing1Price = candles[s1].high,
+                    swing2Price = candles[s2].high,
+                    swing1Rsi = rsiSeries[s1],
+                    swing2Rsi = rsiSeries[s2],
+                    isConfirmedClosedSwings = true,
+                    description = "Confirmed closed-swing Bearish RSI Divergence (HH price vs LH RSI)"
+                )
+            }
+        }
+
+        return when {
+            bullDiv != null && bearDiv != null -> if (bullDiv.swing2Index >= bearDiv.swing2Index) bullDiv else bearDiv
+            bullDiv != null -> bullDiv
+            bearDiv != null -> bearDiv
+            else -> null
+        }
+    }
+
+    fun calculatePivotPoints(candles: List<Candle>): PivotPointsResult? {
+        if (candles.size < 2) return null
+        val prevDayCandles = if (candles.last().openTime > 0L) {
+            val currentDay = candles.last().openTime / 86_400_000L
+            val distinctDays = candles.map { it.openTime / 86_400_000L }.distinct()
+            if (distinctDays.size >= 2) {
+                val prevDay = distinctDays[distinctDays.size - 2]
+                candles.filter { (it.openTime / 86_400_000L) == prevDay && it.openTime / 86_400_000L != currentDay }
+            } else emptyList()
+        } else emptyList()
+
+        val (high, low, close, ts) = if (prevDayCandles.isNotEmpty()) {
+            val h = prevDayCandles.maxOf { it.high }
+            val l = prevDayCandles.minOf { it.low }
+            val c = prevDayCandles.last().close
+            Quad(h, l, c, prevDayCandles.last().openTime)
+        } else {
+            val prior = candles[candles.size - 2]
+            Quad(prior.high, prior.low, prior.close, prior.openTime)
+        }
+        val pp = (high + low + close) / 3.0
+        val range = high - low
+        return PivotPointsResult(
+            pivotPoint = pp,
+            r1 = (2.0 * pp) - low,
+            r2 = pp + range,
+            s1 = (2.0 * pp) - high,
+            s2 = pp - range,
+            sourceTimestampMs = ts
+        )
+    }
+
+    private data class Quad(val h: Double, val l: Double, val c: Double, val ts: Long)
 
     fun calculateRsi(data: DoubleArray, period: Int): Double? {
         if (data.size < period + 1 || period <= 0) return null
@@ -840,6 +1086,9 @@ object TechnicalIndicatorsEngine {
 
     fun calculateObv(candles: List<Candle>): ObvResult? {
         if (candles.size < 2) return null
+        val positiveBars = candles.count { it.volume > 0.0 }
+        if (positiveBars < min(2, candles.size) || candles.sumOf { it.volume } <= 0.0) return null
+
         var obv = 0.0
         val obvHistory = DoubleArray(candles.size)
 
@@ -871,11 +1120,15 @@ object TechnicalIndicatorsEngine {
         val count = candles.size
         var posFlow = 0.0
         var negFlow = 0.0
+        var totalWindowVol = 0.0
 
         for (i in (count - period) until count) {
+            val vol = candles[i].volume
+            if (!vol.isFinite() || vol <= 0.0) continue
+            totalWindowVol += vol
             val currTp = candles[i].typicalPrice
             val prevTp = candles[i - 1].typicalPrice
-            val rawFlow = currTp * candles[i].volume
+            val rawFlow = currTp * vol
 
             if (currTp > prevTp) {
                 posFlow += rawFlow
@@ -884,6 +1137,8 @@ object TechnicalIndicatorsEngine {
             }
         }
 
+        if (totalWindowVol <= 0.0) return null
+        if (posFlow == 0.0 && negFlow == 0.0) return 50.0
         if (negFlow == 0.0) return 100.0
         val moneyRatio = posFlow / negFlow
         return 100.0 - (100.0 / (1.0 + moneyRatio))
@@ -897,6 +1152,7 @@ object TechnicalIndicatorsEngine {
 
         for (i in (count - period) until count) {
             val c = candles[i]
+            if (!c.volume.isFinite() || c.volume <= 0.0) continue
             val range = c.high - c.low
             val multiplier = if (range > 0.0) {
                 ((c.close - c.low) - (c.high - c.close)) / range
@@ -907,19 +1163,26 @@ object TechnicalIndicatorsEngine {
             sumVol += c.volume
         }
 
-        return if (sumVol > 0.0) sumMfv / sumVol else 0.0
+        return if (sumVol > 0.0) sumMfv / sumVol else null
     }
 
     fun calculateRvol(volumes: DoubleArray, period: Int = 20): Double? {
         if (volumes.size < period + 1) return null
         val currentVol = volumes.last()
+        if (!currentVol.isFinite() || currentVol <= 0.0) return null
         var sum = 0.0
+        var positiveCount = 0
         val start = volumes.size - 1 - period
         for (i in start until (volumes.size - 1)) {
-            sum += volumes[i]
+            val v = volumes[i]
+            if (v.isFinite() && v > 0.0) {
+                sum += v
+                positiveCount++
+            }
         }
+        if (positiveCount < max(3, period / 2)) return null
         val avgVol = sum / period
-        return if (avgVol > 0.0) currentVol / avgVol else 1.0
+        return if (avgVol > 0.0) currentVol / avgVol else null
     }
 
     fun calculateVolumeDelta(candles: List<Candle>): VolumeDeltaResult? {
@@ -1360,6 +1623,47 @@ object TechnicalIndicatorsEngine {
                 } else "Requires 20 candles",
                 formulaInfo = "Highest High (20) & Lowest Low (20)",
                 isAvailable = donchian != null
+            )
+        )
+
+        val pp = volatility.pivotPoints
+        list.add(
+            IndicatorCardItem(
+                id = "pivot_points",
+                name = "Classic Pivot Points",
+                category = IndicatorCategory.VOLATILITY,
+                primaryValue = fmt(pp?.pivotPoint),
+                secondaryValue = if (pp != null) "R1: ${fmt(pp.r1)} | S1: ${fmt(pp.s1)}" else null,
+                stance = when {
+                    pp == null -> IndicatorStance.INSUFFICIENT_DATA
+                    currentClose > pp.pivotPoint -> IndicatorStance.BULLISH
+                    currentClose < pp.pivotPoint -> IndicatorStance.BEARISH
+                    else -> IndicatorStance.NEUTRAL
+                },
+                interpretation = if (pp != null) {
+                    "PP ${fmt(pp.pivotPoint)} | R1 ${fmt(pp.r1)}, R2 ${fmt(pp.r2)} | S1 ${fmt(pp.s1)}, S2 ${fmt(pp.s2)}"
+                } else "Requires completed prior session bar",
+                formulaInfo = "PP=(H+L+C)/3; R1=2PP-L; S1=2PP-H",
+                isAvailable = pp != null
+            )
+        )
+
+        val rsiDiv = momentum.rsiDivergence
+        list.add(
+            IndicatorCardItem(
+                id = "rsi_divergence",
+                name = "RSI Divergence (Confirmed Swings)",
+                category = IndicatorCategory.MOMENTUM,
+                primaryValue = rsiDiv?.type?.label ?: "None",
+                secondaryValue = if (rsiDiv != null) "Non-repainting closed pivots" else "No active swing divergence",
+                stance = when (rsiDiv?.type) {
+                    RsiDivergenceType.BULLISH_REGULAR -> IndicatorStance.BULLISH
+                    RsiDivergenceType.BEARISH_REGULAR -> IndicatorStance.BEARISH
+                    else -> IndicatorStance.NEUTRAL
+                },
+                interpretation = rsiDiv?.description ?: "Evaluated strictly on closed 5-bar fractal swings.",
+                formulaInfo = "Confirmed 5-bar Swing Highs/Lows vs Wilder RSI(14)",
+                isAvailable = true
             )
         )
 

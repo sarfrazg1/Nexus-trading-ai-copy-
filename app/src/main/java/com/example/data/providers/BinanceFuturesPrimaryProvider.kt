@@ -206,6 +206,34 @@ class BinanceFuturesPrimaryProvider(
         )
     }
 
+    suspend fun fetchOrderBookDepth(
+        symbol: String,
+        limit: Int = 20
+    ): ProviderFetchOutcome<OrderBookDepthSnapshot> = withContext(Dispatchers.IO) {
+        val sym = symbol.uppercase().trim()
+        val safeLimit = limit.coerceIn(5, 50)
+        val url = "$baseUrl/fapi/v1/depth?symbol=$sym&limit=$safeLimit"
+        val outcome = http.getWithCacheAndRetry(
+            providerId = "${PROVIDER_ID}_depth_$sym",
+            providerName = PROVIDER_NAME,
+            url = url,
+            cacheEntry = null,
+            cacheTtlMillis = 10_000L,
+            maxAttempts = 2
+        )
+        val body = outcome.data ?: return@withContext ProviderFetchOutcome(null, outcome.metadata)
+        val fetchedAt = outcome.metadata.fetchedAtMillis ?: clockMillis()
+        val depth = com.example.data.remote.BinanceFuturesApiClient().parseOrderBookDepth(sym, body, fetchedAt)
+        ProviderFetchOutcome(
+            data = depth,
+            metadata = if (depth != null) outcome.metadata else outcome.metadata.copy(
+                dataStatus = MarketDataStatus.UNAVAILABLE,
+                health = ProviderHealthStatus.UNAVAILABLE,
+                errorMessage = "Invalid Binance Futures order book depth payload"
+            )
+        )
+    }
+
     private fun parsePremiumIndex(body: String, target: MutableMap<String, Pair<Double?, Double?>>) {
         runCatching {
             val trimmed = body.trim()

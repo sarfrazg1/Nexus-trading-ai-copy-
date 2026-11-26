@@ -346,6 +346,104 @@ class BinanceFuturesApiClient(
     }
 
     /**
+     * Fetches real USDT-M Futures top-N order book depth from /fapi/v1/depth.
+     * Public endpoint requiring zero API keys. Returns null when unreachable or invalid.
+     */
+    suspend fun fetchOrderBookDepth(
+        symbol: String,
+        limit: Int = 20
+    ): com.example.data.providers.OrderBookDepthSnapshot? = withContext(Dispatchers.IO) {
+        val normalizedSymbol = symbol.uppercase().trim()
+        val safeLimit = limit.coerceIn(5, 50)
+        val url = "$FUTURES_BASE_URL/fapi/v1/depth?symbol=$normalizedSymbol&limit=$safeLimit"
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .header("User-Agent", "Mozilla/5.0 (Android; NexusTradingAI)")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = response.body?.string() ?: return@withContext null
+                parseOrderBookDepth(normalizedSymbol, body, System.currentTimeMillis())
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Order book depth unavailable for $normalizedSymbol: ${e.message}")
+            null
+        }
+    }
+
+    internal fun parseOrderBookDepth(
+        symbol: String,
+        jsonBody: String,
+        fetchedAtMillis: Long
+    ): com.example.data.providers.OrderBookDepthSnapshot? {
+        return try {
+            val obj = JSONObject(jsonBody)
+            val bids = obj.optJSONArray("bids") ?: return null
+            val asks = obj.optJSONArray("asks") ?: return null
+            if (bids.length() == 0 || asks.length() == 0) return null
+
+            var bestBid = 0.0
+            var bestAsk = 0.0
+            var bidNotional = 0.0
+            var askNotional = 0.0
+            var maxBidNotional = 0.0
+            var maxAskNotional = 0.0
+            var strongestBidPrice: Double? = null
+            var strongestAskPrice: Double? = null
+
+            for (i in 0 until bids.length()) {
+                val lvl = bids.optJSONArray(i) ?: continue
+                val p = lvl.optString(0).toDoubleOrNull() ?: continue
+                val q = lvl.optString(1).toDoubleOrNull() ?: continue
+                if (!p.isFinite() || !q.isFinite() || p <= 0.0 || q < 0.0) continue
+                if (i == 0 || p > bestBid) bestBid = p
+                val notional = p * q
+                bidNotional += notional
+                if (notional > maxBidNotional) {
+                    maxBidNotional = notional
+                    strongestBidPrice = p
+                }
+            }
+
+            for (i in 0 until asks.length()) {
+                val lvl = asks.optJSONArray(i) ?: continue
+                val p = lvl.optString(0).toDoubleOrNull() ?: continue
+                val q = lvl.optString(1).toDoubleOrNull() ?: continue
+                if (!p.isFinite() || !q.isFinite() || p <= 0.0 || q < 0.0) continue
+                if (bestAsk == 0.0 || p < bestAsk) bestAsk = p
+                val notional = p * q
+                askNotional += notional
+                if (notional > maxAskNotional) {
+                    maxAskNotional = notional
+                    strongestAskPrice = p
+                }
+            }
+
+            if (bestBid <= 0.0 || bestAsk <= 0.0 || bestAsk < bestBid) return null
+            val mid = (bestBid + bestAsk) / 2.0
+            val spreadBps = ((bestAsk - bestBid) / mid) * 10_000.0
+            val imbalanceRatio = if (askNotional > 0.0) bidNotional / askNotional else 1.0
+
+            com.example.data.providers.OrderBookDepthSnapshot(
+                symbol = symbol,
+                bestBid = bestBid,
+                bestAsk = bestAsk,
+                spreadBps = spreadBps,
+                topBidsNotionalUsd = bidNotional,
+                topAsksNotionalUsd = askNotional,
+                bidAskImbalanceRatio = imbalanceRatio,
+                strongestBidWallPrice = strongestBidPrice,
+                strongestAskWallPrice = strongestAskPrice,
+                fetchedAtMillis = fetchedAtMillis
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * Connects to Binance Public Futures WebSocket stream for live ticker prices.
      */
     fun startWebSocket(monitoredSymbols: Set<String>) {

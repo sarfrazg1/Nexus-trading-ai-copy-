@@ -168,7 +168,18 @@ data class TradingUiState(
 
     // Part 4: NEXUS 1:5 High-Reward Opportunity Radar
     val highRewardScanState: com.example.data.scanner.HighRewardScanState = com.example.data.scanner.HighRewardScanState(),
-    val selectedHighRewardOpportunity: com.example.data.scanner.HighRewardOpportunity? = null
+    val selectedHighRewardOpportunity: com.example.data.scanner.HighRewardOpportunity? = null,
+
+    // Master Upgrade Part 1-3: Strict Multi-Market Analysis, Fib, Ranking, Signal Lifecycle, Risk & Directional Backtest
+    val multiMarketStrictEvaluations: List<com.example.data.scanner.StrictMultiMarketEvaluation> = emptyList(),
+    val rankedMultiMarketBoard: com.example.data.scanner.RankedMultiMarketBoard? = null,
+    val isScanningMultiMarketStrict: Boolean = false,
+    val multiMarketSetupBacktestSummary: String? = null,
+    val multiMarketSetupDirectionalReport: com.example.data.timemachine.DirectionalSetupBacktestReport? = null,
+    val managedSignals: List<com.example.data.scanner.ManagedSignalEntry> = emptyList(),
+    val signalTransitionLog: List<com.example.data.scanner.SignalTransitionRecord> = emptyList(),
+    val budgetConfig: com.example.data.risk.BudgetConfig = com.example.data.risk.BudgetConfig(),
+    val dailyRiskLedger: com.example.data.risk.DailyRiskLedger = com.example.data.risk.DailyRiskLedger()
 ) {
     val selectedAssetDetail: MarketAsset?
         get() = selectedAssetId?.let { id -> assets.firstOrNull { it.id == id } }
@@ -251,6 +262,11 @@ class TradingViewModel(
     private val _translatedNewsArticle = MutableStateFlow<com.example.data.news.TranslatedNewsArticle?>(null)
     private val _newsTranslationError = MutableStateFlow<String?>(null)
     private val _selectedHighRewardOpportunity = MutableStateFlow<com.example.data.scanner.HighRewardOpportunity?>(null)
+    private val _multiMarketStrictEvaluations = MutableStateFlow<List<com.example.data.scanner.StrictMultiMarketEvaluation>>(emptyList())
+    private val _rankedMultiMarketBoard = MutableStateFlow<com.example.data.scanner.RankedMultiMarketBoard?>(null)
+    private val _isScanningMultiMarketStrict = MutableStateFlow(false)
+    private val _multiMarketSetupBacktestSummary = MutableStateFlow<String?>(null)
+    private val _multiMarketSetupDirectionalReport = MutableStateFlow<com.example.data.timemachine.DirectionalSetupBacktestReport?>(null)
 
     val uiState: StateFlow<TradingUiState> = combine(
         combine(
@@ -398,7 +414,16 @@ class TradingViewModel(
             translatedNewsArticle = _translatedNewsArticle.value,
             newsTranslationError = _newsTranslationError.value,
             highRewardScanState = futuresScannerRepo.highRewardState.value,
-            selectedHighRewardOpportunity = _selectedHighRewardOpportunity.value
+            selectedHighRewardOpportunity = _selectedHighRewardOpportunity.value,
+            multiMarketStrictEvaluations = _multiMarketStrictEvaluations.value,
+            rankedMultiMarketBoard = _rankedMultiMarketBoard.value,
+            isScanningMultiMarketStrict = _isScanningMultiMarketStrict.value,
+            multiMarketSetupBacktestSummary = _multiMarketSetupBacktestSummary.value,
+            multiMarketSetupDirectionalReport = _multiMarketSetupDirectionalReport.value,
+            managedSignals = futuresScannerRepo.managedSignals.value,
+            signalTransitionLog = futuresScannerRepo.signalTransitionLog.value,
+            budgetConfig = futuresScannerRepo.budgetConfig.value,
+            dailyRiskLedger = futuresScannerRepo.dailyRiskLedger.value
         )
     }.stateIn(
         scope = viewModelScope,
@@ -446,6 +471,26 @@ class TradingViewModel(
         }
         viewModelScope.launch {
             futuresScannerRepo.highRewardState.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.managedSignals.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.signalTransitionLog.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.budgetConfig.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.dailyRiskLedger.collect {
                 _learningUpdate.value++
             }
         }
@@ -1733,6 +1778,95 @@ class TradingViewModel(
         refreshFuturesScannerOnDemand()
     }
 
+    fun runMultiMarketStrictScan() {
+        if (_isScanningMultiMarketStrict.value) return
+        _isScanningMultiMarketStrict.value = true
+        _multiMarketSetupBacktestSummary.value = null
+        _multiMarketSetupDirectionalReport.value = null
+        _learningUpdate.value++
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                runCatching { repository.refreshData() }
+                val specs = com.example.data.providers.MultiMarketInstrumentCatalog.allMultiMarketScannerSpecs()
+                val assetsMap = repository.assets.value.associateBy { it.id.uppercase() }
+                val results = mutableListOf<com.example.data.scanner.StrictMultiMarketEvaluation>()
+                val statusMap = mutableMapOf<String, MarketDataStatus>()
+
+                for (spec in specs) {
+                    val asset = assetsMap[spec.canonicalId]
+                    val c15m = repository.getCandles(spec.canonicalId, CandleTimeframe.M15, 160)
+                    val c1h = repository.getCandles(spec.canonicalId, CandleTimeframe.H1, 160)
+                    val c4h = repository.getCandles(spec.canonicalId, CandleTimeframe.H4, 120)
+                    val c1d = repository.getCandles(spec.canonicalId, CandleTimeframe.D1, 90)
+                    val isStale = asset?.dataStatus == MarketDataStatus.UNAVAILABLE ||
+                        asset?.dataStatus == MarketDataStatus.STALE
+
+                    if (asset != null) {
+                        statusMap[spec.canonicalId.uppercase()] = asset.dataStatus
+                    }
+
+                    val eval = com.example.data.scanner.StrictMultiMarketSetupEngine.evaluate(
+                        symbol = spec.canonicalId,
+                        currentPrice = asset?.currentPrice ?: c15m.lastOrNull()?.close,
+                        dataSourceName = asset?.dataSourceName ?: spec.primaryVenue.displayName,
+                        candles1d = c1d,
+                        candles4h = c4h,
+                        candles1h = c1h,
+                        candles15m = c15m,
+                        isDataStale = isStale
+                    )
+                    results.add(eval)
+                }
+
+                val rankedBoard = com.example.data.scanner.MultiMarketOpportunityRanker.rank(
+                    evaluations = results,
+                    dataStatusesBySymbol = statusMap
+                )
+                _multiMarketStrictEvaluations.value = rankedBoard.opportunities.map { it.evaluation }
+                _rankedMultiMarketBoard.value = rankedBoard
+                futuresScannerRepo.onStrictMultiMarketEvaluated(rankedBoard)
+
+                _userMessage.value = if (rankedBoard.qualifiedCount == 0) {
+                    "${rankedBoard.emptyHeadline}: ${rankedBoard.emptyReason ?: "Waiting for confirmed >=1:4 setup"}"
+                } else {
+                    "Multi-Market scan: ${rankedBoard.qualifiedCount} qualified (${rankedBoard.preferredFiveToOneCount} >=1:5) | ${rankedBoard.unavailableCount} unavailable"
+                }
+            } catch (e: Exception) {
+                _userMessage.value = "Multi-Market scan failed: ${e.message ?: "Network error"}"
+            } finally {
+                _isScanningMultiMarketStrict.value = false
+                _learningUpdate.value++
+            }
+        }
+    }
+
+    fun runStrictSetupTimeMachineBacktest(
+        symbol: String,
+        setupType: com.example.data.scanner.SetupModelType,
+        direction: com.example.data.scanner.FuturesDirection
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val candles = repository.getCandles(symbol, CandleTimeframe.H1, 250)
+                val report = com.example.data.timemachine.TimeMachineEngine.runDirectionalBacktestComparison(
+                    symbol = symbol,
+                    timeframe = CandleTimeframe.H1,
+                    setupType = setupType,
+                    slDistancePercent = 1.5,
+                    tpDistancePercent = 6.0,
+                    candles = candles
+                )
+                _multiMarketSetupDirectionalReport.value = report
+                _multiMarketSetupBacktestSummary.value = report.comparisonSummary
+            } catch (e: Exception) {
+                _multiMarketSetupBacktestSummary.value = "Backtest unavailable for $symbol: ${e.message ?: "Error"}"
+            } finally {
+                _learningUpdate.value++
+            }
+        }
+    }
+
     fun openTradeWorkflowBySymbol(symbol: String, signalId: String? = null, alertTypeName: String? = null) {
         _currentTab.value = NavigationTab.SCANNER
         _scannerScreenMode.value = 0
@@ -1839,6 +1973,7 @@ class TradingViewModel(
 
     fun updateWorkflowBudgetConfig(newConfig: com.example.data.risk.BudgetConfig) {
         futuresScannerRepo.updateBudgetConfig(newConfig)
+        _learningUpdate.value++
         val signal = _tradeWorkflow.value.selectedSignal ?: return
         val budgetPlan = com.example.data.risk.BudgetManagerEngine.calculatePlanForSignal(
             signal = signal,

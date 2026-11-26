@@ -3,8 +3,8 @@ package com.example.data.smc
 import com.example.data.model.CandleTimeframe
 
 /**
- * Smart Money Concepts (SMC), Liquidity and Fibonacci Models
- * for NEXUS TRADING AI.
+ * Smart Money Concepts (SMC), Market Structure, Volume Profile, Support/Resistance,
+ * Price Action, and Strict Fibonacci Models for NEXUS TRADING AI.
  */
 
 // ==========================================
@@ -32,7 +32,9 @@ enum class MarketStructureBreakType(val label: String, val isBullish: Boolean) {
     BOS_BULLISH("Bullish BOS", true),
     BOS_BEARISH("Bearish BOS", false),
     CHOCH_BULLISH("Bullish CHoCH", true),
-    CHOCH_BEARISH("Bearish CHoCH", false)
+    CHOCH_BEARISH("Bearish CHoCH", false),
+    MSS_BULLISH("Bullish MSS", true),
+    MSS_BEARISH("Bearish MSS", false)
 }
 
 data class MarketStructureBreak(
@@ -61,7 +63,9 @@ data class MarketStructureAnalysis(
     val isBullishBOSPresent: Boolean,
     val isBearishBOSPresent: Boolean,
     val isBullishCHoCHPresent: Boolean,
-    val isBearishCHoCHPresent: Boolean
+    val isBearishCHoCHPresent: Boolean,
+    val isBullishMSSPresent: Boolean = false,
+    val isBearishMSSPresent: Boolean = false
 )
 
 // ==========================================
@@ -164,7 +168,7 @@ data class LiquidityAnalysis(
 )
 
 // ==========================================
-// 5. SUPPORT & RESISTANCE / SUPPLY & DEMAND
+// 5. ADVANCED SUPPORT & RESISTANCE / SUPPLY & DEMAND / VOLUME PROFILE / PRICE ACTION
 // ==========================================
 
 enum class PriceZoneType(val label: String) {
@@ -172,6 +176,16 @@ enum class PriceZoneType(val label: String) {
     RESISTANCE("Resistance Zone"),
     DEMAND("Demand Zone (Aggressive Buying)"),
     SUPPLY("Supply Zone (Aggressive Selling)")
+}
+
+enum class ZoneSourceType(val shortLabel: String) {
+    REPEATED_REACTION("Repeated Reaction"),
+    SWING_PIVOT("Swing Pivot"),
+    PREVIOUS_DAY_HIGH_LOW("PDH/PDL"),
+    PREVIOUS_WEEK_HIGH_LOW("PWH/PWL"),
+    SUPPLY_DEMAND_OB("Supply/Demand OB"),
+    VOLUME_PROFILE_HVN("Volume Profile"),
+    BREAKOUT_RETEST("Breakout-Retest")
 }
 
 data class PriceLevelZone(
@@ -183,11 +197,59 @@ data class PriceLevelZone(
     val touchesCount: Int,
     val strength: Int, // 1 to 5 stars
     val isCurrentlyActive: Boolean,
-    val distancePercent: Double // from current price
+    val distancePercent: Double, // from current price
+    val zoneSources: List<ZoneSourceType> = emptyList(),
+    val strengthScore: Int = (strength * 20).coerceIn(10, 100),
+    val isBreakoutRetested: Boolean = false,
+    val sourceSummary: String = type.label
+)
+
+data class VolumeProfileSummary(
+    val pocPrice: Double,
+    val vahPrice: Double,
+    val valPrice: Double,
+    val isVolumeReliable: Boolean,
+    val totalVolumeEvaluated: Double
+)
+
+enum class PriceActionPatternType(val label: String, val isBullish: Boolean) {
+    BULLISH_ENGULFING("Bullish Engulfing", true),
+    BEARISH_ENGULFING("Bearish Engulfing", false),
+    BULLISH_PIN_BAR("Bullish Pin Bar", true),
+    BEARISH_PIN_BAR("Bearish Pin Bar", false),
+    BULLISH_REJECTION_WICK("Bullish Rejection Candle", true),
+    BEARISH_REJECTION_WICK("Bearish Rejection Candle", false)
+}
+
+data class PriceActionPatternEvent(
+    val type: PriceActionPatternType,
+    val candleIndex: Int,
+    val timestamp: Long,
+    val closePrice: Double,
+    val hasZoneConfluence: Boolean,
+    val isCandleClosedConfirmed: Boolean,
+    val contextDescription: String
+)
+
+enum class BreakoutRetestType(val label: String, val isBullish: Boolean) {
+    CONFIRMED_BREAKOUT_RETEST_BULLISH("Bullish Breakout & Retest", true),
+    CONFIRMED_BREAKOUT_RETEST_BEARISH("Bearish Breakdown & Retest", false),
+    FAILED_BREAKOUT_BULL_TRAP("Failed Bullish Breakout (Trap)", false),
+    FAILED_BREAKOUT_BEAR_TRAP("Failed Bearish Breakdown (Trap)", true)
+}
+
+data class BreakoutRetestEvent(
+    val type: BreakoutRetestType,
+    val zoneLevel: Double,
+    val breakCandleIndex: Int,
+    val testCandleIndex: Int,
+    val timestamp: Long,
+    val volumeConfirmed: Boolean,
+    val description: String
 )
 
 // ==========================================
-// 6. FIBONACCI RETRACEMENT & EXTENSION
+// 6. STRICT FIBONACCI RETRACEMENT & EXTENSION
 // ==========================================
 
 data class FibLevel(
@@ -197,6 +259,20 @@ data class FibLevel(
     val isExtension: Boolean,
     val isGoldenPocket: Boolean = false,
     val isEquilibrium: Boolean = false
+)
+
+data class FibonacciValidationReport(
+    val hasConfirmedSwingLeg: Boolean,
+    val alignsWithTrendOrStructure: Boolean,
+    val hasSrOrOrderBlockConfluence: Boolean,
+    val hasConfirmedPriceActionReaction: Boolean,
+    val hasVolumeConfirmation: Boolean,
+    val alignsWithHigherTimeframe: Boolean,
+    val hasValidRiskLevels: Boolean,
+    val isInGoldenZone0500To0618: Boolean,
+    val isStrictlyValid: Boolean,
+    val passedGatesCount: Int,
+    val rejectionReason: String? = null
 )
 
 data class FibonacciAnalysis(
@@ -210,7 +286,16 @@ data class FibonacciAnalysis(
     val goldenPocketLow: Double,
     val goldenPocketHigh: Double,
     val equilibriumPrice: Double,
-    val currentFibZoneDescription: String
+    val currentFibZoneDescription: String,
+    val isSwingValid: Boolean = true,
+    val goldenZone0500To0618Low: Double = goldenPocketLow,
+    val goldenZone0500To0618High: Double = goldenPocketHigh,
+    val goldenRatio0618Price: Double = goldenPocketLow,
+    val premiumZoneLow: Double = equilibriumPrice,
+    val premiumZoneHigh: Double = swingHighPrice,
+    val discountZoneLow: Double = swingLowPrice,
+    val discountZoneHigh: Double = equilibriumPrice,
+    val validationReport: FibonacciValidationReport? = null
 )
 
 // ==========================================
@@ -264,5 +349,12 @@ data class SmcAnalysisResult(
     val fibonacci: FibonacciAnalysis?,
     val multiTimeframe: MultiTimeframeSMCAnalysis?,
     val isInsufficientData: Boolean,
-    val calculationTimestamp: Long = System.currentTimeMillis()
+    val calculationTimestamp: Long = System.currentTimeMillis(),
+    val volumeProfile: VolumeProfileSummary? = null,
+    val breakoutRetests: List<BreakoutRetestEvent> = emptyList(),
+    val priceActionPatterns: List<PriceActionPatternEvent> = emptyList(),
+    val previousDayHigh: Double? = null,
+    val previousDayLow: Double? = null,
+    val previousWeekHigh: Double? = null,
+    val previousWeekLow: Double? = null
 )

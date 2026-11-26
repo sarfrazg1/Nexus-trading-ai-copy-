@@ -40,6 +40,19 @@ data class BacktestTradeOccurrence(
     val ambiguityNote: String? = null
 )
 
+data class InOutSampleSplitMetrics(
+    val splitRatioInSample: Double = 0.70,
+    val inSampleCount: Int,
+    val inSampleWinRatePercent: Double,
+    val inSampleExpectancyR: Double,
+    val inSampleProfitFactor: Double,
+    val outOfSampleCount: Int,
+    val outOfSampleWinRatePercent: Double,
+    val outOfSampleExpectancyR: Double,
+    val outOfSampleProfitFactor: Double,
+    val antiLeakageNote: String = "Strict chronological split: first 70% In-Sample vs final 30% Out-of-Sample with zero shared look-ahead."
+)
+
 data class HistoricalBacktestResult(
     val symbol: String,
     val timeframe: CandleTimeframe,
@@ -64,7 +77,13 @@ data class HistoricalBacktestResult(
     val hasSufficientData: Boolean,
     val missingDataAndLimitations: List<String>,
     val antiLookAheadNote: String =
-        "Anti-look-ahead enforced: each historical bar i is evaluated strictly from completed bars [0..i] prior to walking forward from bar i+1."
+        "Anti-look-ahead enforced: each historical bar i is evaluated strictly from completed bars [0..i] prior to walking forward from bar i+1.",
+    val setupTypeName: String? = null,
+    val maxDrawdownPercent: Double = 0.0,
+    val expectancyR: Double = 0.0,
+    val expectancyPercent: Double = 0.0,
+    val inOutSampleSplit: InOutSampleSplitMetrics? = null,
+    val backtestDisclaimer: String = BACKTEST_DISCLAIMER
 ) {
     val resolvedDecisiveCount: Int get() = tpFirstCount + slFirstCount
     val resolvedAllCount: Int get() = tpFirstCount + slFirstCount + ambiguousSameCandleCount
@@ -82,7 +101,22 @@ data class HistoricalBacktestResult(
                 ambiguousSameCandleCount
             )
         }
+
+    companion object {
+        const val BACKTEST_DISCLAIMER =
+            "Historical backtests reflect past market regimes after assumed fees & slippage; they do NOT guarantee future returns or target hits."
+    }
 }
+
+data class DirectionalSetupBacktestReport(
+    val symbol: String,
+    val timeframe: CandleTimeframe,
+    val setupTypeName: String,
+    val longResult: HistoricalBacktestResult,
+    val shortResult: HistoricalBacktestResult,
+    val comparisonSummary: String,
+    val disclaimer: String = HistoricalBacktestResult.BACKTEST_DISCLAIMER
+)
 
 data class OutcomePercentiles(
     val p10ReturnPercent: Double,

@@ -26,10 +26,13 @@ data class TradingThemeColors(
     val textSecondary: Color,
     val textMuted: Color,
     val gold: Color,
+    val onGold: Color,
     val bullishGreen: Color,
     val bearishRed: Color,
     val bullishGreenBg: Color,
     val bearishRedBg: Color,
+    val warningOrange: Color,
+    val neutralCyan: Color,
     val isDark: Boolean
 )
 
@@ -44,10 +47,13 @@ val DarkTradingColors = TradingThemeColors(
     textSecondary = TextSecondary,
     textMuted = TextMuted,
     gold = NexusGold,
+    onGold = Color(0xFF0A0E17),
     bullishGreen = BullishGreen,
     bearishRed = BearishRed,
     bullishGreenBg = BullishGreenBg,
     bearishRedBg = BearishRedBg,
+    warningOrange = WarningOrange,
+    neutralCyan = NeutralCyan,
     isDark = true
 )
 
@@ -62,10 +68,13 @@ val LightTradingColors = TradingThemeColors(
     textSecondary = Color(0xFF334155),
     textMuted = Color(0xFF64748B),
     gold = Color(0xFFB88214),
-    bullishGreen = Color(0xFF00A352),
+    onGold = Color(0xFF0A0E17),
+    bullishGreen = Color(0xFF008F47),
     bearishRed = Color(0xFFDC2626),
-    bullishGreenBg = Color(0x1F00A352),
+    bullishGreenBg = Color(0x1F008F47),
     bearishRedBg = Color(0x1FDC2626),
+    warningOrange = Color(0xFFD97706),
+    neutralCyan = Color(0xFF0284C7),
     isDark = false
 )
 

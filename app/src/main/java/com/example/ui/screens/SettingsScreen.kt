@@ -81,10 +81,7 @@ import com.example.data.settings.AppSettingsState
 import com.example.data.settings.AppThemeMode
 import com.example.data.settings.NexusLocalization
 import com.example.data.settings.RefreshRatePreference
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BullishGreen
 import com.example.ui.theme.NexusTheme
-import com.example.ui.theme.WarningOrange
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -244,7 +241,7 @@ fun SettingsScreen(
                                     shape = RoundedCornerShape(10.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = colors.gold,
-                                        contentColor = if (colors.isDark) Color(0xFF070B14) else Color.White
+                                        contentColor = colors.onGold
                                     ),
                                     modifier = Modifier
                                         .weight(1f)
@@ -397,7 +394,7 @@ fun SettingsScreen(
                                         LearningLanguageMode.BILINGUAL -> "Bilingual"
                                     },
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSelected) (if (colors.isDark) Color(0xFF070B14) else Color.White) else colors.textSecondary,
+                                        color = if (isSelected) colors.onGold else colors.textSecondary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp
                                     )
@@ -444,7 +441,7 @@ fun SettingsScreen(
                                 Text(
                                     text = uSize.displayName(lang),
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSelected) (if (colors.isDark) Color(0xFF070B14) else Color.White) else colors.textSecondary,
+                                        color = if (isSelected) colors.onGold else colors.textSecondary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp
                                     )
@@ -629,7 +626,7 @@ fun SettingsScreen(
                                 Text(
                                     text = tf.label,
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSelected) (if (colors.isDark) Color(0xFF070B14) else Color.White) else colors.textSecondary,
+                                        color = if (isSelected) colors.onGold else colors.textSecondary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp
                                     )
@@ -647,7 +644,13 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val categories = listOf(AssetCategory.ALL, AssetCategory.CRYPTO, AssetCategory.COMMODITIES, AssetCategory.FOREX)
+                    val categories = listOf(
+                        AssetCategory.ALL,
+                        AssetCategory.CRYPTO,
+                        AssetCategory.COMMODITIES,
+                        AssetCategory.STOCKS,
+                        AssetCategory.FOREX
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -666,7 +669,7 @@ fun SettingsScreen(
                                 Text(
                                     text = cat.label,
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSelected) (if (colors.isDark) Color(0xFF070B14) else Color.White) else colors.textSecondary,
+                                        color = if (isSelected) colors.onGold else colors.textSecondary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp
                                     ),
@@ -703,7 +706,7 @@ fun SettingsScreen(
                                 Text(
                                     text = if (rRate.seconds > 0) "${rRate.seconds}s" else "Manual",
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSelected) (if (colors.isDark) Color(0xFF070B14) else Color.White) else colors.textSecondary,
+                                        color = if (isSelected) colors.onGold else colors.textSecondary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp
                                     )
@@ -915,13 +918,13 @@ fun SettingsScreen(
                                 modifier = Modifier
                                     .size(6.dp)
                                     .clip(CircleShape)
-                                    .background(if (config.isConnected) colors.bullishGreen else WarningOrange)
+                                    .background(if (config.isConnected) colors.bullishGreen else colors.warningOrange)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = if (config.isConnected) "CONNECTED" else "NOT CONNECTED",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = if (config.isConnected) colors.bullishGreen else WarningOrange,
+                                    color = if (config.isConnected) colors.bullishGreen else colors.warningOrange,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
@@ -948,7 +951,7 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (config.isConnected) colors.surfaceVariant else colors.gold,
-                                contentColor = if (config.isConnected) colors.textPrimary else (if (colors.isDark) Color(0xFF070B14) else Color.White)
+                                contentColor = if (config.isConnected) colors.textPrimary else colors.onGold
                             )
                         ) {
                             Icon(imageVector = Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -1100,7 +1103,7 @@ fun SettingsScreen(
                 ) {
                     Text(
                         text = NexusLocalization.btnConfirm(lang),
-                        color = if (colors.isDark) Color(0xFF070B14) else Color.White,
+                        color = colors.onGold,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1200,7 +1203,7 @@ private fun ThemeOptionButton(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (isSelected) (if (colors.isDark) Color(0xFF070B14) else Color.White) else colors.textSecondary,
+                tint = if (isSelected) colors.onGold else colors.textSecondary,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -1211,7 +1214,7 @@ private fun ThemeOptionButton(
                     AppThemeMode.SYSTEM -> "Auto"
                 },
                 style = MaterialTheme.typography.labelSmall.copy(
-                    color = if (isSelected) (if (colors.isDark) Color(0xFF070B14) else Color.White) else colors.textSecondary,
+                    color = if (isSelected) colors.onGold else colors.textSecondary,
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp
                 )
@@ -1303,7 +1306,7 @@ private fun LegalNoticeDialog(
                 ) {
                     Text(
                         text = "I Understand / Samajh Gaya",
-                        color = if (colors.isDark) Color(0xFF070B14) else Color.White,
+                        color = colors.onGold,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -1393,7 +1396,7 @@ private fun AboutNexusDialog(
                 ) {
                     Text(
                         text = "Close / Band Karein",
-                        color = if (colors.isDark) Color(0xFF070B14) else Color.White,
+                        color = colors.onGold,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )

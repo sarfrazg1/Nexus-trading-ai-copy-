@@ -43,15 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.learning.LearningLanguageMode
 import com.example.data.news.EconomicTerm
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun EconomicGlossaryDialog(
@@ -60,6 +52,7 @@ fun EconomicGlossaryDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     var selectedLanguage by remember { mutableStateOf(currentLanguageMode) }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -69,8 +62,8 @@ fun EconomicGlossaryDialog(
                 .padding(vertical = 16.dp)
                 .testTag("economic_glossary_dialog_${term.key}"),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = NavyCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+            colors = CardDefaults.cardColors(containerColor = colors.card),
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
         ) {
             Column(
                 modifier = Modifier
@@ -89,13 +82,13 @@ fun EconomicGlossaryDialog(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(NexusGold.copy(alpha = 0.15f)),
+                                .background(colors.gold.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = null,
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -104,7 +97,7 @@ fun EconomicGlossaryDialog(
                             Text(
                                 text = term.abbreviation,
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp
                                 )
@@ -112,7 +105,7 @@ fun EconomicGlossaryDialog(
                             Text(
                                 text = term.title,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = TextSecondary,
+                                    color = colors.textSecondary,
                                     fontSize = 12.sp
                                 )
                             )
@@ -126,7 +119,7 @@ fun EconomicGlossaryDialog(
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close",
-                            tint = TextMuted,
+                            tint = colors.textMuted,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -143,13 +136,13 @@ fun EconomicGlossaryDialog(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
                             text = term.category.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = TextSecondary,
+                                color = colors.textSecondary,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 10.sp
                             )
@@ -167,7 +160,7 @@ fun EconomicGlossaryDialog(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (isSel) NexusGold else NavySurfaceVariant)
+                                    .background(if (isSel) colors.gold else colors.surfaceVariant)
                                     .clickable { selectedLanguage = mode }
                                     .padding(horizontal = 8.dp, vertical = 3.dp),
                                 contentAlignment = Alignment.Center
@@ -175,7 +168,7 @@ fun EconomicGlossaryDialog(
                                 Text(
                                     text = label,
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSel) NavyBackground else TextSecondary,
+                                        color = if (isSel) colors.onGold else colors.textSecondary,
                                         fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                         fontSize = 10.sp
                                     )
@@ -191,7 +184,7 @@ fun EconomicGlossaryDialog(
                 Text(
                     text = "EXPLANATION & CONCEPT",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
@@ -201,14 +194,14 @@ fun EconomicGlossaryDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.5f))
-                        .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                        .background(colors.surfaceVariant.copy(alpha = 0.7f))
+                        .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                         .padding(14.dp)
                 ) {
                     Text(
                         text = term.getExplanation(selectedLanguage),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontSize = 13.sp,
                             lineHeight = 19.sp
                         )
@@ -221,7 +214,7 @@ fun EconomicGlossaryDialog(
                 Text(
                     text = "MARKET IMPACT / ASAR",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
@@ -231,22 +224,22 @@ fun EconomicGlossaryDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.5f))
-                        .border(1.dp, BullishGreen.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                        .background(colors.surfaceVariant.copy(alpha = 0.7f))
+                        .border(1.dp, colors.bullishGreen.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
                         .padding(14.dp)
                 ) {
                     Row(verticalAlignment = Alignment.Top) {
                         Icon(
                             imageVector = Icons.Default.TrendingUp,
                             contentDescription = null,
-                            tint = BullishGreen,
+                            tint = colors.bullishGreen,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = term.getImpact(selectedLanguage),
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontSize = 12.sp,
                                 lineHeight = 18.sp
                             )
@@ -262,11 +255,11 @@ fun EconomicGlossaryDialog(
                         .fillMaxWidth()
                         .testTag("dismiss_glossary_btn"),
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NexusGold)
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.gold)
                 ) {
                     Text(
                         text = "Samajh Gaya / Understood",
-                        color = NavyBackground,
+                        color = colors.onGold,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )

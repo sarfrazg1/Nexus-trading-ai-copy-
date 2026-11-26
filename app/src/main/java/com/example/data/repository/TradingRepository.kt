@@ -80,8 +80,11 @@ class TradingRepository(
     val hybridMarketState: StateFlow<com.example.data.providers.UnifiedHybridMarketState> = _hybridMarketState.asStateFlow()
 
     suspend fun fetchDerivativesForAsset(assetId: String): com.example.data.remote.BinanceFuturesApiClient.DerivativesSnapshot? {
-        val binanceSymbol = assetToBinanceSymbol(assetId.uppercase())
-        if (!binanceSymbol.endsWith("USDT") || assetId.uppercase() in listOf("XAG", "WTI", "BRENT", "NATGAS", "OIL", "GAS")) {
+        val spec = com.example.data.providers.MultiMarketInstrumentCatalog.resolve(assetId)
+        val binanceSymbol = if (spec != null && spec.isBinanceFuturesEligible) {
+            spec.binanceSymbol
+        } else null
+        if (binanceSymbol.isNullOrBlank()) {
             return null
         }
         return try {
@@ -101,6 +104,58 @@ class TradingRepository(
             }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    suspend fun buildFuturesLiquiditySnapshot(
+        assetId: String,
+        candles: List<Candle>
+    ): com.example.data.providers.FuturesLiquiditySnapshot {
+        val spec = com.example.data.providers.MultiMarketInstrumentCatalog.resolve(assetId)
+        val binanceSymbol = spec?.takeIf { it.isBinanceFuturesEligible }?.binanceSymbol
+        if (binanceSymbol.isNullOrBlank()) {
+            return com.example.data.providers.FuturesLiquiditySnapshot(
+                symbol = spec?.displaySymbol ?: assetId.uppercase(),
+                isCryptoFutures = false,
+                status = com.example.data.providers.FuturesTelemetryStatus.NOT_APPLICABLE,
+                source = spec?.primaryVenue?.displayName ?: "Non-Crypto Instrument"
+            )
+        }
+        return try {
+            val derivDeferred = repositoryScope.async { fetchDerivativesForAsset(assetId) }
+            val depthDeferred = repositoryScope.async { futuresApiClient.fetchOrderBookDepth(binanceSymbol, limit = 20) }
+            val deriv = derivDeferred.await()
+            val depth = depthDeferred.await()
+            val vd = TechnicalIndicatorsEngine.calculateVolumeDelta(candles)
+            val hasAnyLive = deriv != null && (
+                deriv.openInterestContracts != null ||
+                    deriv.fundingRatePercent != null ||
+                    deriv.longShortAccountRatio != null
+                )
+            val status = when {
+                !hasAnyLive && depth == null -> com.example.data.providers.FuturesTelemetryStatus.UNAVAILABLE
+                else -> com.example.data.providers.FuturesTelemetryStatus.LIVE
+            }
+            com.example.data.providers.FuturesLiquiditySnapshot(
+                symbol = binanceSymbol,
+                isCryptoFutures = true,
+                status = status,
+                openInterestContracts = deriv?.openInterestContracts,
+                fundingRatePercent = deriv?.fundingRatePercent,
+                longShortAccountRatio = deriv?.longShortAccountRatio,
+                takerCvd = vd?.takeIf { it.hasReliableData }?.cvd,
+                lastBarVolumeDelta = vd?.takeIf { it.hasReliableData }?.delta,
+                orderBookDepth = depth,
+                liquidationDataAvailable = false,
+                fetchedAtMillis = deriv?.fetchedAtMillis ?: depth?.fetchedAtMillis ?: 0L,
+                source = deriv?.source ?: "Binance USDT-M Futures Public REST"
+            )
+        } catch (_: Exception) {
+            com.example.data.providers.FuturesLiquiditySnapshot(
+                symbol = binanceSymbol,
+                isCryptoFutures = true,
+                status = com.example.data.providers.FuturesTelemetryStatus.UNAVAILABLE
+            )
         }
     }
 
@@ -257,10 +312,11 @@ class TradingRepository(
                 _hybridMarketState.value = hybrid
                 applyHybridMacroAndNews(hybrid)
 
-                // 3. Fetch Commodities (Gold, Silver, WTI, Brent, Natural Gas)
+                // 3. Fetch Commodities (Gold, Silver, WTI, Brent, Natural Gas) + Stocks (NVDA, GOOG, GOOGL) & FX/Index
                 val commoditiesKey = _apiConfigs.value.firstOrNull { it.id == "commodities_feed" }?.apiKey ?: ""
                 val commodityQuotes = commoditiesService.fetchCommodityQuotes(commoditiesKey)
-                updateCommoditiesState(commodityQuotes)
+                val stocksAndMacroQuotes = commoditiesService.fetchStocksAndMacroQuotes()
+                updateCommoditiesState(commodityQuotes + stocksAndMacroQuotes)
 
             } catch (e: Exception) {
                 Log.w("TradingRepo", "Data refresh error: ${e.message}")
@@ -553,14 +609,18 @@ class TradingRepository(
                 cache.put(updated)
                 checkAlertTriggers(asset.symbol, quote.price)
                 updated
-            } else if (asset.category == AssetCategory.COMMODITIES && asset.currentPrice == null) {
-                // Commodity has no live quote: clearly mark as UNAVAILABLE with setup instructions
+            } else if ((asset.category == AssetCategory.COMMODITIES || asset.category == AssetCategory.STOCKS ||
+                    asset.category == AssetCategory.FOREX || asset.category == AssetCategory.INDICES) && asset.currentPrice == null) {
                 asset.copy(
                     connectionStatus = ConnectionStatus.NOT_CONNECTED,
                     dataStatus = MarketDataStatus.UNAVAILABLE,
-                    dataSourceName = "Exchange Feed (Key Required)",
-                    dataSourceInfo = "Data Not Connected • API Key Required",
-                    setupInstructions = "Setup required: Add a free TwelveData or AlphaVantage API key in Settings > Market Data Providers to stream real-time quotes for ${asset.name}."
+                    dataSourceName = "DATA UNAVAILABLE (${asset.dataSourceName})",
+                    dataSourceInfo = "Feed unreachable or delayed beyond tolerance",
+                    setupInstructions = if (asset.category == AssetCategory.COMMODITIES) {
+                        "Public Yahoo Finance feed temporarily unavailable. Optional: add a free TwelveData API key in Settings > Market Data Providers."
+                    } else {
+                        "Public Yahoo Finance delayed feed temporarily unavailable. Pull to refresh during market hours."
+                    }
                 )
             } else {
                 asset
@@ -777,25 +837,11 @@ class TradingRepository(
     }
 
     private fun assetToBinanceSymbol(id: String): String {
-        return when (id) {
-            "BTC" -> "BTCUSDT"
-            "ETH" -> "ETHUSDT"
-            "BNB" -> "BNBUSDT"
-            "SOL" -> "SOLUSDT"
-            "XRP" -> "XRPUSDT"
-            "DOGE" -> "DOGEUSDT"
-            "ADA" -> "ADAUSDT"
-            "LINK" -> "LINKUSDT"
-            "AVAX" -> "AVAXUSDT"
-            "TRX" -> "TRXUSDT"
-            "TON" -> "TONUSDT"
-            "LTC" -> "LTCUSDT"
-            "DOT" -> "DOTUSDT"
-            "BCH" -> "BCHUSDT"
-            "SUI" -> "SUIUSDT"
-            "XAU" -> "PAXGUSDT" // Real physical Gold token on Binance
-            else -> "${id}USDT"
+        val spec = com.example.data.providers.MultiMarketInstrumentCatalog.resolve(id)
+        if (spec != null) {
+            return if (spec.isBinanceFuturesEligible) spec.binanceSymbol.orEmpty() else ""
         }
+        return ""
     }
 
     private fun formatCryptoVolume(vol: Double, id: String): String {
@@ -1042,14 +1088,46 @@ class TradingRepository(
                 unit = "$/MMBtu"
             ),
 
-            // 3. Forex & Indices
+            // 3. Verified Equities / Stocks (NVDA, GOOG, GOOGL)
+            MarketAsset(
+                id = "NVDA",
+                name = "NVIDIA Corporation",
+                symbol = "NVDA",
+                category = AssetCategory.STOCKS,
+                dataStatus = MarketDataStatus.UNAVAILABLE,
+                dataSourceName = "NASDAQ / Yahoo Finance",
+                dataSourceInfo = "US Equity Feed",
+                unit = "$"
+            ),
+            MarketAsset(
+                id = "GOOG",
+                name = "Alphabet Inc. (Class C)",
+                symbol = "GOOG",
+                category = AssetCategory.STOCKS,
+                dataStatus = MarketDataStatus.UNAVAILABLE,
+                dataSourceName = "NASDAQ / Yahoo Finance",
+                dataSourceInfo = "US Equity Feed",
+                unit = "$"
+            ),
+            MarketAsset(
+                id = "GOOGL",
+                name = "Alphabet Inc. (Class A)",
+                symbol = "GOOGL",
+                category = AssetCategory.STOCKS,
+                dataStatus = MarketDataStatus.UNAVAILABLE,
+                dataSourceName = "NASDAQ / Yahoo Finance",
+                dataSourceInfo = "US Equity Feed",
+                unit = "$"
+            ),
+
+            // 4. Forex & Indices
             MarketAsset(
                 id = "EURUSD",
                 name = "Euro / US Dollar",
                 symbol = "EUR/USD",
                 category = AssetCategory.FOREX,
                 dataStatus = MarketDataStatus.UNAVAILABLE,
-                dataSourceName = "Interbank FX Spot",
+                dataSourceName = "Interbank FX / Yahoo Finance",
                 dataSourceInfo = "Forex Spot Stream",
                 unit = ""
             ),
@@ -1059,7 +1137,7 @@ class TradingRepository(
                 symbol = "SPX500",
                 category = AssetCategory.INDICES,
                 dataStatus = MarketDataStatus.UNAVAILABLE,
-                dataSourceName = "Global Equity Indices",
+                dataSourceName = "US Equity Index / Yahoo Finance",
                 dataSourceInfo = "Index Benchmark",
                 unit = "pts"
             )
@@ -1461,15 +1539,8 @@ class TradingRepository(
         TechnicalIndicatorsEngine.analyze(symbol, assetName, timeframe, candles)
     }
 
-    private fun normalizeAssetLookupId(symbol: String): String {
-        return when (symbol.uppercase(Locale.US).trim()) {
-            "XAUUSD", "GOLD", "XAU/USD" -> "XAU"
-            "XAGUSD", "SILVER", "XAG/USD" -> "XAG"
-            "OIL_WTI", "OIL", "USOIL", "WTI/USD" -> "WTI"
-            "UKOIL", "BRENT/USD" -> "BRENT"
-            else -> symbol.uppercase(Locale.US).trim().removeSuffix("USDT").removeSuffix("/USDT").removeSuffix("/USD")
-        }
-    }
+    private fun normalizeAssetLookupId(symbol: String): String =
+        com.example.data.providers.MultiMarketInstrumentCatalog.normalizeCanonicalId(symbol)
 
     private fun findAssetBySymbol(symbol: String): MarketAsset? {
         val canonical = normalizeAssetLookupId(symbol)
@@ -1542,24 +1613,37 @@ class TradingRepository(
         var asset = findAssetBySymbol(symbol)
         if (asset == null || asset.currentPrice == null || asset.currentPrice <= 0.0 || asset.dataStatus == MarketDataStatus.UNAVAILABLE) {
             val canonical = normalizeAssetLookupId(symbol)
-            if (canonical in listOf("XAU", "XAG", "WTI", "BRENT", "NATGAS")) {
-                val commoditiesKey = _apiConfigs.value.firstOrNull { it.id == "commodities_feed" }?.apiKey ?: ""
-                runCatching {
-                    val quotes = commoditiesService.fetchCommodityQuotes(commoditiesKey)
-                    updateCommoditiesState(quotes)
+            val spec = com.example.data.providers.MultiMarketInstrumentCatalog.resolve(canonical)
+            when (spec?.category) {
+                AssetCategory.COMMODITIES -> {
+                    val commoditiesKey = _apiConfigs.value.firstOrNull { it.id == "commodities_feed" }?.apiKey ?: ""
+                    runCatching {
+                        val quotes = commoditiesService.fetchCommodityQuotes(commoditiesKey)
+                        updateCommoditiesState(quotes)
+                    }
                 }
-            } else {
-                runCatching { fetchCryptoRestTickers() }
+                AssetCategory.STOCKS, AssetCategory.FOREX, AssetCategory.INDICES -> {
+                    runCatching {
+                        val quotes = commoditiesService.fetchStocksAndMacroQuotes()
+                        updateCommoditiesState(quotes)
+                    }
+                }
+                else -> runCatching { fetchCryptoRestTickers() }
             }
             asset = findAssetBySymbol(symbol)
         }
 
+        val candles = getCandles(symbol, timeframe, 250)
+        val candleSource = candleService.lastDataSourceForSymbol(symbol)
+        val spec = com.example.data.providers.MultiMarketInstrumentCatalog.resolve(symbol)
         val currentPrice = asset?.currentPrice
         val dataStatus = asset?.dataStatus ?: MarketDataStatus.UNAVAILABLE
-        val dataSourceName = asset?.dataSourceName ?: "Binance Public REST"
+        val dataSourceName = candleSource?.takeIf { !it.startsWith("DATA UNAVAILABLE") }
+            ?: asset?.dataSourceName
+            ?: spec?.primaryVenue?.displayName
+            ?: "DATA UNAVAILABLE"
         val lastUpdated = asset?.lastUpdated
 
-        val candles = getCandles(symbol, timeframe, 250)
         val ta = if (candles.size >= 30) {
             TechnicalIndicatorsEngine.analyze(symbol, assetName, timeframe, candles)
         } else null
@@ -1567,7 +1651,16 @@ class TradingRepository(
             calculateSmcAnalysisForCandles(symbol, assetName, timeframe, candles)
         } else null
 
-        AiTradingSignalEngine.generateSignal(
+        val futuresLiq = if (spec?.isBinanceFuturesEligible == true && candles.isNotEmpty()) {
+            buildFuturesLiquiditySnapshot(symbol, candles)
+        } else null
+
+        val candles15m = if (timeframe == CandleTimeframe.M15) candles else getCandles(symbol, CandleTimeframe.M15, 120)
+        val candles1h = if (timeframe == CandleTimeframe.H1) candles else getCandles(symbol, CandleTimeframe.H1, 120)
+        val candles4h = if (timeframe == CandleTimeframe.H4) candles else getCandles(symbol, CandleTimeframe.H4, 100)
+        val candles1d = if (timeframe == CandleTimeframe.D1) candles else getCandles(symbol, CandleTimeframe.D1, 80)
+
+        val baseSignal = AiTradingSignalEngine.generateSignal(
             symbol = symbol,
             assetName = assetName,
             currentPrice = currentPrice,
@@ -1580,6 +1673,30 @@ class TradingRepository(
             smcAnalysis = smc,
             mtfSnapshots = smc?.multiTimeframe?.snapshots ?: emptyList()
         )
+
+        val strictReport = com.example.data.signal.StrictSignalQualityEngine.evaluateSetup(
+            symbol = symbol,
+            assetName = assetName,
+            currentPrice = currentPrice,
+            dataStatus = dataStatus,
+            primaryTimeframe = timeframe,
+            candles = candles,
+            candles15m = candles15m,
+            candles1h = candles1h,
+            candles4h = candles4h,
+            candles1d = candles1d,
+            technicalAnalysis = ta,
+            smcAnalysis = smc,
+            mtfSnapshots = smc?.multiTimeframe?.snapshots ?: emptyList(),
+            futuresLiquidity = futuresLiq,
+            hybridState = _hybridMarketState.value,
+            proposedEntryPrice = baseSignal.riskPlan?.entryPrice,
+            proposedStopLoss = baseSignal.riskPlan?.stopLoss,
+            proposedTargetPrice = baseSignal.riskPlan?.takeProfit3,
+            candidateDirectionOverride = baseSignal.decision.takeIf { it != SignalDecision.NO_TRADE }
+        )
+
+        baseSignal.copy(strictQualityReport = strictReport)
     }
 
     suspend fun refreshAiSignals(): List<AiTradingSignal> = withContext(Dispatchers.IO) {

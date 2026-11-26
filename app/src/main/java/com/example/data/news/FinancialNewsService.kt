@@ -250,7 +250,16 @@ class FinancialNewsService(
                 analysisMethod = "Rule-Based NLP (Facts & Interpretation Separated)"
             )
         )
-        return rawItems.map { NewsImpactAnalyzer.enrichNewsItem(it) }
+        val retrievedNowMs = System.currentTimeMillis()
+        val retrievedNowPkt = TimeZoneUtils.formatKarachiShort(retrievedNowMs)
+        return rawItems.map { item ->
+            val withTimes = item.copy(
+                publishedTimestampPkt = item.timestamp,
+                retrievedTimestampMs = retrievedNowMs,
+                retrievedTimestampPkt = retrievedNowPkt
+            )
+            NewsImpactAnalyzer.enrichNewsItem(withTimes)
+        }
     }
 }
 

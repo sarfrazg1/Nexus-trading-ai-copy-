@@ -61,16 +61,7 @@ import com.example.ui.components.AlertItemCard
 import com.example.ui.components.PriceTickerCard
 import com.example.ui.components.SentimentGauge
 import com.example.ui.components.SignalItemCard
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
-import com.example.ui.theme.WarningOrange
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun DashboardScreen(
@@ -90,6 +81,7 @@ fun DashboardScreen(
     onToggleFavorite: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     // Primary assets for dashboard sections
     val btcAsset = assets.firstOrNull { it.id == "BTC" } ?: assets.firstOrNull()
     val goldAsset = assets.firstOrNull { it.id == "XAU" }
@@ -105,7 +97,7 @@ fun DashboardScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(NavyBackground)
+            .background(colors.background)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -135,8 +127,8 @@ fun DashboardScreen(
                                 .clickable { onAssetClick(fav) }
                                 .testTag("dashboard_fav_${fav.id.lowercase()}"),
                             shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = NavyCard),
-                            border = BorderStroke(1.dp, NavyBorder)
+                            colors = CardDefaults.cardColors(containerColor = colors.card),
+                            border = BorderStroke(1.dp, colors.border)
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Row(
@@ -147,7 +139,7 @@ fun DashboardScreen(
                                     Text(
                                         text = fav.symbol,
                                         style = MaterialTheme.typography.labelMedium.copy(
-                                            color = TextPrimary,
+                                            color = colors.textPrimary,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp
                                         )
@@ -159,7 +151,7 @@ fun DashboardScreen(
                                         Icon(
                                             imageVector = Icons.Default.Star,
                                             contentDescription = null,
-                                            tint = NexusGold,
+                                            tint = colors.gold,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
@@ -168,7 +160,7 @@ fun DashboardScreen(
                                 Text(
                                     text = if (fav.currentPrice != null) String.format(Locale.US, "$%,.2f", fav.currentPrice) else "Awaiting Quote",
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = NexusGold,
+                                        color = colors.gold,
                                         fontWeight = FontWeight.Bold
                                     )
                                 )
@@ -176,7 +168,7 @@ fun DashboardScreen(
                                 Text(
                                     text = "${if (changePct >= 0) "+" else ""}${String.format(Locale.US, "%.2f", changePct)}%",
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (changePct >= 0) BullishGreen else com.example.ui.theme.BearishRed,
+                                        color = if (changePct >= 0) colors.bullishGreen else colors.bearishRed,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
@@ -272,7 +264,7 @@ fun DashboardScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSel) NexusGold else NavySurfaceVariant)
+                            .background(if (isSel) colors.gold else colors.surfaceVariant)
                             .clickable { selectedEnergyId = id }
                             .padding(vertical = 6.dp),
                         contentAlignment = Alignment.Center
@@ -280,7 +272,7 @@ fun DashboardScreen(
                         Text(
                             text = label,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isSel) NavyCard else TextSecondary,
+                                color = if (isSel) colors.onGold else colors.textSecondary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
@@ -336,7 +328,7 @@ fun DashboardScreen(
                 OutlinedButton(
                     onClick = onViewAllSignals,
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NexusGold),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.gold),
                     modifier = Modifier.testTag("dashboard_view_all_signals_btn")
                 ) {
                     Text("View All", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -371,7 +363,7 @@ fun DashboardScreen(
                 Button(
                     onClick = { onSetAlertClick("BTC/USDT") },
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NexusGold, contentColor = NavyCard),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.gold, contentColor = colors.onGold),
                     modifier = Modifier.testTag("dashboard_add_alert_btn")
                 ) {
                     Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -387,11 +379,11 @@ fun DashboardScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = NavyCard),
-                    border = BorderStroke(1.dp, NavyBorder)
+                    colors = CardDefaults.cardColors(containerColor = colors.card),
+                    border = BorderStroke(1.dp, colors.border)
                 ) {
                     Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text("No active price alerts set. Tap 'New Alert' to add one.", color = TextMuted, fontSize = 12.sp)
+                        Text("No active price alerts set. Tap 'New Alert' to add one.", color = colors.textMuted, fontSize = 12.sp)
                     }
                 }
             }
@@ -416,13 +408,14 @@ private fun MarketOverviewHeader(
     overview: MarketOverview,
     onConfigureFeeds: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier.fillMaxWidth().testTag("market_overview_header_card"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         border = BorderStroke(
             1.dp,
-            Brush.horizontalGradient(listOf(NexusGold.copy(alpha = 0.4f), NavyBorder))
+            Brush.horizontalGradient(listOf(colors.gold.copy(alpha = 0.4f), colors.border))
         )
     ) {
         Column(
@@ -439,7 +432,7 @@ private fun MarketOverviewHeader(
                     Text(
                         text = "EXECUTIVE TRADING TERMINAL",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.2.sp
                         )
@@ -447,7 +440,7 @@ private fun MarketOverviewHeader(
                     Text(
                         text = "NEXUS Core Intelligence Engine",
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -456,13 +449,13 @@ private fun MarketOverviewHeader(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurfaceVariant)
+                        .background(colors.surfaceVariant)
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
                         text = overview.marketStatus,
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = BullishGreen,
+                            color = colors.bullishGreen,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp
                         )
@@ -477,29 +470,29 @@ private fun MarketOverviewHeader(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(NavySurfaceVariant.copy(alpha = 0.6f))
+                    .background(colors.surfaceVariant.copy(alpha = 0.7f))
                     .padding(12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("Crypto Market Cap", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                    Text("Crypto Market Cap", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                     Text(
                         text = overview.totalCryptoMarketCap,
-                        style = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+                        style = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary, fontWeight = FontWeight.Bold)
                     )
                 }
                 Column {
-                    Text("24h Volume", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                    Text("24h Volume", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                     Text(
                         text = overview.cryptoVolume24h,
-                        style = MaterialTheme.typography.bodyMedium.copy(color = NexusGold, fontWeight = FontWeight.Bold)
+                        style = MaterialTheme.typography.bodyMedium.copy(color = colors.gold, fontWeight = FontWeight.Bold)
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("BTC Dominance", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                    Text("BTC Dominance", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                     Text(
                         text = overview.btcDominance,
-                        style = MaterialTheme.typography.bodyMedium.copy(color = BullishGreen, fontWeight = FontWeight.Bold)
+                        style = MaterialTheme.typography.bodyMedium.copy(color = colors.bullishGreen, fontWeight = FontWeight.Bold)
                     )
                 }
             }
@@ -510,22 +503,22 @@ private fun MarketOverviewHeader(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.45f))
+                        .background(colors.surfaceVariant.copy(alpha = 0.55f))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("DeFi TVL (DefiLlama)", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
+                        Text("DeFi TVL (DefiLlama)", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
                         Text(
                             text = overview.defiTvlFormatted,
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary, fontWeight = FontWeight.Bold)
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Stablecoin Float", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
+                        Text("Stablecoin Float", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
                         Text(
                             text = overview.stablecoinSupplyFormatted,
-                            style = MaterialTheme.typography.bodySmall.copy(color = BullishGreen, fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.bullishGreen, fontWeight = FontWeight.Bold)
                         )
                     }
                 }
@@ -540,13 +533,13 @@ private fun MarketOverviewHeader(
             ) {
                 Text(
                     text = "${overview.connectedFeedsCount} Active Feeds • ${overview.dataProviderSummary}",
-                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 10.sp),
                     maxLines = 1
                 )
                 Text(
                     text = "Feeds Setup →",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     ),
@@ -563,22 +556,23 @@ private fun SectionHeader(
     subtitle: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector
 ) {
+    val colors = NexusTheme.colors
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
                 .size(28.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(NavySurfaceVariant),
+                .background(colors.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = NexusGold, modifier = Modifier.size(16.dp))
+            Icon(imageVector = icon, contentDescription = null, tint = colors.gold, modifier = Modifier.size(16.dp))
         }
         Spacer(modifier = Modifier.width(8.dp))
         Column {
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelMedium.copy(
-                    color = TextPrimary,
+                    color = colors.textPrimary,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.5.sp
                 )
@@ -586,7 +580,7 @@ private fun SectionHeader(
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = TextMuted,
+                    color = colors.textMuted,
                     fontSize = 10.sp
                 )
             )

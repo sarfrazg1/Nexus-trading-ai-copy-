@@ -25,6 +25,7 @@ object OfflineTradingAnalysisEngine {
         EXPLAIN_FUNDING_RATE,
         EXPLAIN_OPEN_INTEREST,
         EXPLAIN_LIQUIDATIONS,
+        EXPLAIN_INDICATORS_AND_RR,
         TIMEFRAME_COMPARISON,
         RISK_MANAGEMENT,
         COMPARE_ASSETS,
@@ -54,6 +55,7 @@ object OfflineTradingAnalysisEngine {
             FallbackIntent.EXPLAIN_FUNDING_RATE -> buildFundingRateExplanation(context, language)
             FallbackIntent.EXPLAIN_OPEN_INTEREST -> buildOpenInterestExplanation(context, language)
             FallbackIntent.EXPLAIN_LIQUIDATIONS -> buildLiquidationsExplanation(context, language)
+            FallbackIntent.EXPLAIN_INDICATORS_AND_RR -> buildIndicatorAndStrategyExplanation(query, context, language)
             FallbackIntent.TIMEFRAME_COMPARISON -> buildTimeframeAdvice(context, language)
             FallbackIntent.RISK_MANAGEMENT -> buildRiskAnalysis(context, language)
             FallbackIntent.COMPARE_ASSETS -> buildMultiAssetComparison(context, language)
@@ -83,6 +85,7 @@ object OfflineTradingAnalysisEngine {
             q.contains("fed") || q.contains("fomc") || q.contains("powell") || q.contains("interest rate") || q.contains("rate cut") || q.contains("سود") -> FallbackIntent.EXPLAIN_FED_RATES
             q.contains("cpi") || q.contains("inflation") || q.contains("mehngai") || q.contains("سی پی آئی") || q.contains("مہنگائی") -> FallbackIntent.EXPLAIN_CPI_MACRO
             q.contains("watchlist") || q.contains("strongest setup") || q.contains("best coin") || q.contains("best setup") || q.contains("top setup") || q.contains("scanner") || q.contains("واچ لسٹ") -> FallbackIntent.WATCHLIST_STRONGEST_SETUP
+            q.contains("rsi") || q.contains("macd") || q.contains("ema") || q.contains("supertrend") || q.contains("ichimoku") || q.contains("adx") || q.contains("dmi") || q.contains("vwap") || q.contains("obv") || q.contains("mfi") || q.contains("cmf") || q.contains("atr") || q.contains("fibonacci") || q.contains("golden zone") || q.contains("r:r") || q.contains("1:5") || q.contains("1:4") || q.contains("risk to reward") || q.contains("risk reward") || q.contains("indicator") || q.contains("اشارہ") || q.contains("فبوناچی") || q.contains("آر ایس آئی") -> FallbackIntent.EXPLAIN_INDICATORS_AND_RR
             q.contains("timeframe") || tfTokenCount >= 2 || q.contains("ٹائم فریم") || q.contains("چارٹ") || q.contains("پانچ منٹ") -> FallbackIntent.TIMEFRAME_COMPARISON
             q.contains("fall further") || q.contains("drop more") || q.contains("crash more") || q.contains("mazeed gir") || q.contains("نیچے جا") || q.contains("مزید گر") -> FallbackIntent.FURTHER_DOWNSIDE_RISK
             q.contains("support") || q.contains("resistance") || q.contains("levels") || q.contains("سپورٹ") || q.contains("مزاحمت") -> FallbackIntent.SUPPORT_RESISTANCE_LEVELS
@@ -90,7 +93,7 @@ object OfflineTradingAnalysisEngine {
             q.contains("falling") || q.contains("dump") || q.contains("crash") || q.contains("moving") || q.contains("causing") || q.contains("why is") || q.contains("tvl") || q.contains("defi") || q.contains("fear") || q.contains("greed") || q.contains("bybit") || q.contains("gir") || q.contains("کیوں گر") || q.contains("کیوں") -> FallbackIntent.MARKET_FALL_OR_MOVE
             q.contains("5m") || q.contains("15m") || q.contains("1h") || q.contains("4h") -> FallbackIntent.TIMEFRAME_COMPARISON
             q.contains("risk") || q.contains("leverage") || q.contains("stop loss") || q.contains("رسک") || q.contains("لیوریج") || q.contains("اسٹاپ لاس") -> FallbackIntent.RISK_MANAGEMENT
-            q.contains("trend") || q.contains("analy") || q.contains("price") || q.contains("btc") || q.contains("eth") || q.contains("sol") || q.contains("gold") || q.contains("تجزیہ") || q.contains("قیمت") || q.contains("سیٹ اپ") || q.contains("بی ٹی سی") || q.contains("بٹ کوائن") || q.contains("ایتھیریم") -> FallbackIntent.GENERAL_ASSET_SNAPSHOT
+            q.contains("trend") || q.contains("analy") || q.contains("price") || q.contains("btc") || q.contains("eth") || q.contains("sol") || q.contains("gold") || q.contains("nvda") || q.contains("goog") || q.contains("silver") || q.contains("oil") || q.contains("signal") || q.contains("تجزیہ") || q.contains("قیمت") || q.contains("سیٹ اپ") || q.contains("بی ٹی سی") || q.contains("بٹ کوائن") || q.contains("ایتھیریم") -> FallbackIntent.GENERAL_ASSET_SNAPSHOT
             // Short follow-ups like "what about eth?" or "and support?"
             combinedContext.contains("support") || combinedContext.contains("resistance") -> FallbackIntent.SUPPORT_RESISTANCE_LEVELS
             q.length <= 28 && recentHistory.isNotEmpty() -> FallbackIntent.GENERAL_ASSET_SNAPSHOT
@@ -104,7 +107,12 @@ object OfflineTradingAnalysisEngine {
         unavailableReason: String?
     ): String {
         val reasonNote = unavailableReason?.takeIf { it.isNotBlank() } ?: "User-Selected Offline Rule-Based Mode"
-        val dataMeta = "${ctx.dataStatus} • ${ctx.instrumentTypeLabel} • ${ctx.dataSource} (${ctx.lastUpdatedFormatted})"
+        val feedFreshnessTag = when (ctx.dataStatus.uppercase(Locale.US)) {
+            "LIVE" -> "LIVE DATA"
+            "DELAYED" -> "CACHED / DELAYED DATA"
+            else -> "DATA UNAVAILABLE"
+        }
+        val dataMeta = "$feedFreshnessTag (${ctx.dataStatus}) • ${ctx.instrumentTypeLabel} • ${ctx.dataSource} (${ctx.lastUpdatedFormatted})"
         return when (lang) {
             LearningLanguageMode.ENGLISH -> """
                 ⚠️ [LIMITED OFFLINE RULE-BASED ANALYSIS — Not Conversational AI]
@@ -520,6 +528,64 @@ object OfflineTradingAnalysisEngine {
             • Forced position closures on excess leverage can trigger sharp cascades; protect capital with 3x–5x max leverage and hard Stop Loss.
             • اردو: زیادہ لیوریج پر ایکسچینج کے زبردستی پوزیشن بند کرنے سے تیز جھٹکے آتے ہیں؛ ہمیشہ کم لیوریج اور اسٹاپ لاس استعمال کریں۔
         """.trimIndent()
+    }
+
+    private fun buildIndicatorAndStrategyExplanation(
+        query: String,
+        ctx: MarketContextSnapshot,
+        lang: LearningLanguageMode
+    ): String {
+        val q = query.lowercase(Locale.US)
+        val rsiVal = ctx.rsi14?.let { String.format(Locale.US, "%.1f", it) } ?: "Unavailable"
+        val emaText = ctx.emaCondition ?: "Unavailable"
+        val fibText = ctx.fibGoldenPocket ?: "Unavailable"
+        val dataLabel = if (ctx.isRealData) "${ctx.dataStatus} (${fmtPrice(ctx.currentPrice)})" else "UNAVAILABLE"
+
+        val topicEn = when {
+            q.contains("rsi") -> "RSI (14) currently $rsiVal: measures momentum speed (0–100). Above 70 = overbought caution; below 30 = oversold. Divergences against price carry extra weight."
+            q.contains("macd") -> "MACD: compares fast & slow EMAs to spot momentum shifts and histogram expansion; wait for candle-close confirmation alongside trend structure."
+            q.contains("ema") -> "EMA 20 / 50 / 200 ($emaText): evaluates trend hierarchy, slope, and dynamic pullback support/resistance rather than relying on crossovers alone."
+            q.contains("supertrend") -> "Supertrend: ATR-based trailing trend flip confirmed ONLY on completed candle close — helps prevent premature entries inside choppy ranges."
+            q.contains("adx") || q.contains("dmi") -> "ADX & DMI (+DI / -DI): ADX measures trend strength (>25 trending, <20 choppy); +DI vs -DI indicates directional pressure."
+            q.contains("ichimoku") -> "Ichimoku Cloud: Tenkan/Kijun momentum, Kumo cloud support/resistance, and Chikou lagging confirmation align multi-horizon trend."
+            q.contains("fib") || q.contains("golden") -> "Fibonacci Golden Zone (0.500–0.618: $fibText): high-probability institutional pullback zone ONLY when overlapping S/R or Order Block + rejection candle close."
+            q.contains("vwap") || q.contains("obv") || q.contains("mfi") || q.contains("cmf") -> "VWAP, OBV, MFI & CMF: track institutional fair value and real volume accumulation/distribution; never rely on volume if feed volume is missing."
+            q.contains("atr") -> "ATR (Average True Range): measures real volatility so Stop Loss sits outside normal market noise rather than arbitrarily tight."
+            else -> "NEXUS Net 1:4 / 1:5 Risk-to-Reward Rule: LONG risk = Entry - SL, reward = Target - Entry (reversed for SHORT) minus round-trip fees & slippage. Setups under Net 1:4.0 are rejected."
+        }
+
+        return when (lang) {
+            LearningLanguageMode.ENGLISH -> """
+                📐 [INDICATOR & STRATEGY GUIDE — ${ctx.symbol} • Data: $dataLabel]
+                • Direct Answer: $topicEn
+                • Live Snapshot: Price ${fmtPrice(ctx.currentPrice)} | RSI(14): $rsiVal | $emaText | Fib Golden Zone: $fibText
+                • Key Principle: NEXUS treats indicators as independent evidence groups and requires completed 15M candle close + realistic Net R:R >= 1:4.0 (prefer 1:5).
+            """.trimIndent()
+            LearningLanguageMode.ROMAN_URDU -> """
+                📐 [INDICATORS AUR NET R:R KI ASAAN WAZAAHAT — ${ctx.symbol} • Data: $dataLabel]
+                • RSI (14) [$rsiVal]: Momentum batata hai — 70 se ooper mehenga (overbought) aur 30 se neeche sasta (oversold) zone hota hai.
+                • MACD & EMA (20/50/200) [$emaText]: Trend ki simt aur slope dikhate hain; sirf crossover dekh kar trade nahi lete.
+                • Supertrend, ADX & Ichimoku: ADX batata hai trend mazboot (>25) hai ya sideways (<20), jabke Supertrend aur Ichimoku Cloud trend aur pullback hold confirm karte hain.
+                • Fibonacci Golden Zone (0.500–0.618) [$fibText]: Jab price is zone mein Support/Order Block aur rejection candle ke sath aaye tab setup strong hota hai.
+                • VWAP, OBV, MFI/CMF & ATR: Volume pressure aur ATR volatility dikhate hain taake Stop Loss safe jagah lage.
+                • Net 1:4 / 1:5 R:R Usool: Fees aur slippage kaat kar kam az kam 1:4 (behtar 1:5) Net R:R lazmi hai — kabhi fake TP barha kar ratio nahi banaya jata.
+            """.trimIndent()
+            LearningLanguageMode.STANDARD_URDU -> """
+                📐 [انڈیکیٹرز اور رسک ٹو ریوارڈ کی آسان وضاحت — ${ctx.symbol} • ڈیٹا: $dataLabel]
+                • آر ایس آئی (RSI 14: $rsiVal): رفتار اور حد سے زیادہ خریداری (70 سے اوپر) یا فروخت (30 سے نیچے) ظاہر کرتا ہے۔
+                • ای ایم اے (20/50/200) اور MACD ($emaText): مجموعی رجحان اور رفتار کی سمت واضح کرتے ہیں۔
+                • سپر ٹرینڈ، ADX اور Ichimoku: ADX رجحان کی طاقت (>25 مضبوط) ناپتا ہے جبکہ کلاؤڈ اور سپر ٹرینڈ کینڈل کلوز پر تصدیق دیتے ہیں۔
+                • فبوناچی گولڈن زون (0.500–0.618) [$fibText]: سپورٹ یا آرڈر بلاک کے ساتھ قیمت کی واپسی اور ریجیکشن کینڈل کی تصدیق اہم ہے۔
+                • VWAP، OBV، MFI/CMF اور ATR: حقیقی والیوم دباؤ اور اتار چڑھاؤ کے مطابق محفوظ اسٹاپ لاس طے کرنے میں مدد دیتے ہیں۔
+                • خالص 1:4 / 1:5 اصول: فیس اور سلیپیج نکالنے کے بعد کم از کم 1:4 خالص منافع/نقصان کا تناسب لازمی ہے؛ کبھی مصنوعی طور پر ٹارگٹ بڑھایا نہیں جاتا۔
+            """.trimIndent()
+            LearningLanguageMode.BILINGUAL -> """
+                📐 [INDICATOR & R:R GUIDE / انڈیکیٹرز کی وضاحت — ${ctx.symbol}: $dataLabel]
+                • $topicEn
+                • Live Indicators: RSI $rsiVal | EMA: $emaText | Fib: $fibText
+                • اردو خلاصہ: RSI، EMA، Supertrend، ADX، Ichimoku، Golden Zone اور ATR مل کر تصدیق کرتے ہیں، اور فیس/سلیپیج کے بعد کم از کم 1:4 (ترجیحاً 1:5) خالص R:R لازمی ہے۔
+            """.trimIndent()
+        }
     }
 
     private fun buildTimeframeAdvice(ctx: MarketContextSnapshot, lang: LearningLanguageMode): String = when (lang) {

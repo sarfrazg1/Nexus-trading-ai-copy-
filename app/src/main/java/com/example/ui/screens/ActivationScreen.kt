@@ -73,7 +73,6 @@ import com.example.data.subscription.SubscriptionPlan
 import com.example.data.subscription.SubscriptionStatus
 import com.example.data.subscription.SubscriptionValidation
 import com.example.ui.theme.NexusTheme
-import com.example.ui.theme.WarningOrange
 import com.example.ui.viewmodel.SubscriptionUiActionState
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -207,7 +206,7 @@ fun ActivationScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = colors.gold,
-                                    contentColor = colors.background
+                                    contentColor = colors.onGold
                                 ),
                                 modifier = Modifier
                                     .height(48.dp)
@@ -244,7 +243,7 @@ fun ActivationScreen(
                         } else {
                             "Your subscription validity period has ended. Enter a new activation code to renew access."
                         },
-                        WarningOrange
+                        colors.warningOrange
                     )
                     else -> Triple(
                         "Activation Code Required",
@@ -416,7 +415,7 @@ fun ActivationScreen(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = colors.gold,
-                                contentColor = colors.background
+                                contentColor = colors.onGold
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -425,7 +424,7 @@ fun ActivationScreen(
                         ) {
                             if (actionState.isSubmittingCode) {
                                 CircularProgressIndicator(
-                                    color = colors.background,
+                                    color = colors.onGold,
                                     modifier = Modifier.size(18.dp),
                                     strokeWidth = 2.dp
                                 )

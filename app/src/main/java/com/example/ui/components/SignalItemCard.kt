@@ -40,17 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.Signal
 import com.example.data.model.SignalStatus
 import com.example.data.model.SignalType
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BearishRedBg
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.BullishGreenBg
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -60,13 +50,14 @@ fun SignalItemCard(
     onCopyLevelsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val isBullish = signal.type == SignalType.BUY || signal.type == SignalType.STRONG_BUY
     val isBearish = signal.type == SignalType.SELL || signal.type == SignalType.STRONG_SELL
 
     val accentColor = when {
-        isBullish -> BullishGreen
-        isBearish -> BearishRed
-        else -> NexusGold
+        isBullish -> colors.bullishGreen
+        isBearish -> colors.bearishRed
+        else -> colors.gold
     }
 
     Card(
@@ -74,11 +65,11 @@ fun SignalItemCard(
             .fillMaxWidth()
             .testTag("signal_card_${signal.id}"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             Brush.verticalGradient(
-                listOf(accentColor.copy(alpha = 0.35f), NavyBorder)
+                listOf(accentColor.copy(alpha = 0.35f), colors.border)
             )
         )
     ) {
@@ -97,7 +88,7 @@ fun SignalItemCard(
                     Text(
                         text = signal.assetSymbol,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -105,13 +96,13 @@ fun SignalItemCard(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = signal.timeframe,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = TextSecondary,
+                                color = colors.textSecondary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -124,21 +115,21 @@ fun SignalItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
-                        .background(NavySurfaceVariant)
-                        .border(1.dp, NexusGold.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                        .background(colors.surfaceVariant)
+                        .border(1.dp, colors.gold.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "${signal.confidenceScore}% AI Conviction",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp
                         )
@@ -158,7 +149,7 @@ fun SignalItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (isBullish) BullishGreenBg else if (isBearish) BearishRedBg else NavySurfaceVariant)
+                        .background(if (isBullish) colors.bullishGreenBg else if (isBearish) colors.bearishRedBg else colors.surfaceVariant)
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Icon(
@@ -182,9 +173,9 @@ fun SignalItemCard(
                     text = signal.status.label,
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = when (signal.status) {
-                            SignalStatus.ACTIVE -> BullishGreen
-                            SignalStatus.TRIGGERED -> NexusGold
-                            SignalStatus.EXPIRED -> TextMuted
+                            SignalStatus.ACTIVE -> colors.bullishGreen
+                            SignalStatus.TRIGGERED -> colors.gold
+                            SignalStatus.EXPIRED -> colors.textMuted
                         },
                         fontWeight = FontWeight.Medium,
                         fontSize = 11.sp
@@ -199,25 +190,25 @@ fun SignalItemCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(NavySurfaceVariant.copy(alpha = 0.5f))
+                    .background(colors.surfaceVariant.copy(alpha = 0.7f))
                     .padding(10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("ENTRY ZONE", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
-                    Text(signal.entryPrice, style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.SemiBold))
+                    Text("ENTRY ZONE", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
+                    Text(signal.entryPrice, style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary, fontWeight = FontWeight.SemiBold))
                 }
                 Column {
-                    Text("TAKE PROFIT", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
-                    Text(signal.targetPrice, style = MaterialTheme.typography.bodySmall.copy(color = BullishGreen, fontWeight = FontWeight.SemiBold))
+                    Text("TAKE PROFIT", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
+                    Text(signal.targetPrice, style = MaterialTheme.typography.bodySmall.copy(color = colors.bullishGreen, fontWeight = FontWeight.SemiBold))
                 }
                 Column {
-                    Text("STOP LOSS", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
-                    Text(signal.stopLoss, style = MaterialTheme.typography.bodySmall.copy(color = BearishRed, fontWeight = FontWeight.SemiBold))
+                    Text("STOP LOSS", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
+                    Text(signal.stopLoss, style = MaterialTheme.typography.bodySmall.copy(color = colors.bearishRed, fontWeight = FontWeight.SemiBold))
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("R : R", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
-                    Text(signal.riskReward, style = MaterialTheme.typography.bodySmall.copy(color = NexusGold, fontWeight = FontWeight.Bold))
+                    Text("R : R", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
+                    Text(signal.riskReward, style = MaterialTheme.typography.bodySmall.copy(color = colors.gold, fontWeight = FontWeight.Bold))
                 }
             }
 
@@ -227,7 +218,7 @@ fun SignalItemCard(
             Text(
                 text = signal.thesis,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = TextSecondary,
+                    color = colors.textSecondary,
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
@@ -244,13 +235,13 @@ fun SignalItemCard(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = indicator,
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = TextMuted,
+                                color = colors.textMuted,
                                 fontSize = 10.sp
                             )
                         )
@@ -271,7 +262,7 @@ fun SignalItemCard(
                         .weight(1f)
                         .testTag("signal_alert_btn_${signal.id}"),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NexusGold)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.gold)
                 ) {
                     Icon(imageVector = Icons.Default.AddAlert, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -284,7 +275,7 @@ fun SignalItemCard(
                         .weight(1f)
                         .testTag("signal_copy_btn_${signal.id}"),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textSecondary)
                 ) {
                     Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))

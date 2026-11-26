@@ -129,7 +129,8 @@ data class AiTradingSignal(
     val formattedTimestamp: String = TimeZoneUtils.formatKarachiWithSeconds(timestamp),
     val dataSource: String = "Binance Public REST / WebSocket",
     val dataFreshness: String = "LIVE",
-    val executionWarning: String = "Manual Execution Only — Nexus AI never places automated trades. Always verify your exchange margin and risk parameters."
+    val executionWarning: String = "Manual Execution Only — Nexus AI never places automated trades. Always verify your exchange margin and risk parameters.",
+    val strictQualityReport: StrictSignalQualityReport? = null
 ) {
     /**
      * Converts to legacy Signal model for backwards-compatibility with Dashboard overview.

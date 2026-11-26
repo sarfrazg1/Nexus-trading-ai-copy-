@@ -76,19 +76,7 @@ import com.example.data.model.SignalType
 import com.example.data.signal.AiTradingSignal
 import com.example.data.signal.SignalDecision
 import com.example.ui.components.SignalItemCard
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BearishRedBg
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.BullishGreenBg
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurface
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -112,6 +100,7 @@ fun SignalsScreen(
     onCopyLevelsClick: (Signal) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val context = LocalContext.current
     val supportedAssets = listOf(
         Pair("BTC", "Bitcoin"),
@@ -143,7 +132,7 @@ fun SignalsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(NavyBackground)
+            .background(colors.background)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -161,7 +150,7 @@ fun SignalsScreen(
                     Text(
                         text = "MULTI-FACTOR INTELLIGENCE",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.2.sp
                         )
@@ -169,7 +158,7 @@ fun SignalsScreen(
                     Text(
                         text = "AI Trading Signal Engine",
                         style = MaterialTheme.typography.titleLarge.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -179,12 +168,12 @@ fun SignalsScreen(
                     onClick = onAnalyzeClick,
                     enabled = !isAnalyzing,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NexusGold),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.gold),
                     modifier = Modifier.testTag("signal_analyze_button")
                 ) {
                     if (isAnalyzing) {
                         CircularProgressIndicator(
-                            color = NavyBackground,
+                            color = colors.onGold,
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp
                         )
@@ -192,13 +181,13 @@ fun SignalsScreen(
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh",
-                            tint = NavyBackground,
+                            tint = colors.onGold,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Analyze",
-                            color = NavyBackground,
+                            color = colors.onGold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )
@@ -218,8 +207,8 @@ fun SignalsScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSel) NexusGold else NavyCard)
-                            .border(1.dp, if (isSel) NexusGold else NavyBorder, RoundedCornerShape(12.dp))
+                            .background(if (isSel) colors.gold else colors.card)
+                            .border(1.dp, if (isSel) colors.gold else colors.border, RoundedCornerShape(12.dp))
                             .clickable { onAssetSelected(sym) }
                             .padding(horizontal = 14.dp, vertical = 7.dp)
                             .testTag("signal_asset_chip_$sym"),
@@ -228,7 +217,7 @@ fun SignalsScreen(
                         Text(
                             text = sym,
                             style = MaterialTheme.typography.labelMedium.copy(
-                                color = if (isSel) NavyBackground else TextPrimary,
+                                color = if (isSel) colors.onGold else colors.textPrimary,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                 fontSize = 12.sp
                             )
@@ -249,8 +238,8 @@ fun SignalsScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSel) NavySurfaceVariant else NavyCard)
-                            .border(1.dp, if (isSel) NexusGold.copy(alpha = 0.6f) else NavyBorder, RoundedCornerShape(8.dp))
+                            .background(if (isSel) colors.surfaceVariant else colors.card)
+                            .border(1.dp, if (isSel) colors.gold.copy(alpha = 0.6f) else colors.border, RoundedCornerShape(8.dp))
                             .clickable { onTimeframeSelected(tf) }
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                             .testTag("signal_tf_chip_${tf.label}"),
@@ -259,7 +248,7 @@ fun SignalsScreen(
                         Text(
                             text = tf.label,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isSel) NexusGold else TextSecondary,
+                                color = if (isSel) colors.gold else colors.textSecondary,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                 fontSize = 11.sp
                             )
@@ -279,16 +268,16 @@ fun SignalsScreen(
                         .fillMaxWidth()
                         .height(200.dp)
                         .clip(RoundedCornerShape(18.dp))
-                        .background(NavyCard)
-                        .border(1.dp, NavyBorder, RoundedCornerShape(18.dp)),
+                        .background(colors.card)
+                        .border(1.dp, colors.border, RoundedCornerShape(18.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = NexusGold, modifier = Modifier.size(36.dp))
+                        CircularProgressIndicator(color = colors.gold, modifier = Modifier.size(36.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = "Analyzing $selectedSymbol OHLCV, Indicators & SMC...",
-                            color = TextSecondary,
+                            color = colors.textSecondary,
                             fontSize = 12.sp
                         )
                     }
@@ -332,6 +321,15 @@ fun SignalsScreen(
         }
 
         // ----------------------------------------------------
+        // 3B. PART 2: STRICT 8-GROUP QUALITY & MANDATORY FILTERS
+        // ----------------------------------------------------
+        currentAiSignal?.strictQualityReport?.let { strictReport ->
+            item {
+                StrictQualityAuditCard(report = strictReport)
+            }
+        }
+
+        // ----------------------------------------------------
         // 4. MULTI-TIMEFRAME CONFIRMATION MATRIX
         // ----------------------------------------------------
         if (currentAiSignal != null && currentAiSignal.timeframeConditions.isNotEmpty()) {
@@ -353,7 +351,7 @@ fun SignalsScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = NavySurface)
+                colors = CardDefaults.cardColors(containerColor = colors.surface)
             ) {
                 Row(
                     modifier = Modifier.padding(12.dp),
@@ -362,13 +360,13 @@ fun SignalsScreen(
                     Icon(
                         imageVector = Icons.Default.Security,
                         contentDescription = "Manual Execution",
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "Manual Execution Only: NEXUS AI provides decision analytics and never executes trades automatically. Risk is user-managed.",
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
                     )
@@ -389,14 +387,14 @@ fun SignalsScreen(
                 Text(
                     text = "Market Opportunities Feed",
                     style = MaterialTheme.typography.titleMedium.copy(
-                        color = TextPrimary,
+                        color = colors.textPrimary,
                         fontWeight = FontWeight.Bold
                     )
                 )
 
                 Text(
                     text = "${aiSignalsList.size} Scanned",
-                    color = NexusGold,
+                    color = colors.gold,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -414,7 +412,7 @@ fun SignalsScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (isSel) NexusGold else NavyCard)
+                            .background(if (isSel) colors.gold else colors.card)
                             .clickable { onFilterSelected(filter) }
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                             .testTag("signal_feed_filter_${filter.lowercase().replace(" ", "_")}"),
@@ -423,7 +421,7 @@ fun SignalsScreen(
                         Text(
                             text = filter,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isSel) NavyBackground else TextSecondary,
+                                color = if (isSel) colors.onGold else colors.textSecondary,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                 fontSize = 11.sp
                             )
@@ -454,7 +452,7 @@ fun SignalsScreen(
                 ) {
                     Text(
                         text = "No signals matching filter '$signalFilter'",
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontSize = 12.sp
                     )
                 }
@@ -491,20 +489,21 @@ fun HeroSignalCard(
     onSetAlertClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val isLong = signal.decision == SignalDecision.LONG
     val isShort = signal.decision == SignalDecision.SHORT
     val isNoTrade = signal.decision == SignalDecision.NO_TRADE
 
     val accentColor = when {
-        isLong -> BullishGreen
-        isShort -> BearishRed
-        else -> NexusGold
+        isLong -> colors.bullishGreen
+        isShort -> colors.bearishRed
+        else -> colors.gold
     }
 
     val badgeBg = when {
-        isLong -> BullishGreenBg
-        isShort -> BearishRedBg
-        else -> NavySurfaceVariant
+        isLong -> colors.bullishGreenBg
+        isShort -> colors.bearishRedBg
+        else -> colors.surfaceVariant
     }
 
     Card(
@@ -512,11 +511,11 @@ fun HeroSignalCard(
             .fillMaxWidth()
             .testTag("hero_signal_card"),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         border = androidx.compose.foundation.BorderStroke(
             1.5.dp,
             Brush.verticalGradient(
-                listOf(accentColor.copy(alpha = 0.6f), NavyBorder)
+                listOf(accentColor.copy(alpha = 0.6f), colors.border)
             )
         )
     ) {
@@ -535,19 +534,19 @@ fun HeroSignalCard(
                     Text(
                         text = signal.symbol,
                         style = MaterialTheme.typography.titleLarge.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Box(
                         modifier = Modifier
-                            .background(NavySurface, RoundedCornerShape(6.dp))
+                            .background(colors.surface, RoundedCornerShape(6.dp))
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = signal.primaryTimeframe.label,
-                            color = NexusGold,
+                            color = colors.gold,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -602,7 +601,7 @@ fun HeroSignalCard(
                         Icon(
                             imageVector = Icons.Default.Info,
                             contentDescription = "Roman Urdu Info",
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -619,7 +618,7 @@ fun HeroSignalCard(
             ) {
                 Text(
                     text = "${signal.dataSource} • ${signal.dataFreshness} • ${signal.formattedTimestamp}",
-                    color = TextMuted,
+                    color = colors.textMuted,
                     fontSize = 10.sp,
                     modifier = Modifier.weight(1f).padding(end = 8.dp)
                 )
@@ -627,7 +626,7 @@ fun HeroSignalCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "Confidence: ",
-                        color = TextSecondary,
+                        color = colors.textSecondary,
                         fontSize = 11.sp
                     )
                     Text(
@@ -640,7 +639,7 @@ fun HeroSignalCard(
                     Icon(
                         imageVector = Icons.Default.Info,
                         contentDescription = "Confidence Info",
-                        tint = TextMuted,
+                        tint = colors.textMuted,
                         modifier = Modifier
                             .size(14.dp)
                             .clickable { onInfoClick("CONFIDENCE_SCORE") }
@@ -657,20 +656,20 @@ fun HeroSignalCard(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = NavySurface)
+                    colors = CardDefaults.cardColors(containerColor = colors.surface)
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.Warning,
                                 contentDescription = "Advisory",
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = signal.noTradeReason.headline,
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
@@ -679,7 +678,7 @@ fun HeroSignalCard(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = signal.noTradeReason.detailedExplanation,
-                            color = TextSecondary,
+                            color = colors.textSecondary,
                             fontSize = 12.sp,
                             lineHeight = 16.sp
                         )
@@ -688,14 +687,14 @@ fun HeroSignalCard(
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = "Conflicting Factors:",
-                                color = BearishRed,
+                                color = colors.bearishRed,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 11.sp
                             )
                             signal.noTradeReason.conflictingFactors.forEach { factor ->
                                 Text(
                                     text = "• $factor",
-                                    color = TextMuted,
+                                    color = colors.textMuted,
                                     fontSize = 11.sp,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
@@ -705,7 +704,7 @@ fun HeroSignalCard(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "Recommended: ${signal.noTradeReason.recommendedAction}",
-                            color = NexusGold,
+                            color = colors.gold,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -734,7 +733,7 @@ fun HeroSignalCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(NavySurface)
+                        .background(colors.surface)
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -743,7 +742,7 @@ fun HeroSignalCard(
                         label = "ENTRY ZONE",
                         value = plan.entryZoneFormatted,
                         subText = "Discount Structural Level",
-                        color = TextPrimary,
+                        color = colors.textPrimary,
                         termKey = "ENTRY",
                         onInfoClick = onInfoClick
                     )
@@ -753,7 +752,7 @@ fun HeroSignalCard(
                         label = "STOP LOSS",
                         value = plan.stopLossFormatted,
                         subText = "-${String.format(Locale.US, "%.2f", plan.stopLossDistancePercent)}%",
-                        color = BearishRed,
+                        color = colors.bearishRed,
                         termKey = "STOP_LOSS",
                         onInfoClick = onInfoClick
                     )
@@ -763,7 +762,7 @@ fun HeroSignalCard(
                         label = "TAKE PROFIT 1",
                         value = plan.takeProfit1Formatted,
                         subText = "+${String.format(Locale.US, "%.2f", plan.takeProfit1DistancePercent)}% (1.6x R:R)",
-                        color = BullishGreen,
+                        color = colors.bullishGreen,
                         termKey = "TAKE_PROFIT",
                         onInfoClick = onInfoClick
                     )
@@ -772,7 +771,7 @@ fun HeroSignalCard(
                         label = "TAKE PROFIT 2 (Main)",
                         value = plan.takeProfit2Formatted,
                         subText = "+${String.format(Locale.US, "%.2f", plan.takeProfit2DistancePercent)}% (${plan.riskRewardFormatted})",
-                        color = BullishGreen,
+                        color = colors.bullishGreen,
                         termKey = "TAKE_PROFIT",
                         onInfoClick = onInfoClick
                     )
@@ -781,7 +780,7 @@ fun HeroSignalCard(
                         label = "TAKE PROFIT 3 (Runner)",
                         value = plan.takeProfit3Formatted,
                         subText = "+${String.format(Locale.US, "%.2f", plan.takeProfit3DistancePercent)}% (Fib 1.618)",
-                        color = NexusGold,
+                        color = colors.gold,
                         termKey = "TAKE_PROFIT",
                         onInfoClick = onInfoClick
                     )
@@ -800,12 +799,12 @@ fun HeroSignalCard(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
                             text = "Max Leverage: ${plan.suggestedMaxLeverage}x",
-                            color = NexusGold,
+                            color = colors.gold,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -813,7 +812,7 @@ fun HeroSignalCard(
                         Icon(
                             imageVector = Icons.Default.Info,
                             contentDescription = "Leverage Info",
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier
                                 .size(14.dp)
                                 .clickable { onInfoClick("LEVERAGE") }
@@ -825,12 +824,12 @@ fun HeroSignalCard(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
                             text = "R:R: ${plan.riskRewardFormatted}",
-                            color = BullishGreen,
+                            color = colors.bullishGreen,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -838,7 +837,7 @@ fun HeroSignalCard(
                         Icon(
                             imageVector = Icons.Default.Info,
                             contentDescription = "R:R Info",
-                            tint = BullishGreen,
+                            tint = colors.bullishGreen,
                             modifier = Modifier
                                 .size(14.dp)
                                 .clickable { onInfoClick("RISK_REWARD") }
@@ -852,7 +851,7 @@ fun HeroSignalCard(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = BearishRedBg)
+                    colors = CardDefaults.cardColors(containerColor = colors.bearishRedBg)
                 ) {
                     Row(
                         modifier = Modifier.padding(10.dp),
@@ -861,20 +860,20 @@ fun HeroSignalCard(
                         Icon(
                             imageVector = Icons.Default.Block,
                             contentDescription = "Invalidation",
-                            tint = BearishRed,
+                            tint = colors.bearishRed,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Invalidation Condition:",
-                                color = BearishRed,
+                                color = colors.bearishRed,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
                             Text(
                                 text = plan.invalidationCondition,
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontSize = 11.sp,
                                 lineHeight = 14.sp
                             )
@@ -886,7 +885,7 @@ fun HeroSignalCard(
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Invalidation Info",
-                                tint = BearishRed,
+                                tint = colors.bearishRed,
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -907,19 +906,19 @@ fun HeroSignalCard(
                     signal.smcConfirmations.forEach { smc ->
                         Box(
                             modifier = Modifier
-                                .background(NavySurfaceVariant, RoundedCornerShape(6.dp))
+                                .background(colors.surfaceVariant, RoundedCornerShape(6.dp))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
-                            Text(text = smc, color = NexusGold, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                            Text(text = smc, color = colors.gold, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                         }
                     }
                     signal.supportingIndicators.forEach { ind ->
                         Box(
                             modifier = Modifier
-                                .background(NavySurface, RoundedCornerShape(6.dp))
+                                .background(colors.surface, RoundedCornerShape(6.dp))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
-                            Text(text = ind, color = TextSecondary, fontSize = 10.sp)
+                            Text(text = ind, color = colors.textSecondary, fontSize = 10.sp)
                         }
                     }
                 }
@@ -937,20 +936,20 @@ fun HeroSignalCard(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f).testTag("copy_signal_levels_btn")
                 ) {
-                    Icon(imageVector = Icons.Default.ContentCopy, contentDescription = "Copy", tint = TextPrimary, modifier = Modifier.size(15.dp))
+                    Icon(imageVector = Icons.Default.ContentCopy, contentDescription = "Copy", tint = colors.textPrimary, modifier = Modifier.size(15.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Copy Levels", color = TextPrimary, fontSize = 11.sp)
+                    Text(text = "Copy Levels", color = colors.textPrimary, fontSize = 11.sp)
                 }
 
                 Button(
                     onClick = onSetAlertClick,
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NavySurfaceVariant),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceVariant),
                     modifier = Modifier.weight(1f).testTag("set_signal_alert_btn")
                 ) {
-                    Icon(imageVector = Icons.Default.AddAlert, contentDescription = "Alert", tint = NexusGold, modifier = Modifier.size(15.dp))
+                    Icon(imageVector = Icons.Default.AddAlert, contentDescription = "Alert", tint = colors.gold, modifier = Modifier.size(15.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Set Price Alert", color = NexusGold, fontSize = 11.sp)
+                    Text(text = "Set Price Alert", color = colors.gold, fontSize = 11.sp)
                 }
             }
         }
@@ -970,6 +969,7 @@ fun LevelRow(
     termKey: String,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -978,7 +978,7 @@ fun LevelRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = label,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -986,7 +986,7 @@ fun LevelRow(
             Icon(
                 imageVector = Icons.Default.Info,
                 contentDescription = "$label Info",
-                tint = TextMuted,
+                tint = colors.textMuted,
                 modifier = Modifier
                     .size(13.dp)
                     .clickable { onInfoClick(termKey) }
@@ -1002,7 +1002,7 @@ fun LevelRow(
             )
             Text(
                 text = subText,
-                color = TextMuted,
+                color = colors.textMuted,
                 fontSize = 10.sp
             )
         }
@@ -1020,6 +1020,7 @@ fun RiskRewardVisualBar(
     rrFormatted: String,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val total = (riskPercent + rewardPercent).coerceAtLeast(1.0)
     val riskFraction = (riskPercent / total).toFloat().coerceIn(0.1f, 0.5f)
     val rewardFraction = 1f - riskFraction
@@ -1031,7 +1032,7 @@ fun RiskRewardVisualBar(
         ) {
             Text(
                 text = "Risk: ${String.format(Locale.US, "%.1f", riskPercent)}%",
-                color = BearishRed,
+                color = colors.bearishRed,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -1039,7 +1040,7 @@ fun RiskRewardVisualBar(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "Ratio $rrFormatted",
-                    color = NexusGold,
+                    color = colors.gold,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -1047,7 +1048,7 @@ fun RiskRewardVisualBar(
                 Icon(
                     imageVector = Icons.Default.Info,
                     contentDescription = "Risk Reward Info",
-                    tint = TextMuted,
+                    tint = colors.textMuted,
                     modifier = Modifier
                         .size(13.dp)
                         .clickable { onInfoClick("RISK_REWARD") }
@@ -1056,7 +1057,7 @@ fun RiskRewardVisualBar(
 
             Text(
                 text = "Target: +${String.format(Locale.US, "%.1f", rewardPercent)}%",
-                color = BullishGreen,
+                color = colors.bullishGreen,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -1074,15 +1075,181 @@ fun RiskRewardVisualBar(
                 modifier = Modifier
                     .weight(riskFraction)
                     .fillMaxSize()
-                    .background(BearishRed)
+                    .background(colors.bearishRed)
             )
             Spacer(modifier = Modifier.width(2.dp))
             Box(
                 modifier = Modifier
                     .weight(rewardFraction)
                     .fillMaxSize()
-                    .background(BullishGreen)
+                    .background(colors.bullishGreen)
             )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// STRICT 8-GROUP SIGNAL QUALITY & MANDATORY FILTERS CARD
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+fun StrictQualityAuditCard(
+    report: com.example.data.signal.StrictSignalQualityReport
+) {
+    val colors = NexusTheme.colors
+    val tierColor = when (report.qualificationTier) {
+        com.example.data.signal.StrictQualificationTier.HIGH_QUALITY_SETUP -> colors.bullishGreen
+        com.example.data.signal.StrictQualificationTier.QUALIFIED_SETUP -> colors.gold
+        com.example.data.signal.StrictQualificationTier.NO_TRADE -> colors.bearishRed
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("strict_quality_audit_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tierColor.copy(alpha = 0.55f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "STRICT 8-GROUP SIGNAL QUALITY",
+                        color = colors.gold,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = report.qualificationTier.label,
+                        color = tierColor,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.surfaceVariant)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "${report.totalScore} / 100",
+                        color = tierColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = report.qualityScoreDisclaimer,
+                color = colors.textMuted,
+                fontSize = 10.sp,
+                lineHeight = 13.sp
+            )
+
+            report.netRiskRewardSummary?.let { rr ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Net R:R (after fees/slippage): ${rr.netRiskRewardFormatted} • ${if (rr.meetsMinOneToFour) "Meets >= 1:4.0" else "Below 1:4.0"}",
+                    color = if (rr.meetsMinOneToFour) colors.bullishGreen else colors.bearishRed,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "8 Independent Evidence Groups",
+                color = colors.textPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            report.evidenceGroups.forEach { grp ->
+                val frac = (grp.awardedPoints.toFloat() / grp.maxPoints).coerceIn(0f, 1f)
+                val barColor = when {
+                    grp.status == com.example.data.indicators.IndicatorValidationStatus.UNAVAILABLE ||
+                        grp.status == com.example.data.indicators.IndicatorValidationStatus.STALE -> colors.textMuted
+                    frac >= 0.75f -> colors.bullishGreen
+                    frac >= 0.5f -> colors.gold
+                    else -> colors.bearishRed
+                }
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "${grp.groupId.code}. ${grp.groupId.title}",
+                            color = colors.textSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "${grp.awardedPoints}/${grp.maxPoints} (${grp.status.label})",
+                            color = barColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    LinearProgressIndicator(
+                        progress = { frac },
+                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
+                        color = barColor,
+                        trackColor = colors.surfaceVariant
+                    )
+                    Text(
+                        text = grp.summary,
+                        color = colors.textMuted,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Mandatory Gate Filters (${report.passedFilterCount}/${report.mandatoryFilters.size} Passed)",
+                color = colors.textPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            report.mandatoryFilters.forEach { f ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (f.passed) Icons.Default.CheckCircle else Icons.Default.Block,
+                        contentDescription = if (f.passed) "Passed" else "Failed",
+                        tint = if (f.passed) colors.bullishGreen else colors.bearishRed,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "#${f.filterNumber} ${f.name}: ${f.reason}",
+                        color = if (f.passed) colors.textSecondary else colors.bearishRed,
+                        fontSize = 10.sp,
+                        lineHeight = 13.sp
+                    )
+                }
+            }
         }
     }
 }
@@ -1096,11 +1263,12 @@ fun ConfidenceBreakdownCard(
     confidence: com.example.data.signal.ConfidenceScoreBreakdown,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
     ) {
         Column(
             modifier = Modifier
@@ -1116,7 +1284,7 @@ fun ConfidenceBreakdownCard(
                     Text(
                         text = "Confidence Breakdown",
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -1124,7 +1292,7 @@ fun ConfidenceBreakdownCard(
                     Icon(
                         imageVector = Icons.Default.Info,
                         contentDescription = "Confidence Info",
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier
                             .size(16.dp)
                             .clickable { onInfoClick("CONFIDENCE_SCORE") }
@@ -1133,7 +1301,7 @@ fun ConfidenceBreakdownCard(
 
                 Text(
                     text = "${confidence.totalScore} / 100",
-                    color = NexusGold,
+                    color = colors.gold,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
@@ -1142,7 +1310,7 @@ fun ConfidenceBreakdownCard(
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = "Transparent multi-factor scoring based on verified technical indicators and market structure.",
-                color = TextMuted,
+                color = colors.textMuted,
                 fontSize = 11.sp
             )
 
@@ -1157,7 +1325,7 @@ fun ConfidenceBreakdownCard(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Notice: Confidence score reflects data agreement from historical patterns, not a guaranteed probability of profit.",
-                color = TextMuted,
+                color = colors.textMuted,
                 fontSize = 10.sp,
                 lineHeight = 13.sp
             )
@@ -1167,12 +1335,13 @@ fun ConfidenceBreakdownCard(
 
 @Composable
 fun FactorProgressRow(factor: com.example.data.signal.SignalFactorReason) {
+    val colors = NexusTheme.colors
     val fraction = (factor.awardedPoints.toFloat() / factor.maxPoints).coerceIn(0f, 1f)
     val color = when (factor.stance) {
-        "BULLISH" -> BullishGreen
-        "BEARISH" -> BearishRed
-        "CONFLICTING" -> NexusGold
-        else -> TextSecondary
+        "BULLISH" -> colors.bullishGreen
+        "BEARISH" -> colors.bearishRed
+        "CONFLICTING" -> colors.gold
+        else -> colors.textSecondary
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -1182,7 +1351,7 @@ fun FactorProgressRow(factor: com.example.data.signal.SignalFactorReason) {
         ) {
             Text(
                 text = factor.factorName,
-                color = TextPrimary,
+                color = colors.textPrimary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -1203,14 +1372,14 @@ fun FactorProgressRow(factor: com.example.data.signal.SignalFactorReason) {
                 .height(5.dp)
                 .clip(RoundedCornerShape(3.dp)),
             color = color,
-            trackColor = NavySurface
+            trackColor = colors.surfaceVariant
         )
 
         Spacer(modifier = Modifier.height(2.dp))
 
         Text(
             text = factor.summary,
-            color = TextMuted,
+            color = colors.textMuted,
             fontSize = 10.sp
         )
     }
@@ -1228,11 +1397,12 @@ fun MultiTimeframeMatrixCard(
     agreementPercent: Int,
     decision: SignalDecision
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
     ) {
         Column(
             modifier = Modifier
@@ -1247,19 +1417,19 @@ fun MultiTimeframeMatrixCard(
                 Text(
                     text = "Multi-Timeframe Confirmation",
                     style = MaterialTheme.typography.titleMedium.copy(
-                        color = TextPrimary,
+                        color = colors.textPrimary,
                         fontWeight = FontWeight.Bold
                     )
                 )
 
                 Box(
                     modifier = Modifier
-                        .background(NavySurfaceVariant, RoundedCornerShape(6.dp))
+                        .background(colors.surfaceVariant, RoundedCornerShape(6.dp))
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = "$agreementCount / $totalCount Aligned ($agreementPercent%)",
-                        color = if (agreementPercent >= 65) BullishGreen else NexusGold,
+                        color = if (agreementPercent >= 65) colors.bullishGreen else colors.gold,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
@@ -1275,14 +1445,14 @@ fun MultiTimeframeMatrixCard(
             ) {
                 conditions.forEach { cond ->
                     val color = when (cond.stance) {
-                        "BULLISH" -> BullishGreen
-                        "BEARISH" -> BearishRed
-                        else -> TextMuted
+                        "BULLISH" -> colors.bullishGreen
+                        "BEARISH" -> colors.bearishRed
+                        else -> colors.textMuted
                     }
                     val bg = when (cond.stance) {
-                        "BULLISH" -> BullishGreenBg
-                        "BEARISH" -> BearishRedBg
-                        else -> NavySurface
+                        "BULLISH" -> colors.bullishGreenBg
+                        "BEARISH" -> colors.bearishRedBg
+                        else -> colors.surface
                     }
 
                     Column(
@@ -1296,7 +1466,7 @@ fun MultiTimeframeMatrixCard(
                     ) {
                         Text(
                             text = cond.timeframe.label,
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
@@ -1332,12 +1502,13 @@ fun CompactAiSignalRow(
     onSelect: () -> Unit,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val isLong = signal.decision == SignalDecision.LONG
     val isShort = signal.decision == SignalDecision.SHORT
     val accentColor = when {
-        isLong -> BullishGreen
-        isShort -> BearishRed
-        else -> NexusGold
+        isLong -> colors.bullishGreen
+        isShort -> colors.bearishRed
+        else -> colors.gold
     }
 
     Card(
@@ -1347,11 +1518,11 @@ fun CompactAiSignalRow(
             .testTag("signal_feed_row_${signal.symbol}"),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) NavySurfaceVariant else NavyCard
+            containerColor = if (isSelected) colors.surfaceVariant else colors.card
         ),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            if (isSelected) NexusGold else NavyBorder
+            if (isSelected) colors.gold else colors.border
         )
     ) {
         Row(
@@ -1365,14 +1536,14 @@ fun CompactAiSignalRow(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = signal.symbol,
-                        color = TextPrimary,
+                        color = colors.textPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = signal.primaryTimeframe.label,
-                        color = NexusGold,
+                        color = colors.gold,
                         fontSize = 10.sp
                     )
                 }
@@ -1383,7 +1554,7 @@ fun CompactAiSignalRow(
                     } else {
                         "Entry: ${signal.riskPlan?.entryZoneFormatted ?: "N/A"}"
                     },
-                    color = TextMuted,
+                    color = colors.textMuted,
                     fontSize = 11.sp
                 )
             }
@@ -1393,9 +1564,9 @@ fun CompactAiSignalRow(
                     modifier = Modifier
                         .background(
                             when {
-                                isLong -> BullishGreenBg
-                                isShort -> BearishRedBg
-                                else -> NavySurface
+                                isLong -> colors.bullishGreenBg
+                                isShort -> colors.bearishRedBg
+                                else -> colors.surface
                             },
                             RoundedCornerShape(6.dp)
                         )

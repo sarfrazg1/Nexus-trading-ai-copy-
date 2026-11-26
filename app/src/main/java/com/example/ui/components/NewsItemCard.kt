@@ -39,17 +39,7 @@ import com.example.data.model.NewsImpact
 import com.example.data.model.NewsImpactLevel
 import com.example.data.news.EconomicGlossaryDatabase
 import com.example.data.news.EconomicTerm
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BearishRedBg
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.BullishGreenBg
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun NewsItemCard(
@@ -59,6 +49,7 @@ fun NewsItemCard(
     onTermClick: ((EconomicTerm) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val detectedTerms = remember(news.title) {
         EconomicGlossaryDatabase.detectTermsInText(news.title)
     }
@@ -69,8 +60,8 @@ fun NewsItemCard(
             .clickable(onClick = onCardClick)
             .testTag("news_card_${news.id}"),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
     ) {
         Column(
             modifier = Modifier
@@ -87,33 +78,31 @@ fun NewsItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Category
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 7.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = news.category.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
                             )
                         )
                     }
 
-                    // Impact Direction
                     val impactColor = when (news.impact) {
-                        NewsImpact.BULLISH -> BullishGreen
-                        NewsImpact.BEARISH -> BearishRed
-                        NewsImpact.NEUTRAL -> TextMuted
+                        NewsImpact.BULLISH -> colors.bullishGreen
+                        NewsImpact.BEARISH -> colors.bearishRed
+                        NewsImpact.NEUTRAL -> colors.textMuted
                     }
                     val impactBg = when (news.impact) {
-                        NewsImpact.BULLISH -> BullishGreenBg
-                        NewsImpact.BEARISH -> BearishRedBg
-                        NewsImpact.NEUTRAL -> NavySurfaceVariant
+                        NewsImpact.BULLISH -> colors.bullishGreenBg
+                        NewsImpact.BEARISH -> colors.bearishRedBg
+                        NewsImpact.NEUTRAL -> colors.surfaceVariant
                     }
 
                     Box(
@@ -133,16 +122,15 @@ fun NewsItemCard(
                         )
                     }
 
-                    // Impact Level Pill
                     val levelColor = when (news.impactLevel) {
-                        NewsImpactLevel.HIGH -> BearishRed
-                        NewsImpactLevel.MEDIUM -> NexusGold
-                        NewsImpactLevel.LOW -> TextMuted
+                        NewsImpactLevel.HIGH -> colors.bearishRed
+                        NewsImpactLevel.MEDIUM -> colors.gold
+                        NewsImpactLevel.LOW -> colors.textMuted
                     }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -155,38 +143,37 @@ fun NewsItemCard(
                         )
                     }
 
-                    // Event status badge if Scheduled or Unverified
                     if (news.eventStatus != EventStatus.CONFIRMED) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(NavySurfaceVariant)
-                                .border(1.dp, NexusGold.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                .background(colors.surfaceVariant)
+                                .border(1.dp, colors.gold.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
                                 .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = news.eventStatus.label.uppercase(),
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.Medium
                                 )
                             )
                         }
                     }
-                    // Seen Across Refreshes Pill
+
                     if (news.isPreviouslySeen) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(NavySurfaceVariant)
+                                .background(colors.surfaceVariant)
                                 .padding(horizontal = 5.dp, vertical = 2.dp)
                                 .testTag("news_seen_badge_${news.id}")
                         ) {
                             Text(
                                 text = "SEEN",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = TextMuted,
+                                    color = colors.textMuted,
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -202,7 +189,7 @@ fun NewsItemCard(
                     Icon(
                         imageVector = if (news.isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                         contentDescription = "Save News",
-                        tint = if (news.isSaved) NexusGold else TextMuted,
+                        tint = if (news.isSaved) colors.gold else colors.textMuted,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -210,18 +197,16 @@ fun NewsItemCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Headline
             Text(
                 text = news.title,
                 style = MaterialTheme.typography.titleSmall.copy(
-                    color = TextPrimary,
+                    color = colors.textPrimary,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     lineHeight = 20.sp
                 )
             )
 
-            // Detected Economic Terms Roman Urdu trigger row
             if (detectedTerms.isNotEmpty() && onTermClick != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
@@ -231,7 +216,7 @@ fun NewsItemCard(
                     Text(
                         text = "Urdu Wazaahat:",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = TextMuted,
+                            color = colors.textMuted,
                             fontSize = 10.sp
                         )
                     )
@@ -239,7 +224,7 @@ fun NewsItemCard(
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(NexusGold.copy(alpha = 0.12f))
+                                .background(colors.gold.copy(alpha = 0.12f))
                                 .clickable { onTermClick(term) }
                                 .padding(horizontal = 6.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -247,14 +232,14 @@ fun NewsItemCard(
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Explain ${term.abbreviation}",
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(11.dp)
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
                                 text = "${term.abbreviation} (i)",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -266,11 +251,10 @@ fun NewsItemCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Summary
             Text(
                 text = news.summary,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = TextSecondary,
+                    color = colors.textSecondary,
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 ),
@@ -279,25 +263,23 @@ fun NewsItemCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Affected assets & Footer
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Affected assets pills
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     news.affectedAssets.take(4).forEach { asset ->
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(NavySurfaceVariant.copy(alpha = 0.7f))
+                                .background(colors.surfaceVariant.copy(alpha = 0.8f))
                                 .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = asset,
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -306,23 +288,24 @@ fun NewsItemCard(
                     }
                 }
 
-                // Source and Timestamp
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = news.source,
+                        text = "${news.source} • Pub: ${news.publishedTimestampPkt.ifBlank { news.timestamp }}",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = TextMuted,
-                            fontSize = 10.sp,
+                            color = colors.textMuted,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Medium
                         )
                     )
-                    Text(
-                        text = "• ${news.timestamp}",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = TextMuted,
-                            fontSize = 10.sp
+                    if (news.retrievedTimestampPkt.isNotBlank()) {
+                        Text(
+                            text = "Retrieved: ${news.retrievedTimestampPkt}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = colors.textMuted,
+                                fontSize = 8.sp
+                            )
                         )
-                    )
+                    }
                 }
             }
         }

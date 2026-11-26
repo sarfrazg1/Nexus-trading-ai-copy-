@@ -1,14 +1,6 @@
 package com.example.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,34 +11,24 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatteryAlert
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.TrendingDown
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -57,10 +39,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -73,14 +53,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import com.example.data.learning.LearningLanguageMode
 import com.example.data.scanner.EntryTimerStatus
 import com.example.data.scanner.FuturesDirection
 import com.example.data.scanner.FuturesScanSignal
@@ -89,19 +66,7 @@ import com.example.data.scanner.FuturesWatchlistPair
 import com.example.data.scanner.ScannerEngineState
 import com.example.data.scanner.ScannerStatistics
 import com.example.data.scanner.ScannerStatus
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BearishRedBg
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.BullishGreenBg
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurface
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 import java.util.Locale
 
 @Composable
@@ -113,17 +78,17 @@ fun FuturesScannerDashboardHeader(
     onTogglePaperTrading: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val isScanning = state.status == ScannerStatus.SCANNING
 
     Card(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .border(1.dp, if (isScanning) BullishGreen.copy(alpha = 0.5f) else NavyBorder, RoundedCornerShape(14.dp)),
-        colors = CardDefaults.cardColors(containerColor = NavyCard)
+            .border(1.dp, if (isScanning) colors.bullishGreen.copy(alpha = 0.5f) else colors.border, RoundedCornerShape(14.dp)),
+        colors = CardDefaults.cardColors(containerColor = colors.card)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Title & Start/Stop Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -136,11 +101,11 @@ fun FuturesScannerDashboardHeader(
                             .clip(CircleShape)
                             .background(
                                 when (state.status) {
-                                    ScannerStatus.SCANNING -> BullishGreen
-                                    ScannerStatus.IDLE -> NexusGold
-                                    ScannerStatus.PAUSED -> TextMuted
-                                    ScannerStatus.ERROR -> BearishRed
-                                    ScannerStatus.DISCONNECTED -> BearishRed
+                                    ScannerStatus.SCANNING -> colors.bullishGreen
+                                    ScannerStatus.IDLE -> colors.gold
+                                    ScannerStatus.PAUSED -> colors.textMuted
+                                    ScannerStatus.ERROR -> colors.bearishRed
+                                    ScannerStatus.DISCONNECTED -> colors.bearishRed
                                 }
                             )
                     )
@@ -149,7 +114,7 @@ fun FuturesScannerDashboardHeader(
                         Text(
                             text = "BINANCE USDT-M FUTURES SCANNER",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.1.sp
                             )
@@ -163,7 +128,7 @@ fun FuturesScannerDashboardHeader(
                                 ScannerStatus.DISCONNECTED -> "Offline / Disconnected"
                             },
                             style = MaterialTheme.typography.titleMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -173,7 +138,7 @@ fun FuturesScannerDashboardHeader(
                 Button(
                     onClick = { if (isScanning) onStopScanner() else onStartScanner() },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isScanning) BearishRed else BullishGreen
+                        containerColor = if (isScanning) colors.bearishRed else colors.bullishGreen
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.testTag("toggle_futures_scanner_btn")
@@ -196,26 +161,25 @@ fun FuturesScannerDashboardHeader(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Currently Scanning Activity Bar
             if (isScanning && state.currentlyScanningSymbol != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurface)
+                        .background(colors.surface)
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(14.dp),
                         strokeWidth = 2.dp,
-                        color = NexusGold
+                        color = colors.gold
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Scanning ${state.currentlyScanningSymbol} across 4H, 1H, 15M, 5M...",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontSize = 11.sp
                         )
                     )
@@ -223,24 +187,22 @@ fun FuturesScannerDashboardHeader(
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
-            // Stats Grid (Active, Setups, Win Rate, Watchlist Count)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                StatChip(label = "Active Signals", value = "${state.activeSignals.size}", color = BullishGreen)
-                StatChip(label = "Setups Awaiting", value = "${state.watchlistSetups.size}", color = NexusGold)
+                StatChip(label = "Active Signals", value = "${state.activeSignals.size}", color = colors.bullishGreen)
+                StatChip(label = "Setups Awaiting", value = "${state.watchlistSetups.size}", color = colors.gold)
                 StatChip(
                     label = "Win Rate",
                     value = if (state.statistics.winRatePercent > 0) String.format(Locale.US, "%.1f%%", state.statistics.winRatePercent) else "N/A",
-                    color = TextPrimary
+                    color = colors.textPrimary
                 )
-                StatChip(label = "Coins Scanned", value = "${state.selectedWatchlistCount}", color = TextSecondary)
+                StatChip(label = "Coins Scanned", value = "${state.selectedWatchlistCount}", color = colors.textSecondary)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Scan Interval & Paper Trading Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -249,7 +211,7 @@ fun FuturesScannerDashboardHeader(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "Interval:",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 11.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 11.sp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     listOf(15, 30, 60).forEach { sec ->
@@ -257,7 +219,7 @@ fun FuturesScannerDashboardHeader(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (isSelected) NexusGold else NavySurfaceVariant)
+                                .background(if (isSelected) colors.gold else colors.surfaceVariant)
                                 .clickable { onIntervalSelected(sec) }
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                             contentAlignment = Alignment.Center
@@ -265,7 +227,7 @@ fun FuturesScannerDashboardHeader(
                             Text(
                                 text = "${sec}s",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = if (isSelected) NavyBackground else TextSecondary,
+                                    color = if (isSelected) colors.onGold else colors.textSecondary,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     fontSize = 10.sp
                                 )
@@ -279,7 +241,7 @@ fun FuturesScannerDashboardHeader(
                     Text(
                         text = "Paper Trading",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (state.paperTradingEnabled) BullishGreen else TextMuted,
+                            color = if (state.paperTradingEnabled) colors.bullishGreen else colors.textMuted,
                             fontWeight = FontWeight.Medium,
                             fontSize = 11.sp
                         )
@@ -290,10 +252,10 @@ fun FuturesScannerDashboardHeader(
                         onCheckedChange = onTogglePaperTrading,
                         modifier = Modifier.size(24.dp),
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = BullishGreen,
-                            checkedTrackColor = BullishGreenBg,
-                            uncheckedThumbColor = TextMuted,
-                            uncheckedTrackColor = NavySurfaceVariant
+                            checkedThumbColor = colors.bullishGreen,
+                            checkedTrackColor = colors.bullishGreenBg,
+                            uncheckedThumbColor = colors.textMuted,
+                            uncheckedTrackColor = colors.surfaceVariant
                         )
                     )
                 }
@@ -304,22 +266,24 @@ fun FuturesScannerDashboardHeader(
 
 @Composable
 private fun StatChip(label: String, value: String, color: Color) {
+    val colors = NexusTheme.colors
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(text = value, style = MaterialTheme.typography.titleMedium.copy(color = color, fontWeight = FontWeight.Bold))
-        Text(text = label, style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
+        Text(text = label, style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
     }
 }
 
 @Composable
 fun BatteryOptimizationNoticeCard() {
+    val colors = NexusTheme.colors
     var isExpanded by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .border(1.dp, NexusGold.copy(alpha = 0.25f), RoundedCornerShape(10.dp)),
-        colors = CardDefaults.cardColors(containerColor = NavySurface)
+            .border(1.dp, colors.gold.copy(alpha = 0.25f), RoundedCornerShape(10.dp)),
+        colors = CardDefaults.cardColors(containerColor = colors.surface)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -330,17 +294,17 @@ fun BatteryOptimizationNoticeCard() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = Icons.Default.BatteryAlert, contentDescription = null, tint = NexusGold, modifier = Modifier.size(16.dp))
+                    Icon(imageVector = Icons.Default.BatteryAlert, contentDescription = null, tint = colors.gold, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Android Background & Battery Optimization",
-                        style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     )
                 }
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
-                    tint = TextMuted,
+                    tint = colors.textMuted,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -349,9 +313,9 @@ fun BatteryOptimizationNoticeCard() {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "• Foreground Service: NEXUS Scanner runs an Android Foreground Service with an ongoing notification to maintain scanning while the app is in the background.\n" +
-                            "• Doze Mode & Restrictions: Some Android manufacturers (Xiaomi, Samsung, Huawei) aggressively kill background processes to save battery. To ensure continuous scanning, add NEXUS to 'Unrestricted' battery usage in Android App Settings.\n" +
-                            "• Offline Safety: If the device loses Wi-Fi/cellular connection, the scanner pauses gracefully and resumes automatically with exponential backoff.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp, lineHeight = 16.sp)
+                            "• Doze Mode & Restrictions: Android battery optimization/Doze limits background network access when closed; add NEXUS to 'Unrestricted' battery usage in Android App Settings.\n" +
+                            "• Offline Safety: If the device loses Wi-Fi/cellular connection, the scanner pauses gracefully and resumes automatically.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 16.sp)
                 )
             }
         }
@@ -368,9 +332,10 @@ fun FuturesSignalCard(
     onOpenWorkflow: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val isLong = signal.direction == FuturesDirection.LONG
-    val dirColor = if (isLong) BullishGreen else BearishRed
-    val dirBg = if (isLong) BullishGreenBg else BearishRedBg
+    val dirColor = if (isLong) colors.bullishGreen else colors.bearishRed
+    val dirBg = if (isLong) colors.bullishGreenBg else colors.bearishRedBg
     var isExpanded by remember { mutableStateOf(false) }
 
     Card(
@@ -379,13 +344,12 @@ fun FuturesSignalCard(
             .clip(RoundedCornerShape(14.dp))
             .border(
                 1.dp,
-                if (signal.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED) dirColor.copy(alpha = 0.6f) else NavyBorder,
+                if (signal.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED) dirColor.copy(alpha = 0.6f) else colors.border,
                 RoundedCornerShape(14.dp)
             ),
-        colors = CardDefaults.cardColors(containerColor = NavyCard)
+        colors = CardDefaults.cardColors(containerColor = colors.card)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            // Header Row: Pair, Direction Badge, Lifecycle Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -395,7 +359,7 @@ fun FuturesSignalCard(
                     Text(
                         text = signal.symbol,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -436,7 +400,6 @@ fun FuturesSignalCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Pattern & Entry Timer Status Row
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -445,15 +408,15 @@ fun FuturesSignalCard(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(NexusGold.copy(alpha = 0.14f))
-                        .border(1.dp, NexusGold.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                        .background(colors.gold.copy(alpha = 0.14f))
+                        .border(1.dp, colors.gold.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
                         .padding(horizontal = 7.dp, vertical = 2.dp)
                         .testTag("pattern_badge_${signal.symbol}")
                 ) {
                     Text(
                         text = signal.detectedPattern.label,
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp
                         )
@@ -482,14 +445,13 @@ fun FuturesSignalCard(
                 }
             }
 
-            // Entry Timer Trigger / Bar-by-bar Status Note
             signal.entryTimer?.let { timer ->
                 Spacer(modifier = Modifier.height(6.dp))
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurface)
+                        .background(colors.surface)
                         .padding(8.dp)
                         .testTag("entry_timer_box_${signal.symbol}")
                 ) {
@@ -502,7 +464,7 @@ fun FuturesSignalCard(
                     Text(
                         text = headline,
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             lineHeight = 14.sp
@@ -511,49 +473,47 @@ fun FuturesSignalCard(
                     if (timer.wickRejectionCount > 0) {
                         Text(
                             text = "Wick-only probes ignored: ${timer.wickRejectionCount} (completed candle close required)",
-                            style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontSize = 9.sp)
+                            style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontSize = 9.sp)
                         )
                     }
                     Text(
                         text = "${signal.setupDisclaimer} (PKT: ${signal.formattedTimestamp})",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Pricing Grid: Entry Zone, Current, Stop Loss, TP1-3
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(NavySurface)
+                    .background(colors.surface)
                     .padding(10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("ENTRY ZONE", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
-                    Text(signal.entryZoneFormatted, style = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary, fontWeight = FontWeight.Bold))
-                    Text("Live: ${signal.currentPriceFormatted}", style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontSize = 10.sp))
+                    Text("ENTRY ZONE", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
+                    Text(signal.entryZoneFormatted, style = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary, fontWeight = FontWeight.Bold))
+                    Text("Live: ${signal.currentPriceFormatted}", style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontSize = 10.sp))
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("STOP LOSS", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
-                    Text(signal.stopLossFormatted, style = MaterialTheme.typography.bodyMedium.copy(color = BearishRed, fontWeight = FontWeight.Bold))
-                    Text("-${String.format(Locale.US, "%.2f", signal.slDistancePercent)}%", style = MaterialTheme.typography.labelSmall.copy(color = BearishRed, fontSize = 10.sp))
+                    Text("STOP LOSS", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
+                    Text(signal.stopLossFormatted, style = MaterialTheme.typography.bodyMedium.copy(color = colors.bearishRed, fontWeight = FontWeight.Bold))
+                    Text("-${String.format(Locale.US, "%.2f", signal.slDistancePercent)}%", style = MaterialTheme.typography.labelSmall.copy(color = colors.bearishRed, fontSize = 10.sp))
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("TARGET (TP2)", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
-                    Text(signal.tp2Formatted, style = MaterialTheme.typography.bodyMedium.copy(color = BullishGreen, fontWeight = FontWeight.Bold))
-                    Text("+${String.format(Locale.US, "%.2f", signal.tp2DistancePercent)}%", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
+                    Text("TARGET (TP2)", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
+                    Text(signal.tp2Formatted, style = MaterialTheme.typography.bodyMedium.copy(color = colors.bullishGreen, fontWeight = FontWeight.Bold))
+                    Text("+${String.format(Locale.US, "%.2f", signal.tp2DistancePercent)}%", style = MaterialTheme.typography.labelSmall.copy(color = colors.bullishGreen, fontSize = 10.sp))
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // R:R & Confluence Score Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -563,7 +523,7 @@ fun FuturesSignalCard(
                     Text(
                         text = "R:R 1:${String.format(Locale.US, "%.2f", signal.riskRewardRatio)}",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
@@ -571,7 +531,7 @@ fun FuturesSignalCard(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Lev: ${signal.suggestedLeverage}x (Cap)",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary, fontSize = 10.sp)
                     )
                 }
 
@@ -579,14 +539,14 @@ fun FuturesSignalCard(
                     Text(
                         text = "Model Conf: ${signal.qualityScore}%",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (signal.qualityScore >= 92) BullishGreen else if (signal.qualityScore >= 75) NexusGold else TextSecondary,
+                            color = if (signal.qualityScore >= 92) colors.bullishGreen else if (signal.qualityScore >= 75) colors.gold else colors.textSecondary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
                     )
                     Text(
                         text = "Model Conf != Hist. Win Rate",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 8.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 8.sp)
                     )
                 }
             }
@@ -595,13 +555,12 @@ fun FuturesSignalCard(
             LinearProgressIndicator(
                 progress = { signal.qualityScore / 100f },
                 modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
-                color = if (signal.qualityScore >= 75) BullishGreen else NexusGold,
-                trackColor = NavySurfaceVariant,
+                color = if (signal.qualityScore >= 75) colors.bullishGreen else colors.gold,
+                trackColor = colors.surfaceVariant,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Multi-Timeframe Stance Chips (4H, 1H, 15M, 5M)
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -610,12 +569,12 @@ fun FuturesSignalCard(
                 signal.timeframeConfirmations.forEach { tf ->
                     val isBull = tf.trend.contains("Bullish", ignoreCase = true)
                     val isBear = tf.trend.contains("Bearish", ignoreCase = true)
-                    val chipColor = if (isBull) BullishGreen else if (isBear) BearishRed else TextSecondary
+                    val chipColor = if (isBull) colors.bullishGreen else if (isBear) colors.bearishRed else colors.textSecondary
 
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(NavySurface)
+                            .background(colors.surface)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -632,69 +591,64 @@ fun FuturesSignalCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Expandable Technical & Invalidation Details
             AnimatedVisibility(visible = isExpanded) {
                 Column {
-                    // Reasons for Entry
                     Text(
                         text = "Confluence Reasoning:",
-                        style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     )
                     signal.reasonsForEntry.forEach { reason ->
                         Text(
                             text = "• $reason",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 15.sp)
                         )
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Invalidation Rule
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(6.dp))
-                            .background(BearishRedBg.copy(alpha = 0.5f))
+                            .background(colors.bearishRedBg.copy(alpha = 0.5f))
                             .padding(8.dp)
                     ) {
                         Row(verticalAlignment = Alignment.Top) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = BearishRed, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = colors.bearishRed, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Invalidation Rule: ${signal.invalidationCondition}",
-                                style = MaterialTheme.typography.bodySmall.copy(color = BearishRed, fontSize = 10.sp, lineHeight = 14.sp)
+                                style = MaterialTheme.typography.bodySmall.copy(color = colors.bearishRed, fontSize = 10.sp, lineHeight = 14.sp)
                             )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // TP Tiers breakdown
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("TP1 (40%): ${signal.tp1Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
-                        Text("TP2 (35%): ${signal.tp2Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
-                        Text("TP3 (25%): ${signal.tp3Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontSize = 10.sp))
+                        Text("TP1 (40%): ${signal.tp1Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = colors.bullishGreen, fontSize = 10.sp))
+                        Text("TP2 (35%): ${signal.tp2Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = colors.bullishGreen, fontSize = 10.sp))
+                        Text("TP3 (25%): ${signal.tp3Formatted}", style = MaterialTheme.typography.labelSmall.copy(color = colors.bullishGreen, fontSize = 10.sp))
                     }
 
-                    // Pre-Entry Exit Planner section
                     signal.exitPlan?.let { plan ->
                         Spacer(modifier = Modifier.height(8.dp))
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(NavySurface)
-                                .border(1.dp, NavyBorder, RoundedCornerShape(8.dp))
+                                .background(colors.surface)
+                                .border(1.dp, colors.border, RoundedCornerShape(8.dp))
                                 .padding(10.dp)
                                 .testTag("exit_planner_card_${signal.symbol}")
                         ) {
                             Text(
                                 text = "PRE-ENTRY EXIT PLANNER",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
@@ -702,23 +656,23 @@ fun FuturesSignalCard(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "Stop Basis: ${plan.invalidationBasis} (ATR Ref: ${String.format(Locale.US, "$%.2f", plan.atrBasedStopLevel)})",
-                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp)
+                                style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 10.sp)
                             )
                             Text(
                                 text = "Setup Expiry (PKT): ${plan.expiryDeadlinePkt}",
-                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp)
+                                style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 10.sp)
                             )
                             plan.calculationAssumptions.take(3).forEach { assumption ->
                                 Text(
                                     text = "• $assumption",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 9.sp, lineHeight = 13.sp)
+                                    style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 9.sp, lineHeight = 13.sp)
                                 )
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "⚠️ ${plan.stopOrderDisclaimer}",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = BearishRed,
+                                    color = colors.bearishRed,
                                     fontSize = 9.sp,
                                     lineHeight = 13.sp
                                 )
@@ -730,7 +684,6 @@ fun FuturesSignalCard(
                 }
             }
 
-            // Bottom Action Bar: Toggle Details, Explain with AI, Copy, Paper Trade
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -746,7 +699,7 @@ fun FuturesSignalCard(
                     Text(
                         text = if (isExpanded) "Hide Details ▲" else "View Details ▼",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
@@ -755,38 +708,38 @@ fun FuturesSignalCard(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onCopyLevels, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Levels", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Levels", tint = colors.textSecondary, modifier = Modifier.size(18.dp))
                     }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(BullishGreen.copy(alpha = 0.16f))
-                            .border(1.dp, BullishGreen.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                            .background(colors.bullishGreen.copy(alpha = 0.16f))
+                            .border(1.dp, colors.bullishGreen.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
                             .clickable { onOpenWorkflow() }
                             .padding(horizontal = 10.dp, vertical = 10.dp)
                             .testTag("workflow_btn_${signal.symbol}"),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Security, contentDescription = "Open Trade Workflow for ${signal.symbol}", tint = BullishGreen, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Security, contentDescription = "Open Trade Workflow for ${signal.symbol}", tint = colors.bullishGreen, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Workflow", style = MaterialTheme.typography.labelSmall.copy(color = BullishGreen, fontWeight = FontWeight.Bold, fontSize = 11.sp))
+                            Text("Workflow", style = MaterialTheme.typography.labelSmall.copy(color = colors.bullishGreen, fontWeight = FontWeight.Bold, fontSize = 11.sp))
                         }
                     }
                     Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(NexusGold.copy(alpha = 0.15f))
+                            .background(colors.gold.copy(alpha = 0.15f))
                             .clickable { onExplainClick() }
                             .padding(horizontal = 10.dp, vertical = 10.dp)
                             .testTag("ask_ai_signal_${signal.symbol}"),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = "Ask AI about ${signal.symbol}", tint = NexusGold, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Ask AI about ${signal.symbol}", tint = colors.gold, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Ask AI", style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold, fontSize = 11.sp))
+                            Text("Ask AI", style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold, fontSize = 11.sp))
                         }
                     }
                 }
@@ -803,20 +756,21 @@ fun FuturesWatchlistManagerSection(
     onRemovePair: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     var newPairInput by remember { mutableStateOf("") }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .border(1.dp, NavyBorder, RoundedCornerShape(14.dp)),
-        colors = CardDefaults.cardColors(containerColor = NavyCard)
+            .border(1.dp, colors.border, RoundedCornerShape(14.dp)),
+        colors = CardDefaults.cardColors(containerColor = colors.card)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "SELECTED SCANNER WATCHLIST",
                 style = MaterialTheme.typography.labelSmall.copy(
-                    color = NexusGold,
+                    color = colors.gold,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.1.sp
                 )
@@ -824,21 +778,20 @@ fun FuturesWatchlistManagerSection(
             Text(
                 text = "USDT-M Futures Coins to Scan",
                 style = MaterialTheme.typography.titleMedium.copy(
-                    color = TextPrimary,
+                    color = colors.textPrimary,
                     fontWeight = FontWeight.Bold
                 )
             )
             Text(
                 text = "The scanner will ONLY fetch and analyze candles for coins enabled below to optimize speed and battery.",
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = TextMuted,
+                    color = colors.textMuted,
                     fontSize = 11.sp
                 )
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Add Custom Pair Field
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -846,14 +799,14 @@ fun FuturesWatchlistManagerSection(
                 OutlinedTextField(
                     value = newPairInput,
                     onValueChange = { newPairInput = it },
-                    placeholder = { Text("e.g. SUI, NEAR, PEPE", color = TextMuted, fontSize = 12.sp) },
+                    placeholder = { Text("e.g. SUI, NEAR, PEPE", color = colors.textMuted, fontSize = 12.sp) },
                     modifier = Modifier.weight(1f).height(48.dp),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NexusGold,
-                        unfocusedBorderColor = NavyBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
+                        focusedBorderColor = colors.gold,
+                        unfocusedBorderColor = colors.border,
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -864,25 +817,24 @@ fun FuturesWatchlistManagerSection(
                             newPairInput = ""
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = NexusGold),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.gold),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.height(48.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = NavyBackground, modifier = Modifier.size(16.dp))
-                    Text("Add", color = NavyBackground, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Icon(Icons.Default.Add, contentDescription = null, tint = colors.onGold, modifier = Modifier.size(16.dp))
+                    Text("Add", color = colors.onGold, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Watchlist Grid
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 watchlist.forEach { pair ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(NavySurface)
+                            .background(colors.surface)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -893,10 +845,10 @@ fun FuturesWatchlistManagerSection(
                                 onCheckedChange = { onToggleScanning(pair.symbol) },
                                 modifier = Modifier.size(20.dp),
                                 colors = SwitchDefaults.colors(
-                                    checkedThumbColor = BullishGreen,
-                                    checkedTrackColor = BullishGreenBg,
-                                    uncheckedThumbColor = TextMuted,
-                                    uncheckedTrackColor = NavySurfaceVariant
+                                    checkedThumbColor = colors.bullishGreen,
+                                    checkedTrackColor = colors.bullishGreenBg,
+                                    uncheckedThumbColor = colors.textMuted,
+                                    uncheckedTrackColor = colors.surfaceVariant
                                 )
                             )
                             Spacer(modifier = Modifier.width(10.dp))
@@ -904,13 +856,13 @@ fun FuturesWatchlistManagerSection(
                                 Text(
                                     text = pair.symbol,
                                     style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = if (pair.isSelectedForScanning) TextPrimary else TextMuted,
+                                        color = if (pair.isSelectedForScanning) colors.textPrimary else colors.textMuted,
                                         fontWeight = FontWeight.Bold
                                     )
                                 )
                                 Text(
                                     text = pair.displayName,
-                                    style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp)
+                                    style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp)
                                 )
                             }
                         }
@@ -920,13 +872,13 @@ fun FuturesWatchlistManagerSection(
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         text = "$${String.format(Locale.US, "%.2f", pair.currentPrice)}",
-                                        style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Medium)
+                                        style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary, fontWeight = FontWeight.Medium)
                                     )
                                     pair.fundingRatePercent?.let { fr ->
                                         Text(
                                             text = "FR: ${String.format(Locale.US, "%.4f%%", fr)}",
                                             style = MaterialTheme.typography.labelSmall.copy(
-                                                color = if (fr >= 0) BullishGreen else BearishRed,
+                                                color = if (fr >= 0) colors.bullishGreen else colors.bearishRed,
                                                 fontSize = 9.sp
                                             )
                                         )
@@ -935,7 +887,7 @@ fun FuturesWatchlistManagerSection(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(onClick = { onRemovePair(pair.symbol) }, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Remove", tint = TextMuted, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Default.Close, contentDescription = "Remove", tint = colors.textMuted, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
@@ -951,24 +903,24 @@ fun FuturesSignalHistoryTab(
     statistics: ScannerStatistics,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     Column(modifier = modifier.fillMaxWidth()) {
-        // Detailed Performance Cards
         Card(
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)),
-            colors = CardDefaults.cardColors(containerColor = NavyCard)
+            colors = CardDefaults.cardColors(containerColor = colors.card)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = "HISTORICAL SCANNER PERFORMANCE",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.1.sp
                     )
                 )
                 Text(
                     text = "Verified Outcome Statistics",
-                    style = MaterialTheme.typography.titleMedium.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.titleMedium.copy(color = colors.textPrimary, fontWeight = FontWeight.Bold)
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -977,11 +929,11 @@ fun FuturesSignalHistoryTab(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    StatChip(label = "Total Scanned", value = "${statistics.totalSignalsScanned}", color = TextPrimary)
-                    StatChip(label = "TP1 Hits", value = "${statistics.tp1HitsCount}", color = BullishGreen)
-                    StatChip(label = "TP2 Hits", value = "${statistics.tp2HitsCount}", color = BullishGreen)
-                    StatChip(label = "TP3 Hits", value = "${statistics.tp3HitsCount}", color = BullishGreen)
-                    StatChip(label = "Stop Loss", value = "${statistics.stopLossHitsCount}", color = BearishRed)
+                    StatChip(label = "Total Scanned", value = "${statistics.totalSignalsScanned}", color = colors.textPrimary)
+                    StatChip(label = "TP1 Hits", value = "${statistics.tp1HitsCount}", color = colors.bullishGreen)
+                    StatChip(label = "TP2 Hits", value = "${statistics.tp2HitsCount}", color = colors.bullishGreen)
+                    StatChip(label = "TP3 Hits", value = "${statistics.tp3HitsCount}", color = colors.bullishGreen)
+                    StatChip(label = "Stop Loss", value = "${statistics.stopLossHitsCount}", color = colors.bearishRed)
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -990,28 +942,28 @@ fun FuturesSignalHistoryTab(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurface)
+                        .background(colors.surface)
                         .padding(10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("Win Rate (Closed Trades)", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                        Text("Win Rate (Closed Trades)", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                         Text(
                             text = if (statistics.winRatePercent > 0) String.format(Locale.US, "%.1f%%", statistics.winRatePercent) else "0.0%",
                             style = MaterialTheme.typography.titleMedium.copy(
-                                color = if (statistics.winRatePercent >= 50) BullishGreen else NexusGold,
+                                color = if (statistics.winRatePercent >= 50) colors.bullishGreen else colors.gold,
                                 fontWeight = FontWeight.Bold
                             )
                         )
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Paper Trading Net PnL", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                        Text("Paper Trading Net PnL", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                         Text(
                             text = String.format(Locale.US, "%+.2f%%", statistics.paperTradingNetPnlPercent),
                             style = MaterialTheme.typography.titleMedium.copy(
-                                color = if (statistics.paperTradingNetPnlPercent >= 0) BullishGreen else BearishRed,
+                                color = if (statistics.paperTradingNetPnlPercent >= 0) colors.bullishGreen else colors.bearishRed,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -1022,7 +974,6 @@ fun FuturesSignalHistoryTab(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // History Log
         if (history.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -1032,7 +983,7 @@ fun FuturesSignalHistoryTab(
             ) {
                 Text(
                     text = "No closed signals yet. Active signals will appear here as targets or stop losses are reached.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, textAlign = TextAlign.Center)
+                    style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, textAlign = TextAlign.Center)
                 )
             }
         } else {
@@ -1042,19 +993,19 @@ fun FuturesSignalHistoryTab(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(NavyCard)
-                            .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                            .background(colors.card)
+                            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                             .padding(12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(sig.symbol, style = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary, fontWeight = FontWeight.Bold))
+                                Text(sig.symbol, style = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary, fontWeight = FontWeight.Bold))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(sig.direction.name, style = MaterialTheme.typography.labelSmall.copy(color = if (sig.direction == FuturesDirection.LONG) BullishGreen else BearishRed, fontWeight = FontWeight.Bold))
+                                Text(sig.direction.name, style = MaterialTheme.typography.labelSmall.copy(color = if (sig.direction == FuturesDirection.LONG) colors.bullishGreen else colors.bearishRed, fontWeight = FontWeight.Bold))
                             }
-                            Text(sig.formattedTimestamp, style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                            Text(sig.formattedTimestamp, style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
@@ -1066,7 +1017,7 @@ fun FuturesSignalHistoryTab(
                                 )
                             )
                             sig.outcomeSummary?.let { outcome ->
-                                Text(outcome, style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
+                                Text(outcome, style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary, fontSize = 10.sp))
                             }
                         }
                     }

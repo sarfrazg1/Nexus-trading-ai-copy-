@@ -634,7 +634,21 @@ fun NexusTradingApp(
                         activeAlertRulesCount = uiState.tradeWorkflowState.tradeAlertRules.count { it.isActive },
                         highRewardScanState = uiState.highRewardScanState,
                         onScanHighRewardNow = { viewModel.scanHighRewardOpportunitiesNow() },
-                        onInspectHighRewardOpportunity = { opp -> viewModel.openHighRewardDetail(opp) }
+                        onInspectHighRewardOpportunity = { opp -> viewModel.openHighRewardDetail(opp) },
+                        multiMarketStrictEvaluations = uiState.multiMarketStrictEvaluations,
+                        isScanningMultiMarketStrict = uiState.isScanningMultiMarketStrict,
+                        multiMarketSetupBacktestSummary = uiState.multiMarketSetupBacktestSummary,
+                        onScanMultiMarketStrict = { viewModel.runMultiMarketStrictScan() },
+                        onRunStrictSetupBacktest = { sym, type, dir ->
+                            viewModel.runStrictSetupTimeMachineBacktest(sym, type, dir)
+                        },
+                        rankedMultiMarketBoard = uiState.rankedMultiMarketBoard,
+                        multiMarketSetupDirectionalReport = uiState.multiMarketSetupDirectionalReport,
+                        managedSignals = uiState.managedSignals,
+                        signalTransitionLog = uiState.signalTransitionLog,
+                        budgetConfig = uiState.budgetConfig,
+                        dailyRiskLedger = uiState.dailyRiskLedger,
+                        onUpdateBudgetConfig = { cfg -> viewModel.updateWorkflowBudgetConfig(cfg) }
                     )
                 }
 

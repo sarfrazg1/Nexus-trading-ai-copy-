@@ -67,19 +67,8 @@ import com.example.data.indicators.IndicatorStance
 import com.example.data.indicators.OverallAnalysisResult
 import com.example.data.model.Candle
 import com.example.data.model.CandleTimeframe
-import com.example.ui.theme.CandleGreen
-import com.example.ui.theme.CandleRed
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurface
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.NexusNeonGreen
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
 import com.example.data.smc.SmcAnalysisResult
+import com.example.ui.theme.NexusTheme
 import com.example.ui.viewmodel.AnalysisMode
 import com.example.ui.viewmodel.SmcCategoryTab
 import java.util.Locale
@@ -109,15 +98,17 @@ fun TechnicalAnalysisScreen(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val supportedSymbols = listOf(
         "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "LINK", "AVAX", "SUI",
-        "XAU", "XAG", "WTI", "BRENT", "NATGAS"
+        "XAU", "XAG", "WTI", "BRENT", "NATGAS",
+        "NVDA", "GOOG", "GOOGL"
     )
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(NavyBackground)
+            .background(colors.background)
             .testTag("technical_analysis_screen"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -134,13 +125,13 @@ fun TechnicalAnalysisScreen(
                         onClick = onBackClick,
                         modifier = Modifier
                             .size(38.dp)
-                            .background(NavySurface, CircleShape)
-                            .border(1.dp, NavyBorder, CircleShape)
+                            .background(colors.surface, CircleShape)
+                            .border(1.dp, colors.border, CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Back",
-                            tint = TextPrimary,
+                            tint = colors.textPrimary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -151,26 +142,26 @@ fun TechnicalAnalysisScreen(
                                 text = "TECHNICAL ENGINE",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Black,
-                                color = TextPrimary
+                                color = colors.textPrimary
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Box(
                                 modifier = Modifier
-                                    .background(NexusGold.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                    .background(colors.gold.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "22 INDICATORS",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = NexusGold
+                                    color = colors.gold
                                 )
                             }
                         }
                         Text(
                             text = "Real OHLCV mathematical models",
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextMuted
+                            color = colors.textMuted
                         )
                     }
                 }
@@ -179,7 +170,7 @@ fun TechnicalAnalysisScreen(
                     if (isLoading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
-                            color = NexusGold,
+                            color = colors.gold,
                             strokeWidth = 2.5.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -188,13 +179,13 @@ fun TechnicalAnalysisScreen(
                         onClick = onRefresh,
                         modifier = Modifier
                             .size(38.dp)
-                            .background(NavySurface, CircleShape)
-                            .border(1.dp, NavyBorder, CircleShape)
+                            .background(colors.surface, CircleShape)
+                            .border(1.dp, colors.border, CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh Indicators",
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -209,7 +200,7 @@ fun TechnicalAnalysisScreen(
                     text = "SELECT ASSET",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
+                    color = colors.textSecondary,
                     letterSpacing = 1.sp
                 )
                 LazyRow(
@@ -223,12 +214,12 @@ fun TechnicalAnalysisScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(
-                                    if (isSelected) NexusGold.copy(alpha = 0.2f)
-                                    else NavySurface
+                                    if (isSelected) colors.gold.copy(alpha = 0.2f)
+                                    else colors.surface
                                 )
                                 .border(
                                     width = 1.dp,
-                                    color = if (isSelected) NexusGold else NavyBorder,
+                                    color = if (isSelected) colors.gold else colors.border,
                                     shape = RoundedCornerShape(8.dp)
                                 )
                                 .clickable { onSymbolSelected(sym) }
@@ -239,7 +230,7 @@ fun TechnicalAnalysisScreen(
                                     Box(
                                         modifier = Modifier
                                             .size(6.dp)
-                                            .background(NexusGold, CircleShape)
+                                            .background(colors.gold, CircleShape)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                 }
@@ -247,7 +238,7 @@ fun TechnicalAnalysisScreen(
                                     text = sym,
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) NexusGold else TextPrimary
+                                    color = if (isSelected) colors.gold else colors.textPrimary
                                 )
                             }
                         }
@@ -268,13 +259,13 @@ fun TechnicalAnalysisScreen(
                         text = "TIMEFRAME (12 SUPPORTED)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
+                        color = colors.textSecondary,
                         letterSpacing = 1.sp
                     )
                     Text(
                         text = selectedTimeframe.displayName,
                         fontSize = 11.sp,
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -289,8 +280,8 @@ fun TechnicalAnalysisScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(
-                                    if (isSelected) NexusGold
-                                    else NavySurfaceVariant.copy(alpha = 0.7f)
+                                    if (isSelected) colors.gold
+                                    else colors.surfaceVariant.copy(alpha = 0.7f)
                                 )
                                 .clickable { onTimeframeSelected(tf) }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -299,7 +290,7 @@ fun TechnicalAnalysisScreen(
                                 text = tf.label,
                                 fontSize = 12.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) NavyBackground else TextPrimary
+                                color = if (isSelected) colors.onGold else colors.textPrimary
                             )
                         }
                     }
@@ -312,8 +303,8 @@ fun TechnicalAnalysisScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(NavySurface, RoundedCornerShape(10.dp))
-                    .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                    .background(colors.surface, RoundedCornerShape(10.dp))
+                    .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -321,7 +312,7 @@ fun TechnicalAnalysisScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (analysisMode == AnalysisMode.SMC_FIBONACCI) NexusGold else Color.Transparent)
+                        .background(if (analysisMode == AnalysisMode.SMC_FIBONACCI) colors.gold else Color.Transparent)
                         .clickable { onAnalysisModeChange(AnalysisMode.SMC_FIBONACCI) }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
@@ -330,7 +321,7 @@ fun TechnicalAnalysisScreen(
                         Icon(
                             imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint = if (analysisMode == AnalysisMode.SMC_FIBONACCI) NavyBackground else NexusGold,
+                            tint = if (analysisMode == AnalysisMode.SMC_FIBONACCI) colors.onGold else colors.gold,
                             modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -338,7 +329,7 @@ fun TechnicalAnalysisScreen(
                             text = "SMART MONEY & FIB",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Black,
-                            color = if (analysisMode == AnalysisMode.SMC_FIBONACCI) NavyBackground else TextPrimary
+                            color = if (analysisMode == AnalysisMode.SMC_FIBONACCI) colors.onGold else colors.textPrimary
                         )
                     }
                 }
@@ -347,7 +338,7 @@ fun TechnicalAnalysisScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (analysisMode == AnalysisMode.INDICATORS) NexusGold else Color.Transparent)
+                        .background(if (analysisMode == AnalysisMode.INDICATORS) colors.gold else Color.Transparent)
                         .clickable { onAnalysisModeChange(AnalysisMode.INDICATORS) }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
@@ -356,7 +347,7 @@ fun TechnicalAnalysisScreen(
                         Icon(
                             imageVector = Icons.Default.Timeline,
                             contentDescription = null,
-                            tint = if (analysisMode == AnalysisMode.INDICATORS) NavyBackground else NexusGold,
+                            tint = if (analysisMode == AnalysisMode.INDICATORS) colors.onGold else colors.gold,
                             modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -364,7 +355,7 @@ fun TechnicalAnalysisScreen(
                             text = "22 INDICATORS",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Black,
-                            color = if (analysisMode == AnalysisMode.INDICATORS) NavyBackground else TextPrimary
+                            color = if (analysisMode == AnalysisMode.INDICATORS) colors.onGold else colors.textPrimary
                         )
                     }
                 }
@@ -375,18 +366,18 @@ fun TechnicalAnalysisScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = NavySurface),
-                    border = BorderStroke(1.dp, CandleRed.copy(alpha = 0.5f))
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                    border = BorderStroke(1.dp, colors.bearishRed.copy(alpha = 0.5f))
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = CandleRed)
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = colors.bearishRed)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text("Data Feed Alert", fontWeight = FontWeight.Bold, color = CandleRed)
-                            Text(errorMessage, fontSize = 12.sp, color = TextSecondary)
+                            Text("Data Feed Alert", fontWeight = FontWeight.Bold, color = colors.bearishRed)
+                            Text(errorMessage, fontSize = 12.sp, color = colors.textSecondary)
                         }
                     }
                 }
@@ -418,8 +409,8 @@ fun TechnicalAnalysisScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(if (isSelected) NexusGold else NavySurface)
-                                .border(1.dp, if (isSelected) NexusGold else NavyBorder, RoundedCornerShape(20.dp))
+                                .background(if (isSelected) colors.gold else colors.surface)
+                                .border(1.dp, if (isSelected) colors.gold else colors.border, RoundedCornerShape(20.dp))
                                 .clickable { onSmcTabChange(tab) }
                                 .padding(horizontal = 14.dp, vertical = 6.dp)
                         ) {
@@ -427,7 +418,7 @@ fun TechnicalAnalysisScreen(
                                 text = tab.label,
                                 fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) NavyBackground else TextSecondary
+                                color = if (isSelected) colors.onGold else colors.textSecondary
                             )
                         }
                     }
@@ -503,12 +494,12 @@ fun TechnicalAnalysisScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = NexusGold)
+                            CircularProgressIndicator(color = colors.gold)
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "Analyzing Smart Money Concepts, Liquidity & Fibonacci levels...",
                                 fontSize = 12.sp,
-                                color = TextSecondary
+                                color = colors.textSecondary
                             )
                         }
                     }
@@ -549,22 +540,22 @@ fun TechnicalAnalysisScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(NexusGold.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-                                    .border(1.dp, NexusGold.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                    .background(colors.gold.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, colors.gold.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
                                         imageVector = Icons.Default.Info,
                                         contentDescription = null,
-                                        tint = NexusGold,
+                                        tint = colors.gold,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = warn,
                                         fontSize = 11.sp,
-                                        color = NexusGold,
+                                        color = colors.gold,
                                         lineHeight = 15.sp
                                     )
                                 }
@@ -591,12 +582,12 @@ fun TechnicalAnalysisScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(
-                                    if (isSelected) NexusGold.copy(alpha = 0.2f)
-                                    else NavySurface
+                                    if (isSelected) colors.gold.copy(alpha = 0.2f)
+                                    else colors.surface
                                 )
                                 .border(
                                     width = 1.dp,
-                                    color = if (isSelected) NexusGold else NavyBorder,
+                                    color = if (isSelected) colors.gold else colors.border,
                                     shape = RoundedCornerShape(20.dp)
                                 )
                                 .clickable { onCategorySelected(cat) }
@@ -606,7 +597,7 @@ fun TechnicalAnalysisScreen(
                                 text = "${cat.label} ($count)",
                                 fontSize = 12.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) NexusGold else TextSecondary
+                                color = if (isSelected) colors.gold else colors.textSecondary
                             )
                         }
                     }
@@ -633,12 +624,12 @@ fun TechnicalAnalysisScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = NexusGold)
+                            CircularProgressIndicator(color = colors.gold)
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "Streaming historical candles & computing 22 indicators...",
                                 fontSize = 12.sp,
-                                color = TextSecondary
+                                color = colors.textSecondary
                             )
                         }
                     }
@@ -650,15 +641,15 @@ fun TechnicalAnalysisScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = NavySurface.copy(alpha = 0.5f)),
-                border = BorderStroke(1.dp, NavyBorder.copy(alpha = 0.4f))
+                colors = CardDefaults.cardColors(containerColor = colors.surface.copy(alpha = 0.5f)),
+                border = BorderStroke(1.dp, colors.border.copy(alpha = 0.4f))
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -666,14 +657,14 @@ fun TechnicalAnalysisScreen(
                             text = "NEXUS MATHEMATICAL INTEGRITY",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = colors.textPrimary
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "All indicators are strictly calculated from real exchange OHLCV candle feeds on background worker threads. No simulated prices or mock values are ever presented.",
                         fontSize = 11.sp,
-                        color = TextMuted,
+                        color = colors.textMuted,
                         lineHeight = 15.sp
                     )
                 }
@@ -692,10 +683,11 @@ fun SentimentOverviewCard(
     onSetAlert: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = BorderStroke(1.dp, NavyBorder),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = BorderStroke(1.dp, colors.border),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -711,14 +703,14 @@ fun SentimentOverviewCard(
                             text = analysis.symbol,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black,
-                            color = TextPrimary
+                            color = colors.textPrimary
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "(${analysis.timeframe.label})",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = NexusGold
+                            color = colors.gold
                         )
                     }
                     Text(
@@ -726,13 +718,13 @@ fun SentimentOverviewCard(
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Black,
                         fontFamily = FontFamily.Monospace,
-                        color = TextPrimary
+                        color = colors.textPrimary
                     )
                     Text(
                         text = "${if (analysis.priceChangePercent >= 0) "+" else ""}${String.format(Locale.US, "%.2f", analysis.priceChangePercent)}% last candle",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (analysis.priceChangePercent >= 0) CandleGreen else CandleRed
+                        color = if (analysis.priceChangePercent >= 0) colors.bullishGreen else colors.bearishRed
                     )
                 }
 
@@ -742,7 +734,7 @@ fun SentimentOverviewCard(
                     Text(
                         text = "${analysis.candleCount} candles analyzed",
                         fontSize = 10.sp,
-                        color = TextMuted
+                        color = colors.textMuted
                     )
                 }
             }
@@ -764,19 +756,19 @@ fun SentimentOverviewCard(
                         text = "Bullish: ${analysis.bullishCount}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = CandleGreen
+                        color = colors.bullishGreen
                     )
                     Text(
                         text = "Neutral: ${analysis.neutralCount}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        color = NexusGold
+                        color = colors.gold
                     )
                     Text(
                         text = "Bearish: ${analysis.bearishCount}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = CandleRed
+                        color = colors.bearishRed
                     )
                 }
 
@@ -786,14 +778,14 @@ fun SentimentOverviewCard(
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(NavySurface)
+                        .background(colors.surface)
                 ) {
                     if (bullRatio > 0f) {
                         Box(
                             modifier = Modifier
                                 .weight(bullRatio.coerceAtLeast(0.01f))
                                 .height(8.dp)
-                                .background(CandleGreen)
+                                .background(colors.bullishGreen)
                         )
                     }
                     if (neuRatio > 0f) {
@@ -801,7 +793,7 @@ fun SentimentOverviewCard(
                             modifier = Modifier
                                 .weight(neuRatio.coerceAtLeast(0.01f))
                                 .height(8.dp)
-                                .background(NexusGold)
+                                .background(colors.gold)
                         )
                     }
                     if (bearRatio > 0f) {
@@ -809,7 +801,7 @@ fun SentimentOverviewCard(
                             modifier = Modifier
                                 .weight(bearRatio.coerceAtLeast(0.01f))
                                 .height(8.dp)
-                                .background(CandleRed)
+                                .background(colors.bearishRed)
                         )
                     }
                 }
@@ -821,7 +813,7 @@ fun SentimentOverviewCard(
             Text(
                 text = analysis.summaryText,
                 fontSize = 12.sp,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 lineHeight = 16.sp
             )
 
@@ -833,19 +825,19 @@ fun SentimentOverviewCard(
                     .fillMaxWidth()
                     .height(38.dp),
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, NexusGold.copy(alpha = 0.6f))
+                border = BorderStroke(1.dp, colors.gold.copy(alpha = 0.6f))
             ) {
                 Icon(
                     imageVector = Icons.Default.AddAlert,
                     contentDescription = null,
-                    tint = NexusGold,
+                    tint = colors.gold,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "Set Price Alert at $${String.format(Locale.US, "%,.2f", analysis.currentClose)}",
                     fontSize = 12.sp,
-                    color = NexusGold,
+                    color = colors.gold,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -864,10 +856,14 @@ fun CandlestickPreviewCard(
     timeframe: CandleTimeframe,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
+    val bullColor = colors.bullishGreen
+    val bearColor = colors.bearishRed
+
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = NavySurface),
-        border = BorderStroke(1.dp, NavyBorder),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+        border = BorderStroke(1.dp, colors.border),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -880,7 +876,7 @@ fun CandlestickPreviewCard(
                     Icon(
                         imageVector = Icons.Default.Timeline,
                         contentDescription = null,
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -888,7 +884,7 @@ fun CandlestickPreviewCard(
                         text = "PRICE ACTION (${candles.takeLast(30).size} CANDLES)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = colors.textPrimary
                     )
                 }
 
@@ -898,7 +894,7 @@ fun CandlestickPreviewCard(
                 Text(
                     text = "H: $${String.format(Locale.US, "%.1f", highest)}  L: $${String.format(Locale.US, "%.1f", lowest)}",
                     fontSize = 10.sp,
-                    color = TextMuted,
+                    color = colors.textMuted,
                     fontFamily = FontFamily.Monospace
                 )
             }
@@ -911,7 +907,7 @@ fun CandlestickPreviewCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(90.dp)
-                    .background(NavyBackground, RoundedCornerShape(6.dp))
+                    .background(colors.background, RoundedCornerShape(6.dp))
                     .padding(vertical = 4.dp, horizontal = 6.dp)
             ) {
                 if (displayCandles.isEmpty()) return@Canvas
@@ -933,7 +929,7 @@ fun CandlestickPreviewCard(
                     val yClose = size.height - (((c.close - minP) / priceRange) * size.height).toFloat()
 
                     val isBull = c.close >= c.open
-                    val candleColor = if (isBull) CandleGreen else CandleRed
+                    val candleColor = if (isBull) bullColor else bearColor
 
                     // Draw wick
                     drawLine(
@@ -966,12 +962,13 @@ fun IndicatorItemCard(
     card: IndicatorCardItem,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = modifier
             .fillMaxWidth()
             .testTag("indicator_card_${card.id}"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = BorderStroke(1.dp, NavyBorder),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = BorderStroke(1.dp, colors.border),
         shape = RoundedCornerShape(10.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -985,12 +982,12 @@ fun IndicatorItemCard(
                         text = card.name,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = colors.textPrimary
                     )
                     Text(
                         text = card.category.label,
                         fontSize = 10.sp,
-                        color = TextMuted
+                        color = colors.textMuted
                     )
                 }
 
@@ -1010,7 +1007,7 @@ fun IndicatorItemCard(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace,
-                    color = if (card.isAvailable) TextPrimary else TextMuted
+                    color = if (card.isAvailable) colors.textPrimary else colors.textMuted
                 )
 
                 card.secondaryValue?.let { sec ->
@@ -1019,11 +1016,11 @@ fun IndicatorItemCard(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = when (card.stance) {
-                            IndicatorStance.STRONG_BULLISH, IndicatorStance.BULLISH -> CandleGreen
-                            IndicatorStance.STRONG_BEARISH, IndicatorStance.BEARISH -> CandleRed
-                            IndicatorStance.OVERBOUGHT -> Color(0xFFFF8A65)
-                            IndicatorStance.OVERSOLD -> Color(0xFF81D4FA)
-                            else -> TextSecondary
+                            IndicatorStance.STRONG_BULLISH, IndicatorStance.BULLISH -> colors.bullishGreen
+                            IndicatorStance.STRONG_BEARISH, IndicatorStance.BEARISH -> colors.bearishRed
+                            IndicatorStance.OVERBOUGHT -> colors.warningOrange
+                            IndicatorStance.OVERSOLD -> colors.neutralCyan
+                            else -> colors.textSecondary
                         }
                     )
                 }
@@ -1035,13 +1032,13 @@ fun IndicatorItemCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(NavyBackground, RoundedCornerShape(6.dp))
+                    .background(colors.background, RoundedCornerShape(6.dp))
                     .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
                 Text(
                     text = card.interpretation,
                     fontSize = 11.sp,
-                    color = TextSecondary,
+                    color = colors.textSecondary,
                     lineHeight = 15.sp
                 )
             }
@@ -1052,7 +1049,7 @@ fun IndicatorItemCard(
             Text(
                 text = card.formulaInfo,
                 fontSize = 9.sp,
-                color = TextMuted,
+                color = colors.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1069,15 +1066,16 @@ fun StanceBadge(
     stance: IndicatorStance,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val (bg, fg, label) = when (stance) {
-        IndicatorStance.STRONG_BULLISH -> Triple(CandleGreen.copy(alpha = 0.2f), CandleGreen, "STRONG BUY")
-        IndicatorStance.BULLISH -> Triple(CandleGreen.copy(alpha = 0.15f), CandleGreen, "BULLISH")
-        IndicatorStance.STRONG_BEARISH -> Triple(CandleRed.copy(alpha = 0.2f), CandleRed, "STRONG SELL")
-        IndicatorStance.BEARISH -> Triple(CandleRed.copy(alpha = 0.15f), CandleRed, "BEARISH")
-        IndicatorStance.OVERBOUGHT -> Triple(Color(0xFFFF7043).copy(alpha = 0.2f), Color(0xFFFF8A65), "OVERBOUGHT")
-        IndicatorStance.OVERSOLD -> Triple(Color(0xFF29B6F6).copy(alpha = 0.2f), Color(0xFF81D4FA), "OVERSOLD")
-        IndicatorStance.NEUTRAL -> Triple(NexusGold.copy(alpha = 0.15f), NexusGold, "NEUTRAL")
-        IndicatorStance.INSUFFICIENT_DATA -> Triple(Color.Gray.copy(alpha = 0.15f), Color.LightGray, "NEED DATA")
+        IndicatorStance.STRONG_BULLISH -> Triple(colors.bullishGreen.copy(alpha = 0.2f), colors.bullishGreen, "STRONG BUY")
+        IndicatorStance.BULLISH -> Triple(colors.bullishGreen.copy(alpha = 0.15f), colors.bullishGreen, "BULLISH")
+        IndicatorStance.STRONG_BEARISH -> Triple(colors.bearishRed.copy(alpha = 0.2f), colors.bearishRed, "STRONG SELL")
+        IndicatorStance.BEARISH -> Triple(colors.bearishRed.copy(alpha = 0.15f), colors.bearishRed, "BEARISH")
+        IndicatorStance.OVERBOUGHT -> Triple(colors.warningOrange.copy(alpha = 0.16f), colors.warningOrange, "OVERBOUGHT")
+        IndicatorStance.OVERSOLD -> Triple(colors.neutralCyan.copy(alpha = 0.16f), colors.neutralCyan, "OVERSOLD")
+        IndicatorStance.NEUTRAL -> Triple(colors.gold.copy(alpha = 0.15f), colors.gold, "NEUTRAL")
+        IndicatorStance.INSUFFICIENT_DATA -> Triple(colors.textMuted.copy(alpha = 0.15f), colors.textMuted, "NEED DATA")
     }
 
     Box(

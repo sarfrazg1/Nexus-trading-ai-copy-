@@ -49,15 +49,16 @@ object FuturesSymbolPrecisionRegistry {
 
 data class BudgetConfig(
     val accountBalanceUsdt: Double = 1000.0,
-    val maxRiskPerTradeAmount: Double = 20.0,
+    val maxRiskPerTradeAmount: Double = 10.0,
     val riskCurrency: RiskCurrency = RiskCurrency.USDT,
     val pkrPerUsdtRate: Double = 278.5,
-    val maxRiskPercent: Double = 2.0,
+    val maxRiskPercent: Double = 1.0,
     val leverageLimit: Int = 5,
     val feeRatePercentPerSide: Double = 0.05,
     val slippagePercentPerSide: Double = 0.03,
+    val dailyLossWarningPercent: Double = 3.0,
     val dailyLossLimitPercent: Double = 5.0,
-    val maxTradesPerDay: Int = 5,
+    val maxTradesPerDay: Int = 2,
     val minRiskRewardRatio: Double = 1.5,
     val maxOpenExposurePercentOfBalance: Double = 80.0
 )

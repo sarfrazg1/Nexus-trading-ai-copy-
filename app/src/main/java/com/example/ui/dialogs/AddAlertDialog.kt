@@ -39,14 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.AlertDirection
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavyHover
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun AddAlertDialog(
@@ -54,6 +47,7 @@ fun AddAlertDialog(
     onDismiss: () -> Unit,
     onConfirm: (symbol: String, name: String, targetPrice: Double, direction: AlertDirection, note: String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val supportedSymbols = listOf(
         "BTC/USDT" to "Bitcoin",
         "XAU/USD" to "Gold Spot",
@@ -75,8 +69,8 @@ fun AddAlertDialog(
                 .padding(16.dp)
                 .testTag("add_alert_dialog"),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = NavyCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+            colors = CardDefaults.cardColors(containerColor = colors.card),
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
         ) {
             Column(
                 modifier = Modifier
@@ -86,7 +80,7 @@ fun AddAlertDialog(
                 Text(
                     text = "CREATE PRICE ALERT",
                     style = MaterialTheme.typography.titleMedium.copy(
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
@@ -95,7 +89,7 @@ fun AddAlertDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Asset Selector Chips
-                Text("Select Asset", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+                Text("Select Asset", style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary))
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
@@ -108,7 +102,7 @@ fun AddAlertDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSel) NexusGold else NavySurfaceVariant)
+                                .background(if (isSel) colors.gold else colors.surfaceVariant)
                                 .clickable { selectedSymbol = sym }
                                 .padding(vertical = 6.dp),
                             contentAlignment = Alignment.Center
@@ -116,7 +110,7 @@ fun AddAlertDialog(
                             Text(
                                 text = sym.split("/")[0],
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = if (isSel) NavyCard else TextPrimary,
+                                    color = if (isSel) colors.onGold else colors.textPrimary,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp
                                 )
@@ -128,7 +122,7 @@ fun AddAlertDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Direction Toggle (Above or Below)
-                Text("Trigger Condition", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+                Text("Trigger Condition", style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary))
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
@@ -141,8 +135,8 @@ fun AddAlertDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSel) NavyHover else NavySurfaceVariant)
-                                .border(1.dp, if (isSel) NexusGold else Color.Transparent, RoundedCornerShape(8.dp))
+                                .background(if (isSel) colors.hover else colors.surfaceVariant)
+                                .border(1.dp, if (isSel) colors.gold else Color.Transparent, RoundedCornerShape(8.dp))
                                 .clickable { selectedDirection = dir }
                                 .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
@@ -150,7 +144,7 @@ fun AddAlertDialog(
                             Text(
                                 text = "${dir.symbol} ${dir.label}",
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = if (isSel) NexusGold else TextSecondary,
+                                    color = if (isSel) colors.gold else colors.textSecondary,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             )
@@ -173,12 +167,12 @@ fun AddAlertDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth().testTag("target_price_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NexusGold,
-                        unfocusedBorderColor = NavyBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedContainerColor = NavySurfaceVariant,
-                        unfocusedContainerColor = NavySurfaceVariant
+                        focusedBorderColor = colors.gold,
+                        unfocusedBorderColor = colors.border,
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary,
+                        focusedContainerColor = colors.surfaceVariant,
+                        unfocusedContainerColor = colors.surfaceVariant
                     )
                 )
 
@@ -193,12 +187,12 @@ fun AddAlertDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("alert_note_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NexusGold,
-                        unfocusedBorderColor = NavyBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedContainerColor = NavySurfaceVariant,
-                        unfocusedContainerColor = NavySurfaceVariant
+                        focusedBorderColor = colors.gold,
+                        unfocusedBorderColor = colors.border,
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary,
+                        focusedContainerColor = colors.surfaceVariant,
+                        unfocusedContainerColor = colors.surfaceVariant
                     )
                 )
 
@@ -206,7 +200,7 @@ fun AddAlertDialog(
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = errorMessage ?: "",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFFF5252), fontSize = 11.sp)
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.bearishRed, fontSize = 11.sp)
                     )
                 }
 
@@ -220,7 +214,7 @@ fun AddAlertDialog(
                     OutlinedButton(
                         onClick = onDismiss,
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textSecondary)
                     ) {
                         Text("Cancel")
                     }
@@ -239,7 +233,7 @@ fun AddAlertDialog(
                         },
                         modifier = Modifier.testTag("confirm_create_alert_btn"),
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = NexusGold, contentColor = NavyCard)
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.gold, contentColor = colors.onGold)
                     ) {
                         Text("Set Alert", fontWeight = FontWeight.Bold)
                     }

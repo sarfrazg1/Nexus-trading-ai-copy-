@@ -49,19 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MarketAsset
 import com.example.data.model.MarketDataStatus
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BearishRedBg
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.BullishGreenBg
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavyHover
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
-import com.example.ui.theme.WarningOrange
+import com.example.ui.theme.NexusTheme
 import java.util.Locale
 
 @Composable
@@ -73,11 +61,12 @@ fun PriceTickerCard(
     onToggleFavorite: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val borderColor = when (asset.dataStatus) {
-        MarketDataStatus.LIVE -> BullishGreen.copy(alpha = 0.4f)
-        MarketDataStatus.DELAYED -> NexusGold.copy(alpha = 0.4f)
-        MarketDataStatus.STALE -> WarningOrange.copy(alpha = 0.4f)
-        MarketDataStatus.UNAVAILABLE -> NavyBorder
+        MarketDataStatus.LIVE -> colors.bullishGreen.copy(alpha = 0.4f)
+        MarketDataStatus.DELAYED -> colors.gold.copy(alpha = 0.4f)
+        MarketDataStatus.STALE -> colors.warningOrange.copy(alpha = 0.4f)
+        MarketDataStatus.UNAVAILABLE -> colors.border
     }
 
     Card(
@@ -86,8 +75,8 @@ fun PriceTickerCard(
             .clickable(onClick = onCardClick)
             .testTag("price_card_${asset.id.lowercase()}"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = BorderStroke(1.dp, Brush.verticalGradient(listOf(borderColor, NavyBorder)))
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = BorderStroke(1.dp, Brush.verticalGradient(listOf(borderColor, colors.border)))
     ) {
         Column(
             modifier = Modifier
@@ -106,23 +95,19 @@ fun PriceTickerCard(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
-                            .background(NavySurfaceVariant)
-                            .border(1.dp, NavyBorder, CircleShape),
+                            .background(colors.surfaceVariant)
+                            .border(1.dp, colors.border, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = asset.id.take(3),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 color = when (asset.id) {
-                                    "BTC" -> NexusGold
-                                    "ETH" -> Color(0xFF8C9EFF)
-                                    "SOL" -> Color(0xFF00E5FF)
-                                    "BNB" -> NexusGold
-                                    "XAU" -> NexusGold
-                                    "XAG" -> Color(0xFFE2E8F0)
-                                    "WTI", "BRENT" -> Color(0xFFFF8A65)
-                                    "NATGAS" -> Color(0xFF80D8FF)
-                                    else -> TextPrimary
+                                    "BTC", "BNB", "XAU" -> colors.gold
+                                    "ETH", "SOL", "NATGAS" -> colors.neutralCyan
+                                    "XAG" -> colors.textSecondary
+                                    "WTI", "BRENT" -> colors.warningOrange
+                                    else -> colors.textPrimary
                                 },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
@@ -137,7 +122,7 @@ fun PriceTickerCard(
                             Text(
                                 text = asset.name,
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    color = TextPrimary,
+                                    color = colors.textPrimary,
                                     fontWeight = FontWeight.Bold
                                 )
                             )
@@ -145,7 +130,7 @@ fun PriceTickerCard(
                             Text(
                                 text = asset.symbol,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = TextMuted,
+                                    color = colors.textMuted,
                                     fontSize = 11.sp
                                 )
                             )
@@ -153,7 +138,7 @@ fun PriceTickerCard(
                         Text(
                             text = asset.category.label,
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = TextSecondary,
+                                color = colors.textSecondary,
                                 fontSize = 11.sp
                             )
                         )
@@ -169,7 +154,7 @@ fun PriceTickerCard(
                             Icon(
                                 imageVector = if (asset.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
                                 contentDescription = "Toggle Favorite",
-                                tint = if (asset.isFavorite) NexusGold else TextMuted,
+                                tint = if (asset.isFavorite) colors.gold else colors.textMuted,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -195,7 +180,7 @@ fun PriceTickerCard(
                         Text(
                             text = String.format(Locale.US, "$%,.2f", asset.currentPrice),
                             style = MaterialTheme.typography.headlineMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = (-0.5).sp
                             )
@@ -207,7 +192,7 @@ fun PriceTickerCard(
                             Icon(
                                 imageVector = if (isPositive) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
                                 contentDescription = null,
-                                tint = if (isPositive) BullishGreen else BearishRed,
+                                tint = if (isPositive) colors.bullishGreen else colors.bearishRed,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
@@ -220,7 +205,7 @@ fun PriceTickerCard(
                                     asset.change24hPercent ?: 0.0
                                 ),
                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = if (isPositive) BullishGreen else BearishRed,
+                                    color = if (isPositive) colors.bullishGreen else colors.bearishRed,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             )
@@ -250,29 +235,29 @@ fun PriceTickerCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.5f))
+                        .background(colors.surfaceVariant.copy(alpha = 0.7f))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("24h High", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                        Text("24h High", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                         Text(
                             text = if (asset.high24h != null) String.format(Locale.US, "$%,.2f", asset.high24h) else "N/A",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Medium)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary, fontWeight = FontWeight.Medium)
                         )
                     }
                     Column {
-                        Text("24h Low", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                        Text("24h Low", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                         Text(
                             text = if (asset.low24h != null) String.format(Locale.US, "$%,.2f", asset.low24h) else "N/A",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Medium)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary, fontWeight = FontWeight.Medium)
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("24h Volume", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp))
+                        Text("24h Volume", style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp))
                         Text(
                             text = asset.volume24h ?: "N/A",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Medium)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary, fontWeight = FontWeight.Medium)
                         )
                     }
                 }
@@ -288,7 +273,7 @@ fun PriceTickerCard(
                     Text(
                         text = "Source: ${asset.dataSourceName}",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -296,7 +281,7 @@ fun PriceTickerCard(
                     Text(
                         text = "Updated: ${asset.lastUpdatedFormatted}",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextMuted,
+                            color = colors.textMuted,
                             fontSize = 11.sp
                         )
                     )
@@ -308,8 +293,8 @@ fun PriceTickerCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.6f))
-                        .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                        .background(colors.surfaceVariant.copy(alpha = 0.7f))
+                        .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                         .padding(12.dp)
                 ) {
                     Row(
@@ -321,14 +306,14 @@ fun PriceTickerCard(
                             Text(
                                 text = "---.--",
                                 style = MaterialTheme.typography.headlineSmall.copy(
-                                    color = TextMuted,
+                                    color = colors.textMuted,
                                     fontWeight = FontWeight.Bold
                                 )
                             )
                             Text(
                                 text = "Source: ${asset.dataSourceName}",
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = TextSecondary,
+                                    color = colors.textSecondary,
                                     fontSize = 11.sp
                                 )
                             )
@@ -339,7 +324,7 @@ fun PriceTickerCard(
                             onClick = onSetAlertClick,
                             modifier = Modifier.testTag("set_alert_btn_${asset.id.lowercase()}"),
                             shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NexusGold)
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.gold)
                         ) {
                             Icon(imageVector = Icons.Default.AddAlert, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -355,15 +340,15 @@ fun PriceTickerCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(NavyCard)
+                                .background(colors.card)
                                 .padding(8.dp),
                             verticalAlignment = Alignment.Top
                         ) {
-                            Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = WarningOrange, modifier = Modifier.size(14.dp))
+                            Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = colors.warningOrange, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = asset.setupInstructions,
-                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+                                style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 15.sp)
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -377,8 +362,8 @@ fun PriceTickerCard(
                             .testTag("connect_feed_btn_${asset.id.lowercase()}"),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (asset.category == com.example.data.model.AssetCategory.CRYPTO) NexusGold else NavyHover,
-                            contentColor = if (asset.category == com.example.data.model.AssetCategory.CRYPTO) NavyCard else TextPrimary
+                            containerColor = if (asset.category == com.example.data.model.AssetCategory.CRYPTO) colors.gold else colors.hover,
+                            contentColor = if (asset.category == com.example.data.model.AssetCategory.CRYPTO) colors.onGold else colors.textPrimary
                         )
                     ) {
                         Icon(
@@ -388,7 +373,11 @@ fun PriceTickerCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (asset.category == com.example.data.model.AssetCategory.CRYPTO) "Reconnect WebSocket Stream" else "Setup Provider API Key",
+                            text = when (asset.category) {
+                                com.example.data.model.AssetCategory.CRYPTO -> "Reconnect WebSocket Stream"
+                                com.example.data.model.AssetCategory.COMMODITIES -> "Configure Commodities Feed"
+                                else -> "View Market Feed Status"
+                            },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -401,11 +390,12 @@ fun PriceTickerCard(
 
 @Composable
 fun MarketStatusBadge(status: MarketDataStatus) {
-    val (bgColor, textColor, label, icon) = when (status) {
-        MarketDataStatus.LIVE -> Tuple4(BullishGreenBg, BullishGreen, "LIVE", Icons.Default.Sync)
-        MarketDataStatus.DELAYED -> Tuple4(Color(0x22FFC107), NexusGold, "DELAYED", Icons.Default.AccessTime)
-        MarketDataStatus.STALE -> Tuple4(Color(0x22FF9100), WarningOrange, "STALE", Icons.Default.History)
-        MarketDataStatus.UNAVAILABLE -> Tuple4(Color(0x2264748B), TextMuted, "UNAVAILABLE", Icons.Default.CloudOff)
+    val colors = NexusTheme.colors
+    val (bgColor, textColor, label, _) = when (status) {
+        MarketDataStatus.LIVE -> Tuple4(colors.bullishGreenBg, colors.bullishGreen, "LIVE", Icons.Default.Sync)
+        MarketDataStatus.DELAYED -> Tuple4(colors.gold.copy(alpha = 0.14f), colors.gold, "DELAYED", Icons.Default.AccessTime)
+        MarketDataStatus.STALE -> Tuple4(colors.warningOrange.copy(alpha = 0.14f), colors.warningOrange, "STALE", Icons.Default.History)
+        MarketDataStatus.UNAVAILABLE -> Tuple4(colors.surfaceVariant, colors.textMuted, "UNAVAILABLE", Icons.Default.CloudOff)
     }
 
     Row(

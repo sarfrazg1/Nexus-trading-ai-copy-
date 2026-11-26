@@ -275,19 +275,27 @@ object MarketContextBuilder {
             "${item.title} [${item.source} • ${item.timestamp} • ${item.impact.label}/${item.impactLevel.label}]"
         }
 
-        val resolvedBinancePair = when {
-            symbol.contains("/") -> symbol.replace("/", "").uppercase(Locale.US)
-            symbol.endsWith("USDT", ignoreCase = true) -> symbol.uppercase(Locale.US)
-            else -> "${(asset?.id ?: symbol).uppercase(Locale.US)}USDT"
+        val isCryptoAsset = asset?.category == null || asset.category == AssetCategory.CRYPTO
+        val resolvedBinancePair = if (isCryptoAsset) {
+            when {
+                symbol.contains("/") -> symbol.replace("/", "").uppercase(Locale.US)
+                symbol.endsWith("USDT", ignoreCase = true) -> symbol.uppercase(Locale.US)
+                else -> "${(asset?.id ?: symbol).uppercase(Locale.US)}USDT"
+            }
+        } else {
+            asset?.symbol ?: symbol
         }
 
         val sourceLower = (asset?.dataSourceName ?: "").lowercase(Locale.US)
         val instrumentTypeLabel = when {
+            asset?.category == AssetCategory.STOCKS -> "US Equity (${asset.dataSourceName})"
+            asset?.category == AssetCategory.COMMODITIES -> "Commodities / Macro Quote (${asset.dataSourceName})"
+            asset?.category == AssetCategory.FOREX -> "Spot Forex (${asset.dataSourceName})"
+            asset?.category == AssetCategory.INDICES -> "Market Index (${asset.dataSourceName})"
             sourceLower.contains("spot") -> "Spot Market"
             sourceLower.contains("futures") || sourceLower.contains("perpetual") -> "USDT-M Perpetual Futures"
-            asset?.category == AssetCategory.COMMODITIES -> "Commodities / Macro Quote"
             hybridState?.primaryFuturesQuotes?.containsKey(resolvedBinancePair) == true -> "USDT-M Perpetual Futures"
-            else -> "USDT-M Perpetual Futures"
+            else -> "Crypto Market"
         }
 
         val crossExchangeText = hybridState?.crossExchangeComparisons?.get(resolvedBinancePair)?.let { cmp ->

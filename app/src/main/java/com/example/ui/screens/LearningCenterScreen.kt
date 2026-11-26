@@ -73,19 +73,7 @@ import com.example.data.learning.LearningContentDatabase
 import com.example.data.learning.LearningLanguageMode
 import com.example.data.learning.LessonCategory
 import com.example.data.learning.LessonItem
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BearishRedBg
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.BullishGreenBg
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurface
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 enum class AcademyViewTab(val label: String) {
     ALL_LESSONS("All Lessons"),
@@ -114,6 +102,7 @@ fun LearningCenterScreen(
     onNextLesson: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     var activeViewTab by remember { mutableStateOf(AcademyViewTab.ALL_LESSONS) }
     var selectedGlossaryLetter by remember { mutableStateOf<Char?>(null) }
 
@@ -168,7 +157,7 @@ fun LearningCenterScreen(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(NavyBackground)) {
+    Box(modifier = modifier.fillMaxSize().background(colors.background)) {
         if (selectedLesson != null) {
             // Full Detailed Lesson Reader
             LessonDetailView(
@@ -261,14 +250,14 @@ fun LearningCenterScreen(
                                 AcademyViewTab.RECENTLY_VIEWED -> "Recently Studied (${displayedLessons.size})"
                             },
                             style = MaterialTheme.typography.titleSmall.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
                             text = "${displayedLessons.size} lessons",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = TextMuted,
+                                color = colors.textMuted,
                                 fontSize = 11.sp
                             )
                         )
@@ -311,13 +300,14 @@ private fun AcademyHeroHeader(
     languageMode: LearningLanguageMode,
     onLanguageModeChange: (LearningLanguageMode) -> Unit
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .border(1.dp, NexusGold.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+            .border(1.dp, colors.gold.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
             .testTag("academy_hero_card"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard)
+        colors = CardDefaults.cardColors(containerColor = colors.card)
     ) {
         Box(
             modifier = Modifier
@@ -325,9 +315,9 @@ private fun AcademyHeroHeader(
                 .background(
                     androidx.compose.ui.graphics.Brush.horizontalGradient(
                         listOf(
-                            NexusGold.copy(alpha = 0.22f),
-                            NavyCard,
-                            NexusGold.copy(alpha = 0.12f)
+                            colors.gold.copy(alpha = 0.22f),
+                            colors.card,
+                            colors.gold.copy(alpha = 0.12f)
                         )
                     )
                 )
@@ -341,7 +331,7 @@ private fun AcademyHeroHeader(
                 Text(
                     text = "SMART MONEY CONCEPTS • ORDER BLOCKS • LIQUIDITY • MACRO",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.8.sp
                     )
@@ -349,7 +339,7 @@ private fun AcademyHeroHeader(
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
                     contentDescription = "Smart Money Concepts Academy",
-                    tint = NexusGold,
+                    tint = colors.gold,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -364,13 +354,13 @@ private fun AcademyHeroHeader(
                     Box(
                         modifier = Modifier
                             .size(38.dp)
-                            .background(NexusGold.copy(alpha = 0.15f), CircleShape),
+                            .background(colors.gold.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.School,
                             contentDescription = "Academy",
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -379,7 +369,7 @@ private fun AcademyHeroHeader(
                         Text(
                             text = "NEXUS TRADING ACADEMY",
                             style = MaterialTheme.typography.titleMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 0.5.sp
                             )
@@ -387,7 +377,7 @@ private fun AcademyHeroHeader(
                         Text(
                             text = "56 Professional Lessons • 100% Offline",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontSize = 11.sp
                             )
                         )
@@ -406,7 +396,7 @@ private fun AcademyHeroHeader(
                 Text(
                     text = "Language / Zaban:",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontSize = 11.sp
                     )
                 )
@@ -417,7 +407,7 @@ private fun AcademyHeroHeader(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) NexusGold else NavySurfaceVariant)
+                                .background(if (isSelected) colors.gold else colors.surfaceVariant)
                                 .clickable { onLanguageModeChange(mode) }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                                 .testTag("lang_chip_${mode.id.lowercase()}"),
@@ -431,7 +421,7 @@ private fun AcademyHeroHeader(
                                     LearningLanguageMode.BILINGUAL -> "Bilingual (Dono)"
                                 },
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = if (isSelected) NavyBackground else TextSecondary,
+                                    color = if (isSelected) colors.onGold else colors.textSecondary,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     fontSize = 11.sp
                                 )
@@ -452,14 +442,14 @@ private fun AcademyHeroHeader(
                 Text(
                     text = "Course Progress (Mukammal Karda)",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = TextSecondary,
+                        color = colors.textSecondary,
                         fontSize = 11.sp
                     )
                 )
                 Text(
                     text = "$completedCount / $totalCount (${(progressPercent * 100).toInt()}%)",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (progressPercent > 0.8f) BullishGreen else NexusGold,
+                        color = if (progressPercent > 0.8f) colors.bullishGreen else colors.gold,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
@@ -472,8 +462,8 @@ private fun AcademyHeroHeader(
                     .fillMaxWidth()
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
-                color = NexusGold,
-                trackColor = NavySurfaceVariant
+                color = colors.gold,
+                trackColor = colors.surfaceVariant
             )
         }
     }
@@ -484,6 +474,7 @@ private fun SearchBarSection(
     query: String,
     onQueryChange: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
@@ -493,29 +484,29 @@ private fun SearchBarSection(
         placeholder = {
             Text(
                 text = "Search terms, SMC, indicators, Urdu...",
-                color = TextMuted,
+                color = colors.textMuted,
                 fontSize = 13.sp
             )
         },
         leadingIcon = {
-            Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = NexusGold, modifier = Modifier.size(18.dp))
+            Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = colors.gold, modifier = Modifier.size(18.dp))
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear", tint = TextMuted, modifier = Modifier.size(16.dp))
+                    Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear", tint = colors.textMuted, modifier = Modifier.size(16.dp))
                 }
             }
         },
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = NavySurface,
-            unfocusedContainerColor = NavySurface,
-            focusedBorderColor = NexusGold,
-            unfocusedBorderColor = NavyBorder,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary
+            focusedContainerColor = colors.surface,
+            unfocusedContainerColor = colors.surface,
+            focusedBorderColor = colors.gold,
+            unfocusedBorderColor = colors.border,
+            focusedTextColor = colors.textPrimary,
+            unfocusedTextColor = colors.textPrimary
         )
     )
 }
@@ -527,12 +518,13 @@ private fun ViewTabSelector(
     recentCount: Int,
     onTabSelected: (AcademyViewTab) -> Unit
 ) {
+    val colors = NexusTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(NavySurface)
-            .border(1.dp, NavyBorder, RoundedCornerShape(12.dp))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
             .padding(4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -549,7 +541,7 @@ private fun ViewTabSelector(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (isSelected) NexusGold else Color.Transparent)
+                    .background(if (isSelected) colors.gold else Color.Transparent)
                     .clickable { onTabSelected(tab) }
                     .padding(vertical = 8.dp)
                     .testTag("academy_view_tab_${tab.name.lowercase()}"),
@@ -558,7 +550,7 @@ private fun ViewTabSelector(
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (isSelected) NavyBackground else TextSecondary,
+                        color = if (isSelected) colors.onGold else colors.textSecondary,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         fontSize = 11.sp
                     ),
@@ -574,6 +566,7 @@ private fun CategoryFilterChips(
     selectedCategory: LessonCategory?,
     onSelect: (LessonCategory?) -> Unit
 ) {
+    val colors = NexusTheme.colors
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth().testTag("category_filter_row")
@@ -583,8 +576,8 @@ private fun CategoryFilterChips(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (isSelected) NexusGold else NavySurfaceVariant)
-                    .border(1.dp, if (isSelected) NexusGold else NavyBorder, RoundedCornerShape(10.dp))
+                    .background(if (isSelected) colors.gold else colors.surfaceVariant)
+                    .border(1.dp, if (isSelected) colors.gold else colors.border, RoundedCornerShape(10.dp))
                     .clickable { onSelect(null) }
                     .padding(horizontal = 12.dp, vertical = 7.dp)
                     .testTag("cat_chip_all"),
@@ -593,7 +586,7 @@ private fun CategoryFilterChips(
                 Text(
                     text = "All Categories",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (isSelected) NavyBackground else TextSecondary,
+                        color = if (isSelected) colors.onGold else colors.textSecondary,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 11.sp
                     )
@@ -606,8 +599,8 @@ private fun CategoryFilterChips(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (isSelected) NexusGold else NavySurfaceVariant)
-                    .border(1.dp, if (isSelected) NexusGold else NavyBorder, RoundedCornerShape(10.dp))
+                    .background(if (isSelected) colors.gold else colors.surfaceVariant)
+                    .border(1.dp, if (isSelected) colors.gold else colors.border, RoundedCornerShape(10.dp))
                     .clickable { onSelect(category) }
                     .padding(horizontal = 12.dp, vertical = 7.dp)
                     .testTag("cat_chip_${category.id}"),
@@ -616,7 +609,7 @@ private fun CategoryFilterChips(
                 Text(
                     text = "${category.letter}. ${category.title}",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (isSelected) NavyBackground else TextSecondary,
+                        color = if (isSelected) colors.onGold else colors.textSecondary,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 11.sp
                     )
@@ -631,6 +624,7 @@ private fun GlossaryAlphabetSelector(
     selectedLetter: Char?,
     onLetterSelected: (Char) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val alphabet = ('A'..'Z').toList()
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -642,14 +636,14 @@ private fun GlossaryAlphabetSelector(
                 modifier = Modifier
                     .size(28.dp)
                     .clip(CircleShape)
-                    .background(if (isSelected) NexusGold else NavySurfaceVariant)
+                    .background(if (isSelected) colors.gold else colors.surfaceVariant)
                     .clickable { onLetterSelected(letter) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = letter.toString(),
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (isSelected) NavyBackground else TextSecondary,
+                        color = if (isSelected) colors.onGold else colors.textSecondary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
@@ -669,14 +663,15 @@ private fun LessonCardItem(
     onToggleBookmark: () -> Unit,
     onToggleCompleted: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, if (isCompleted) BullishGreen.copy(alpha = 0.35f) else NavyBorder, RoundedCornerShape(12.dp))
+            .border(1.dp, if (isCompleted) colors.bullishGreen.copy(alpha = 0.35f) else colors.border, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .testTag("lesson_card_${lesson.id}"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard)
+        colors = CardDefaults.cardColors(containerColor = colors.card)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             // Header Row: Category Badge + Completion check + Bookmark
@@ -688,13 +683,13 @@ private fun LessonCardItem(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(NavySurfaceVariant)
+                        .background(colors.surfaceVariant)
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = "${lesson.category.letter}. ${lesson.category.title}",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -709,7 +704,7 @@ private fun LessonCardItem(
                         Icon(
                             imageVector = if (isCompleted) Icons.Default.CheckCircle else Icons.Default.CheckCircleOutline,
                             contentDescription = if (isCompleted) "Completed" else "Mark Complete",
-                            tint = if (isCompleted) BullishGreen else TextMuted,
+                            tint = if (isCompleted) colors.bullishGreen else colors.textMuted,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -721,7 +716,7 @@ private fun LessonCardItem(
                         Icon(
                             imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             contentDescription = if (isBookmarked) "Bookmarked" else "Bookmark",
-                            tint = if (isBookmarked) NexusGold else TextMuted,
+                            tint = if (isBookmarked) colors.gold else colors.textMuted,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -736,7 +731,7 @@ private fun LessonCardItem(
                     Text(
                         text = lesson.englishTitle,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -745,7 +740,7 @@ private fun LessonCardItem(
                     Text(
                         text = lesson.romanUrduTitle,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -754,7 +749,7 @@ private fun LessonCardItem(
                     Text(
                         text = lesson.englishTitle,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -762,7 +757,7 @@ private fun LessonCardItem(
                     Text(
                         text = "Urdu: ${lesson.romanUrduTitle}",
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Medium,
                             fontSize = 12.sp
                         )
@@ -782,7 +777,7 @@ private fun LessonCardItem(
             Text(
                 text = summaryText,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = TextSecondary,
+                    color = colors.textSecondary,
                     lineHeight = 16.sp
                 ),
                 maxLines = if (languageMode == LearningLanguageMode.BILINGUAL) 4 else 2
@@ -799,7 +794,7 @@ private fun LessonCardItem(
                 Text(
                     text = "3-5 min masterclass",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontSize = 10.sp
                     )
                 )
@@ -808,7 +803,7 @@ private fun LessonCardItem(
                     Text(
                         text = "Read Full Lesson",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
@@ -817,7 +812,7 @@ private fun LessonCardItem(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = null,
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(12.dp)
                     )
                 }
@@ -839,18 +834,19 @@ private fun LessonDetailView(
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(NavyBackground)
+            .background(colors.background)
             .testTag("lesson_detail_view")
     ) {
         // Top Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(NavySurface)
-                .border(1.dp, NavyBorder)
+                .background(colors.surface)
+                .border(1.dp, colors.border)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -860,7 +856,7 @@ private fun LessonDetailView(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -869,7 +865,7 @@ private fun LessonDetailView(
                     Text(
                         text = "MASTERCLASS",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp
                         )
@@ -877,7 +873,7 @@ private fun LessonDetailView(
                     Text(
                         text = "${lesson.category.letter}. ${lesson.category.title}",
                         style = MaterialTheme.typography.titleSmall.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp
                         ),
@@ -891,7 +887,7 @@ private fun LessonDetailView(
                     Icon(
                         imageVector = if (isCompleted) Icons.Default.CheckCircle else Icons.Default.CheckCircleOutline,
                         contentDescription = "Complete",
-                        tint = if (isCompleted) BullishGreen else TextMuted,
+                        tint = if (isCompleted) colors.bullishGreen else colors.textMuted,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -900,7 +896,7 @@ private fun LessonDetailView(
                     Icon(
                         imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                         contentDescription = "Bookmark",
-                        tint = if (isBookmarked) NexusGold else TextMuted,
+                        tint = if (isBookmarked) colors.gold else colors.textMuted,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -921,8 +917,8 @@ private fun LessonDetailView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(NavySurface)
-                    .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                    .background(colors.surface)
+                    .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -932,7 +928,7 @@ private fun LessonDetailView(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) NexusGold else Color.Transparent)
+                            .background(if (isSelected) colors.gold else Color.Transparent)
                             .clickable { onLanguageModeChange(mode) }
                             .padding(vertical = 6.dp),
                         contentAlignment = Alignment.Center
@@ -945,7 +941,7 @@ private fun LessonDetailView(
                                 LearningLanguageMode.BILINGUAL -> "Bilingual"
                             },
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isSelected) NavyBackground else TextSecondary,
+                                color = if (isSelected) colors.onGold else colors.textSecondary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 fontSize = 11.sp
                             )
@@ -960,7 +956,7 @@ private fun LessonDetailView(
             Text(
                 text = lesson.englishTitle,
                 style = MaterialTheme.typography.headlineSmall.copy(
-                    color = TextPrimary,
+                    color = colors.textPrimary,
                     fontWeight = FontWeight.Black
                 )
             )
@@ -970,7 +966,7 @@ private fun LessonDetailView(
                 Text(
                     text = "Roman Urdu: ${lesson.romanUrduTitle}",
                     style = MaterialTheme.typography.titleMedium.copy(
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -983,14 +979,14 @@ private fun LessonDetailView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, NexusGold.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
-                colors = CardDefaults.cardColors(containerColor = NavyCard)
+                    .border(1.dp, colors.gold.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                colors = CardDefaults.cardColors(containerColor = colors.card)
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
                         text = "QUICK SUMMARY / KHULASA",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp
                         )
@@ -1000,7 +996,7 @@ private fun LessonDetailView(
                         Text(
                             text = lesson.summaryEnglish,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 lineHeight = 18.sp
                             )
                         )
@@ -1012,7 +1008,7 @@ private fun LessonDetailView(
                         Text(
                             text = lesson.summaryRomanUrdu,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 lineHeight = 18.sp
                             )
                         )
@@ -1026,7 +1022,7 @@ private fun LessonDetailView(
             Text(
                 text = "Comprehensive Guide",
                 style = MaterialTheme.typography.titleMedium.copy(
-                    color = TextPrimary,
+                    color = colors.textPrimary,
                     fontWeight = FontWeight.Bold
                 )
             )
@@ -1036,7 +1032,7 @@ private fun LessonDetailView(
                 Text(
                     text = lesson.detailedExplanationEnglish,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = TextSecondary,
+                        color = colors.textSecondary,
                         lineHeight = 22.sp,
                         fontSize = 14.sp
                     )
@@ -1049,7 +1045,7 @@ private fun LessonDetailView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(1.dp)
-                        .background(NavyBorder)
+                        .background(colors.border)
                 )
                 Spacer(modifier = Modifier.height(14.dp))
             }
@@ -1058,7 +1054,7 @@ private fun LessonDetailView(
                 Text(
                     text = "Asaan Roman Urdu Mein Tafseel:",
                     style = MaterialTheme.typography.titleSmall.copy(
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -1066,7 +1062,7 @@ private fun LessonDetailView(
                 Text(
                     text = lesson.detailedExplanationRomanUrdu,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = TextPrimary,
+                        color = colors.textPrimary,
                         lineHeight = 22.sp,
                         fontSize = 14.sp
                     )
@@ -1080,22 +1076,22 @@ private fun LessonDetailView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, BullishGreen.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
-                colors = CardDefaults.cardColors(containerColor = BullishGreenBg)
+                    .border(1.dp, colors.bullishGreen.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                colors = CardDefaults.cardColors(containerColor = colors.bullishGreenBg)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.MenuBook,
                             contentDescription = "Example",
-                            tint = BullishGreen,
+                            tint = colors.bullishGreen,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Practical Market Example / Amli Misaal",
                             style = MaterialTheme.typography.titleSmall.copy(
-                                color = BullishGreen,
+                                color = colors.bullishGreen,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -1108,7 +1104,7 @@ private fun LessonDetailView(
                             LearningLanguageMode.BILINGUAL -> "${lesson.practicalExampleEnglish}\n\nUrdu Misaal: ${lesson.practicalExampleRomanUrdu ?: ""}"
                         },
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             lineHeight = 18.sp
                         )
                     )
@@ -1122,22 +1118,22 @@ private fun LessonDetailView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, NexusGold.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
-                colors = CardDefaults.cardColors(containerColor = NavyCard)
+                    .border(1.dp, colors.gold.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                colors = CardDefaults.cardColors(containerColor = colors.card)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Lightbulb,
                             contentDescription = "Pro Tip",
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Nexus Pro Tip / Kamyabi Ka Raaz",
                             style = MaterialTheme.typography.titleSmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -1150,7 +1146,7 @@ private fun LessonDetailView(
                             LearningLanguageMode.BILINGUAL -> "${lesson.proTipEnglish}\n\nPro Tip: ${lesson.proTipRomanUrdu ?: ""}"
                         },
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             lineHeight = 18.sp
                         )
                     )
@@ -1164,22 +1160,22 @@ private fun LessonDetailView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, BearishRed.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
-                colors = CardDefaults.cardColors(containerColor = BearishRedBg)
+                    .border(1.dp, colors.bearishRed.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                colors = CardDefaults.cardColors(containerColor = colors.bearishRedBg)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Warning,
                             contentDescription = "Warning",
-                            tint = BearishRed,
+                            tint = colors.bearishRed,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Risk Warning / Khatraat Ki Wazahad",
                             style = MaterialTheme.typography.titleSmall.copy(
-                                color = BearishRed,
+                                color = colors.bearishRed,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -1192,7 +1188,7 @@ private fun LessonDetailView(
                             LearningLanguageMode.BILINGUAL -> "${lesson.riskWarningEnglish ?: "Trading futures carries high risk of loss."}\n\nKhatray Ki Baat: ${lesson.riskWarningRomanUrdu ?: "Leverage trading mein nuqsan ka khatra rehta hai."}"
                         },
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             lineHeight = 18.sp
                         )
                     )
@@ -1206,8 +1202,8 @@ private fun LessonDetailView(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(NavySurface)
-                .border(1.dp, NavyBorder)
+                .background(colors.surface)
+                .border(1.dp, colors.border)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -1215,7 +1211,7 @@ private fun LessonDetailView(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(NavySurfaceVariant)
+                    .background(colors.surfaceVariant)
                     .clickable(onClick = onPrevious)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
                     .testTag("btn_prev_lesson")
@@ -1224,14 +1220,14 @@ private fun LessonDetailView(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Previous",
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Previous",
                         style = MaterialTheme.typography.labelMedium.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -1242,7 +1238,7 @@ private fun LessonDetailView(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (isCompleted) BullishGreen else NexusGold)
+                    .background(if (isCompleted) colors.bullishGreen else colors.gold)
                     .clickable(onClick = onToggleCompleted)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
                     .testTag("btn_complete_bottom")
@@ -1251,14 +1247,14 @@ private fun LessonDetailView(
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
                         contentDescription = null,
-                        tint = NavyBackground,
+                        tint = colors.onGold,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (isCompleted) "Completed" else "Mark Complete",
                         style = MaterialTheme.typography.labelMedium.copy(
-                            color = NavyBackground,
+                            color = colors.onGold,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -1268,7 +1264,7 @@ private fun LessonDetailView(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(NavySurfaceVariant)
+                    .background(colors.surfaceVariant)
                     .clickable(onClick = onNext)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
                     .testTag("btn_next_lesson")
@@ -1277,7 +1273,7 @@ private fun LessonDetailView(
                     Text(
                         text = "Next",
                         style = MaterialTheme.typography.labelMedium.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -1285,7 +1281,7 @@ private fun LessonDetailView(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = "Next",
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1296,12 +1292,13 @@ private fun LessonDetailView(
 
 @Composable
 private fun EmptyStateCard(activeViewTab: AcademyViewTab, searchQuery: String) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, NavyBorder, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = NavyCard)
+            .border(1.dp, colors.border, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = colors.card)
     ) {
         Column(
             modifier = Modifier
@@ -1312,7 +1309,7 @@ private fun EmptyStateCard(activeViewTab: AcademyViewTab, searchQuery: String) {
             Icon(
                 imageVector = Icons.Default.School,
                 contentDescription = null,
-                tint = NexusGold.copy(alpha = 0.5f),
+                tint = colors.gold.copy(alpha = 0.5f),
                 modifier = Modifier.size(48.dp)
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -1324,7 +1321,7 @@ private fun EmptyStateCard(activeViewTab: AcademyViewTab, searchQuery: String) {
                     else -> "No lessons found in this section."
                 },
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    color = TextMuted,
+                    color = colors.textMuted,
                     fontSize = 13.sp
                 ),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center

@@ -47,7 +47,8 @@ object AiTradingSignalEngine {
         candles: List<Candle>,
         technicalAnalysis: OverallAnalysisResult?,
         smcAnalysis: SmcAnalysisResult?,
-        mtfSnapshots: List<TimeframeSmcSnapshot> = emptyList()
+        mtfSnapshots: List<TimeframeSmcSnapshot> = emptyList(),
+        strictQualityReportOverride: StrictSignalQualityReport? = null
     ): AiTradingSignal = withContext(Dispatchers.Default) {
         val now = System.currentTimeMillis()
         val formattedTime = TimeZoneUtils.formatKarachiWithSeconds(now)
@@ -217,16 +218,19 @@ object AiTradingSignalEngine {
         var bullMomPoints = 0
         var bearMomPoints = 0
 
+        val rsiDiv = ta.momentum.rsiDivergence
         if (rsi14 != null) {
             when {
                 rsi14 in 50.0..68.0 -> bullMomPoints += 5
                 rsi14 in 68.01..78.0 -> bullMomPoints += 4
-                rsi14 < 30.0 -> bullMomPoints += 3 // Oversold bounce watch
+                rsiDiv?.type == com.example.data.indicators.RsiDivergenceType.BULLISH_REGULAR && rsiDiv.isConfirmedClosedSwings ->
+                    bullMomPoints += 4
             }
             when {
                 rsi14 in 32.0..49.99 -> bearMomPoints += 5
                 rsi14 in 22.0..31.99 -> bearMomPoints += 4
-                rsi14 > 78.0 -> bearMomPoints += 3 // Overbought exhaustion watch
+                rsiDiv?.type == com.example.data.indicators.RsiDivergenceType.BEARISH_REGULAR && rsiDiv.isConfirmedClosedSwings ->
+                    bearMomPoints += 4
             }
         }
 
@@ -279,42 +283,49 @@ object AiTradingSignalEngine {
         val volStance: String
         val volSummary: String
 
-        val rvol = ta.volume.relativeVolume ?: 1.0
+        val rvol = ta.volume.relativeVolume
         val volDelta = ta.volume.volumeDelta
         val cmf = ta.volume.cmf
 
         var bullVolPts = 0
         var bearVolPts = 0
 
-        if (volDelta != null) {
-            if (volDelta.delta > 0) bullVolPts += if (rvol >= 1.15) 7 else 5
-            else if (volDelta.delta < 0) bearVolPts += if (rvol >= 1.15) 7 else 5
+        if (ta.volume.hasReliableVolume) {
+            if (volDelta != null && volDelta.hasReliableData) {
+                if (volDelta.delta > 0) bullVolPts += if ((rvol ?: 0.0) >= 1.15) 7 else 5
+                else if (volDelta.delta < 0) bearVolPts += if ((rvol ?: 0.0) >= 1.15) 7 else 5
+            }
+            // Grouped OBV + CMF merged vote (not double-counted)
+            val cmfBull = cmf != null && cmf > 0.0
+            val cmfBear = cmf != null && cmf < 0.0
+            val obvBull = ta.volume.obv?.stance == IndicatorStance.BULLISH
+            val obvBear = ta.volume.obv?.stance == IndicatorStance.BEARISH
+            if (cmfBull || obvBull) bullVolPts += if (cmf != null && cmf >= 0.05 && obvBull) 6 else 4
+            if (cmfBear || obvBear) bearVolPts += if (cmf != null && cmf <= -0.05 && obvBear) 6 else 4
         }
-        if (cmf != null) {
-            if (cmf >= 0.05) bullVolPts += 5
-            else if (cmf > 0.0) bullVolPts += 3
-            else if (cmf <= -0.05) bearVolPts += 5
-            else if (cmf < 0.0) bearVolPts += 3
-        }
-        if (ta.volume.obv?.stance == IndicatorStance.BULLISH) bullVolPts += 4
-        else if (ta.volume.obv?.stance == IndicatorStance.BEARISH) bearVolPts += 4
 
-        if (bullVolPts >= 7 && bullVolPts - bearVolPts >= 3) {
+        val rvolText = rvol?.let { "${String.format(Locale.US, "%.2f", it)}x" } ?: "N/A"
+
+        if (!ta.volume.hasReliableVolume) {
+            volPts = 0
+            volStance = "NEUTRAL"
+            volSummary = "Volume data unavailable on feed (never invented)"
+        } else if (bullVolPts >= 7 && bullVolPts - bearVolPts >= 3) {
             volPts = min(15, bullVolPts)
             bullishPoints += volPts
             volStance = "BULLISH"
-            volSummary = "Net buying flow (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x, CMF: ${cmf?.let { String.format(Locale.US, "%.2f", it) } ?: "N/A"})"
-            supportingIndicators.add("Buy Volume Confluence (RVOL ${String.format(Locale.US, "%.2f", rvol)}x)")
+            volSummary = "Net buying flow (RVOL: $rvolText, CMF: ${cmf?.let { String.format(Locale.US, "%.2f", it) } ?: "N/A"})"
+            supportingIndicators.add("Buy Volume Confluence (RVOL $rvolText)")
         } else if (bearVolPts >= 7 && bearVolPts - bullVolPts >= 3) {
             volPts = min(15, bearVolPts)
             bearishPoints += volPts
             volStance = "BEARISH"
-            volSummary = "Net selling flow (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x, CMF: ${cmf?.let { String.format(Locale.US, "%.2f", it) } ?: "N/A"})"
-            supportingIndicators.add("Sell Volume Confluence (RVOL ${String.format(Locale.US, "%.2f", rvol)}x)")
+            volSummary = "Net selling flow (RVOL: $rvolText, CMF: ${cmf?.let { String.format(Locale.US, "%.2f", it) } ?: "N/A"})"
+            supportingIndicators.add("Sell Volume Confluence (RVOL $rvolText)")
         } else {
             volPts = 6
             volStance = "NEUTRAL"
-            volSummary = "Balanced volume (RVOL: ${String.format(Locale.US, "%.2f", rvol)}x) without dominant delta divergence"
+            volSummary = "Balanced volume (RVOL: $rvolText) without dominant delta divergence"
         }
         factorReasons.add(SignalFactorReason("Volume & Participation", 15, volPts, volStance, volSummary))
 
@@ -432,7 +443,10 @@ object AiTradingSignalEngine {
         val srStance: String
         val srSummary: String
 
-        val goldenPocket = smc.fibonacci?.retracementLevels?.firstOrNull { it.isGoldenPocket }
+        val fibReport = smc.fibonacci?.validationReport
+        val goldenPocket = smc.fibonacci?.retracementLevels?.firstOrNull { it.ratio == 0.618 }
+        val isGoldenConfirmed = fibReport?.isStrictlyValid == true
+        val isGoldenTouchOnly = fibReport?.isInGoldenZone0500To0618 == true && !isGoldenConfirmed
         val isNearGoldenPocket = goldenPocket != null && abs(currentPrice - goldenPocket.price) / currentPrice <= 0.03
         val nearestSupport = smc.priceZones.firstOrNull { it.type == PriceZoneType.SUPPORT || it.type == PriceZoneType.DEMAND }
         val nearestResistance = smc.priceZones.firstOrNull { it.type == PriceZoneType.RESISTANCE || it.type == PriceZoneType.SUPPLY }
@@ -446,36 +460,44 @@ object AiTradingSignalEngine {
         val nearSupportDemand = nearestSupport != null && distToSupport <= 0.025 && (distToSupport <= distToResistance || unfilledBullishFvg != null)
         val nearResistanceSupply = nearestResistance != null && distToResistance <= 0.025 && (distToResistance < distToSupport || unfilledBearishFvg != null)
 
-        if ((isNearGoldenPocket && (distToSupport <= distToResistance || unfilledBullishFvg != null)) ||
-            (nearSupportDemand && bullishPoints >= bearishPoints)
+        if ((isGoldenConfirmed && smc.fibonacci?.isUptrendSwing == true) ||
+            (nearSupportDemand && bullishPoints >= bearishPoints && !isGoldenTouchOnly)
         ) {
-            srPts = if (isNearGoldenPocket) 9 else 8
+            srPts = if (isGoldenConfirmed) 10 else 8
             bullishPoints += srPts
             srStance = "BULLISH"
-            srSummary = if (isNearGoldenPocket && goldenPocket != null) {
-                "0.618 Fib Golden Pocket confluence (${formatPrice(goldenPocket.price)}) + Demand Support"
+            srSummary = if (isGoldenConfirmed && goldenPocket != null) {
+                "Strict 7-Gate Golden Zone (0.500–0.618) LONG Confirmed (${formatPrice(goldenPocket.price)})"
             } else {
                 "Holding Key Demand / Support Zone (${formatPrice(nearestSupport!!.centralPrice)})"
             }
-            if (isNearGoldenPocket && goldenPocket != null) {
-                smcConfirmations.add("Fibonacci 0.618 Golden Pocket (${formatPrice(goldenPocket.price)})")
+            if (isGoldenConfirmed && goldenPocket != null) {
+                smcConfirmations.add("7-Gate Golden Zone 0.500–0.618 (${formatPrice(goldenPocket.price)})")
             }
             if (unfilledBullishFvg != null) {
                 smcConfirmations.add("Unfilled Bullish FVG [${formatPrice(unfilledBullishFvg.bottomPrice)} - ${formatPrice(unfilledBullishFvg.topPrice)}]")
             }
-        } else if ((isNearGoldenPocket && distToResistance < distToSupport) ||
-            (nearResistanceSupply && bearishPoints >= bullishPoints)
+        } else if ((isGoldenConfirmed && smc.fibonacci?.isUptrendSwing == false) ||
+            (nearResistanceSupply && bearishPoints >= bullishPoints && !isGoldenTouchOnly)
         ) {
-            srPts = if (isNearGoldenPocket) 9 else 8
+            srPts = if (isGoldenConfirmed) 10 else 8
             bearishPoints += srPts
             srStance = "BEARISH"
-            srSummary = "Testing Key Supply / Resistance Barrier (${formatPrice(nearestResistance?.centralPrice ?: currentPrice)})"
+            srSummary = if (isGoldenConfirmed && goldenPocket != null) {
+                "Strict 7-Gate Golden Zone (0.500–0.618) SHORT Confirmed (${formatPrice(goldenPocket.price)})"
+            } else {
+                "Testing Key Supply / Resistance Barrier (${formatPrice(nearestResistance?.centralPrice ?: currentPrice)})"
+            }
             nearestResistance?.let {
                 smcConfirmations.add("Supply / Key Resistance Barrier (${formatPrice(it.centralPrice)})")
             }
             if (unfilledBearishFvg != null) {
                 smcConfirmations.add("Unfilled Bearish FVG [${formatPrice(unfilledBearishFvg.bottomPrice)} - ${formatPrice(unfilledBearishFvg.topPrice)}]")
             }
+        } else if (isGoldenTouchOnly) {
+            srPts = 5
+            srStance = "NEUTRAL"
+            srSummary = "In Golden Zone (0.500–0.618) — ${fibReport?.rejectionReason ?: "Awaiting rejection candle + confluence (touch alone insufficient)"}"
         } else if (unfilledBullishFvg != null && currentPrice >= unfilledBullishFvg.bottomPrice * 0.99 && bullishPoints > bearishPoints) {
             srPts = 7
             bullishPoints += srPts
@@ -488,6 +510,11 @@ object AiTradingSignalEngine {
             srStance = "BEARISH"
             srSummary = "Capped below Bearish FVG [${formatPrice(unfilledBearishFvg.bottomPrice)} - ${formatPrice(unfilledBearishFvg.topPrice)}]"
             smcConfirmations.add("Bearish FVG Resistance [${formatPrice(unfilledBearishFvg.bottomPrice)} - ${formatPrice(unfilledBearishFvg.topPrice)}]")
+        } else if (isNearGoldenPocket && (distToSupport <= distToResistance)) {
+            srPts = 6
+            bullishPoints += srPts
+            srStance = "BULLISH"
+            srSummary = "Approaching 0.618 Fib near Support (${formatPrice(nearestSupport?.centralPrice ?: currentPrice)})"
         } else {
             srPts = 5
             srStance = "NEUTRAL"
@@ -641,6 +668,23 @@ object AiTradingSignalEngine {
         // ----------------------------------------------------
         // 8. FINAL VALID TRADING SIGNAL
         // ----------------------------------------------------
+        val strictReport = strictQualityReportOverride ?: StrictSignalQualityEngine.evaluateSetup(
+            symbol = symbol,
+            assetName = assetName,
+            currentPrice = currentPrice,
+            dataStatus = dataStatus,
+            primaryTimeframe = primaryTimeframe,
+            candles = candles,
+            technicalAnalysis = ta,
+            smcAnalysis = smc,
+            mtfSnapshots = mtfSnapshots,
+            proposedEntryPrice = riskPlan.entryPrice,
+            proposedStopLoss = riskPlan.stopLoss,
+            proposedTargetPrice = riskPlan.takeProfit3,
+            candidateDirectionOverride = decision,
+            referenceTimeMs = now
+        )
+
         val signalId = "SIG_${symbol.replace("/", "_")}_${System.currentTimeMillis()}"
 
         return@withContext AiTradingSignal(
@@ -661,7 +705,8 @@ object AiTradingSignalEngine {
             timestamp = now,
             formattedTimestamp = formattedTime,
             dataSource = dataSourceName,
-            dataFreshness = dataStatus.label
+            dataFreshness = dataStatus.label,
+            strictQualityReport = strictReport
         )
     }
 
@@ -777,8 +822,14 @@ object AiTradingSignalEngine {
         val riskPercent = (slDist / entryMid) * 100.0
 
         val tp1 = entryMid - (slDist * 1.6)
-        val tp2 = entryMid - (slDist * 2.8)
-        val tp3 = entryMid - (slDist * 4.2)
+        val fibExtensions = fibAnalysis?.extensionLevels.orEmpty()
+            .filter { !fibAnalysis!!.isUptrendSwing }
+            .map { it.price }
+            .sortedDescending()
+        val tp2 = fibExtensions.firstOrNull { it < tp1 - (slDist * 0.5) }
+            ?: (entryMid - (slDist * 2.8))
+        val tp3 = fibExtensions.firstOrNull { it < tp2 - (slDist * 0.5) }
+            ?: (entryMid - (slDist * 4.2))
 
         val tp1Dist = ((entryMid - tp1) / entryMid) * 100.0
         val tp2Dist = ((entryMid - tp2) / entryMid) * 100.0

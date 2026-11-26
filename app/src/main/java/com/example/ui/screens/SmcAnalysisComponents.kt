@@ -70,18 +70,7 @@ import com.example.data.smc.OrderBlockType
 import com.example.data.smc.PriceZoneType
 import com.example.data.smc.SmcAnalysisResult
 import com.example.data.smc.SwingType
-import com.example.ui.theme.CandleGreen
-import com.example.ui.theme.CandleRed
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurface
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.NexusNeonGreen
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 import com.example.ui.viewmodel.SmcCategoryTab
 import kotlin.math.max
 import kotlin.math.min
@@ -97,6 +86,7 @@ fun SmcHeaderWithInfo(
     onInfoClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically
@@ -105,7 +95,7 @@ fun SmcHeaderWithInfo(
             text = title,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
-            color = TextSecondary,
+            color = colors.textSecondary,
             letterSpacing = 1.sp
         )
         Spacer(modifier = Modifier.width(4.dp))
@@ -113,7 +103,7 @@ fun SmcHeaderWithInfo(
             modifier = Modifier
                 .size(20.dp)
                 .clip(CircleShape)
-                .background(NexusGold.copy(alpha = 0.12f))
+                .background(colors.gold.copy(alpha = 0.12f))
                 .clickable { onInfoClick(termKey) }
                 .testTag("info_btn_$termKey"),
             contentAlignment = Alignment.Center
@@ -121,7 +111,7 @@ fun SmcHeaderWithInfo(
             Icon(
                 imageVector = Icons.Default.Info,
                 contentDescription = "Roman Urdu info for $title",
-                tint = NexusGold,
+                tint = colors.gold,
                 modifier = Modifier.size(12.dp)
             )
         }
@@ -138,15 +128,22 @@ fun SmcCandlestickChart(
     smc: SmcAnalysisResult?,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
+    val bullColor = colors.bullishGreen
+    val bearColor = colors.bearishRed
+    val goldColor = colors.gold
+    val warningColor = colors.warningOrange
+    val cyanColor = colors.neutralCyan
+
     if (candles.isEmpty()) {
         Box(
             modifier = modifier
                 .fillMaxWidth()
                 .height(200.dp)
-                .background(NavySurface, RoundedCornerShape(12.dp)),
+                .background(colors.surface, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text("Awaiting candle data...", color = TextMuted, fontSize = 12.sp)
+            Text("Awaiting candle data...", color = colors.textMuted, fontSize = 12.sp)
         }
         return
     }
@@ -166,8 +163,8 @@ fun SmcCandlestickChart(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(NavySurface)
-            .border(1.dp, NavyBorder, RoundedCornerShape(14.dp))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
             .padding(12.dp)
     ) {
         Row(
@@ -179,20 +176,20 @@ fun SmcCandlestickChart(
                 Box(
                     modifier = Modifier
                         .size(8.dp)
-                        .background(NexusNeonGreen, CircleShape)
+                        .background(bullColor, CircleShape)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "SMC CHART OVERLAYS",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = colors.textPrimary
                 )
             }
             Text(
                 text = "Last ${displayCandles.size} Candles • OB / FVG / Fib",
                 fontSize = 10.sp,
-                color = TextMuted
+                color = colors.textMuted
             )
         }
 
@@ -219,9 +216,9 @@ fun SmcCandlestickChart(
                     val zoneHeight = max(2f, yBottom - yTop)
 
                     val zoneColor = if (ob.type == OrderBlockType.BULLISH) {
-                        CandleGreen.copy(alpha = if (ob.status == OrderBlockStatus.UNMITIGATED) 0.16f else 0.08f)
+                        bullColor.copy(alpha = if (ob.status == OrderBlockStatus.UNMITIGATED) 0.16f else 0.08f)
                     } else {
-                        CandleRed.copy(alpha = if (ob.status == OrderBlockStatus.UNMITIGATED) 0.16f else 0.08f)
+                        bearColor.copy(alpha = if (ob.status == OrderBlockStatus.UNMITIGATED) 0.16f else 0.08f)
                     }
 
                     drawRect(
@@ -232,7 +229,7 @@ fun SmcCandlestickChart(
 
                     // Draw boundary line
                     drawLine(
-                        color = if (ob.type == OrderBlockType.BULLISH) CandleGreen.copy(alpha = 0.5f) else CandleRed.copy(alpha = 0.5f),
+                        color = if (ob.type == OrderBlockType.BULLISH) bullColor.copy(alpha = 0.5f) else bearColor.copy(alpha = 0.5f),
                         start = Offset(0f, yTop),
                         end = Offset(canvasWidth, yTop),
                         strokeWidth = 1f,
@@ -247,7 +244,7 @@ fun SmcCandlestickChart(
                     val gapHeight = max(2f, yBottom - yTop)
 
                     drawRect(
-                        color = if (fvg.type == FvgType.BULLISH) NexusGold.copy(alpha = 0.12f) else Color(0xFFFF9800).copy(alpha = 0.12f),
+                        color = if (fvg.type == FvgType.BULLISH) goldColor.copy(alpha = 0.12f) else warningColor.copy(alpha = 0.12f),
                         topLeft = Offset(0f, yTop),
                         size = Size(canvasWidth, gapHeight)
                     )
@@ -258,14 +255,14 @@ fun SmcCandlestickChart(
                     val y = priceToY(fib.price)
                     if (fib.isGoldenPocket) {
                         drawLine(
-                            color = NexusGold,
+                            color = goldColor,
                             start = Offset(0f, y),
                             end = Offset(canvasWidth, y),
                             strokeWidth = 1.5f
                         )
                     } else if (fib.isEquilibrium) {
                         drawLine(
-                            color = Color(0xFF64B5F6),
+                            color = cyanColor,
                             start = Offset(0f, y),
                             end = Offset(canvasWidth, y),
                             strokeWidth = 1f,
@@ -278,7 +275,7 @@ fun SmcCandlestickChart(
                 if (bsl != null && bsl in minPrice..maxPrice) {
                     val yBsl = priceToY(bsl)
                     drawLine(
-                        color = Color(0xFF00E5FF),
+                        color = cyanColor,
                         start = Offset(0f, yBsl),
                         end = Offset(canvasWidth, yBsl),
                         strokeWidth = 1.2f,
@@ -288,7 +285,7 @@ fun SmcCandlestickChart(
                 if (ssl != null && ssl in minPrice..maxPrice) {
                     val ySsl = priceToY(ssl)
                     drawLine(
-                        color = Color(0xFFFF5252),
+                        color = bearColor,
                         start = Offset(0f, ySsl),
                         end = Offset(canvasWidth, ySsl),
                         strokeWidth = 1.2f,
@@ -304,7 +301,7 @@ fun SmcCandlestickChart(
                 displayCandles.forEachIndexed { i, c ->
                     val xCenter = (i * slotWidth) + (slotWidth / 2f)
                     val isGreen = c.close >= c.open
-                    val candleColor = if (isGreen) CandleGreen else CandleRed
+                    val candleColor = if (isGreen) bullColor else bearColor
 
                     val yHigh = priceToY(c.high)
                     val yLow = priceToY(c.low)
@@ -343,18 +340,19 @@ fun SmcCandlestickChart(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            LegendItem(color = CandleGreen, label = "Bullish OB")
-            LegendItem(color = CandleRed, label = "Bearish OB")
-            LegendItem(color = NexusGold, label = "Golden Fib (0.618)")
-            LegendItem(color = Color(0xFFFF9800), label = "FVG Imbalance")
-            LegendItem(color = Color(0xFF00E5FF), label = "BSL (Liquidity)")
-            LegendItem(color = Color(0xFFFF5252), label = "SSL (Liquidity)")
+            LegendItem(color = bullColor, label = "Bullish OB")
+            LegendItem(color = bearColor, label = "Bearish OB")
+            LegendItem(color = goldColor, label = "Golden Fib (0.618)")
+            LegendItem(color = warningColor, label = "FVG Imbalance")
+            LegendItem(color = cyanColor, label = "BSL (Liquidity)")
+            LegendItem(color = bearColor, label = "SSL (Liquidity)")
         }
     }
 }
 
 @Composable
 private fun LegendItem(color: Color, label: String) {
+    val colors = NexusTheme.colors
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
@@ -362,7 +360,7 @@ private fun LegendItem(color: Color, label: String) {
                 .background(color, CircleShape)
         )
         Spacer(modifier = Modifier.width(4.dp))
-        Text(text = label, fontSize = 9.sp, color = TextMuted)
+        Text(text = label, fontSize = 9.sp, color = colors.textMuted)
     }
 }
 
@@ -375,21 +373,22 @@ fun MarketStructureSection(
     smc: SmcAnalysisResult,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val structure = smc.marketStructure
     val trendColor = when (structure.trendState) {
-        MarketTrendState.BULLISH_UPTREND -> CandleGreen
-        MarketTrendState.BEARISH_DOWNTREND -> CandleRed
-        MarketTrendState.TRANSITION_REVERSAL -> NexusGold
-        MarketTrendState.NEUTRAL_RANGING -> TextSecondary
+        MarketTrendState.BULLISH_UPTREND -> colors.bullishGreen
+        MarketTrendState.BEARISH_DOWNTREND -> colors.bearishRed
+        MarketTrendState.TRANSITION_REVERSAL -> colors.gold
+        MarketTrendState.NEUTRAL_RANGING -> colors.textSecondary
     }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("smc_market_structure_card"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, NavyBorder)
+        border = BorderStroke(1.dp, colors.border)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -434,28 +433,28 @@ fun MarketStructureSection(
                 SwingBadge(
                     label = "HH",
                     count = hhCount,
-                    color = CandleGreen,
+                    color = colors.bullishGreen,
                     modifier = Modifier.weight(1f),
                     onInfoClick = { onInfoClick("HH_HL") }
                 )
                 SwingBadge(
                     label = "HL",
                     count = hlCount,
-                    color = CandleGreen.copy(alpha = 0.8f),
+                    color = colors.bullishGreen.copy(alpha = 0.8f),
                     modifier = Modifier.weight(1f),
                     onInfoClick = { onInfoClick("HH_HL") }
                 )
                 SwingBadge(
                     label = "LH",
                     count = lhCount,
-                    color = CandleRed.copy(alpha = 0.8f),
+                    color = colors.bearishRed.copy(alpha = 0.8f),
                     modifier = Modifier.weight(1f),
                     onInfoClick = { onInfoClick("LH_LL") }
                 )
                 SwingBadge(
                     label = "LL",
                     count = llCount,
-                    color = CandleRed,
+                    color = colors.bearishRed,
                     modifier = Modifier.weight(1f),
                     onInfoClick = { onInfoClick("LH_LL") }
                 )
@@ -468,27 +467,27 @@ fun MarketStructureSection(
                 Text(
                     text = "No recent structure breaks detected within current window.",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
             } else {
                 Text(
                     text = "RECENT STRUCTURE BREAK EVENTS",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextMuted,
+                    color = colors.textMuted,
                     letterSpacing = 0.5.sp
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 structure.structureBreaks.takeLast(3).reversed().forEach { brk ->
                     val isBullish = brk.type.isBullish
-                    val breakColor = if (isBullish) CandleGreen else CandleRed
+                    val breakColor = if (isBullish) colors.bullishGreen else colors.bearishRed
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .background(NavySurface, RoundedCornerShape(8.dp))
-                            .border(1.dp, NavyBorder, RoundedCornerShape(8.dp))
+                            .background(colors.surface, RoundedCornerShape(8.dp))
+                            .border(1.dp, colors.border, RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -511,7 +510,7 @@ fun MarketStructureSection(
                                 Text(
                                     text = brk.description,
                                     fontSize = 10.sp,
-                                    color = TextSecondary
+                                    color = colors.textSecondary
                                 )
                             }
                         }
@@ -520,7 +519,7 @@ fun MarketStructureSection(
                             modifier = Modifier
                                 .size(24.dp)
                                 .clip(CircleShape)
-                                .background(NavySurfaceVariant)
+                                .background(colors.surfaceVariant)
                                 .clickable {
                                     onInfoClick(if (brk.type.label.contains("CHoCH")) "CHOCH" else "BOS")
                                 },
@@ -529,11 +528,38 @@ fun MarketStructureSection(
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Info",
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(13.dp)
                             )
                         }
                     }
+                }
+            }
+
+            if (smc.breakoutRetests.isNotEmpty() || smc.priceActionPatterns.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "BREAKOUT-RETEST & CONTEXTUAL PRICE ACTION",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textMuted
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                smc.breakoutRetests.take(2).forEach { ev ->
+                    val evColor = if (ev.type.isBullish) colors.bullishGreen else colors.bearishRed
+                    Text(
+                        text = "• ${ev.type.label}: ${ev.description}",
+                        fontSize = 10.sp,
+                        color = evColor
+                    )
+                }
+                smc.priceActionPatterns.take(2).forEach { pa ->
+                    val paColor = if (pa.type.isBullish) colors.bullishGreen else colors.bearishRed
+                    Text(
+                        text = "• ${pa.contextDescription}",
+                        fontSize = 10.sp,
+                        color = paColor
+                    )
                 }
             }
         }
@@ -548,11 +574,12 @@ private fun SwingBadge(
     modifier: Modifier = Modifier,
     onInfoClick: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(NavySurface)
-            .border(1.dp, NavyBorder, RoundedCornerShape(8.dp))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(8.dp))
             .clickable { onInfoClick() }
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center
@@ -560,7 +587,7 @@ private fun SwingBadge(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(text = label, fontSize = 11.sp, fontWeight = FontWeight.Black, color = color)
             Spacer(modifier = Modifier.height(2.dp))
-            Text(text = "$count", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text(text = "$count", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
         }
     }
 }
@@ -574,13 +601,14 @@ fun OrderBlocksSection(
     orderBlocks: List<OrderBlock>,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("smc_order_blocks_card"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, NavyBorder)
+        border = BorderStroke(1.dp, colors.border)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -597,7 +625,7 @@ fun OrderBlocksSection(
                 Text(
                     text = "${orderBlocks.size} Detected",
                     fontSize = 11.sp,
-                    color = NexusGold,
+                    color = colors.gold,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -608,25 +636,25 @@ fun OrderBlocksSection(
                 Text(
                     text = "No clear institutional Order Blocks detected in current candle range.",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
             } else {
                 orderBlocks.take(6).forEach { ob ->
                     val isBull = ob.type == OrderBlockType.BULLISH
-                    val color = if (isBull) CandleGreen else CandleRed
+                    val color = if (isBull) colors.bullishGreen else colors.bearishRed
 
                     val statusBadgeColor = when (ob.status) {
-                        OrderBlockStatus.UNMITIGATED -> NexusGold
-                        OrderBlockStatus.MITIGATED -> Color(0xFF64B5F6)
-                        OrderBlockStatus.INVALIDATED -> TextMuted
+                        OrderBlockStatus.UNMITIGATED -> colors.gold
+                        OrderBlockStatus.MITIGATED -> colors.neutralCyan
+                        OrderBlockStatus.INVALIDATED -> colors.textMuted
                     }
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .background(NavySurface, RoundedCornerShape(10.dp))
-                            .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                            .background(colors.surface, RoundedCornerShape(10.dp))
+                            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                             .padding(10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -667,7 +695,7 @@ fun OrderBlocksSection(
                                     ob.meanThresholdPrice
                                 ),
                                 fontSize = 11.sp,
-                                color = TextPrimary
+                                color = colors.textPrimary
                             )
                         }
 
@@ -680,7 +708,7 @@ fun OrderBlocksSection(
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Info",
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -700,13 +728,14 @@ fun FairValueGapsSection(
     fvgs: List<FairValueGap>,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("smc_fvg_card"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, NavyBorder)
+        border = BorderStroke(1.dp, colors.border)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -724,7 +753,7 @@ fun FairValueGapsSection(
                 Text(
                     text = "$unfilledCount Fresh Gaps",
                     fontSize = 11.sp,
-                    color = NexusGold,
+                    color = colors.gold,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -735,25 +764,25 @@ fun FairValueGapsSection(
                 Text(
                     text = "No Fair Value Gaps found in recent candles.",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
             } else {
                 fvgs.take(6).forEach { fvg ->
                     val isBull = fvg.type == FvgType.BULLISH
-                    val color = if (isBull) CandleGreen else CandleRed
+                    val color = if (isBull) colors.bullishGreen else colors.bearishRed
 
                     val statusColor = when (fvg.status) {
-                        FvgStatus.UNFILLED -> NexusGold
-                        FvgStatus.PARTIALLY_FILLED -> Color(0xFF64B5F6)
-                        FvgStatus.FULLY_FILLED -> TextMuted
+                        FvgStatus.UNFILLED -> colors.gold
+                        FvgStatus.PARTIALLY_FILLED -> colors.neutralCyan
+                        FvgStatus.FULLY_FILLED -> colors.textMuted
                     }
 
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .background(NavySurface, RoundedCornerShape(10.dp))
-                            .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                            .background(colors.surface, RoundedCornerShape(10.dp))
+                            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                             .padding(10.dp)
                     ) {
                         Row(
@@ -800,7 +829,7 @@ fun FairValueGapsSection(
                                 fvg.gapSizePercent
                             ),
                             fontSize = 11.sp,
-                            color = TextPrimary
+                            color = colors.textPrimary
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -812,7 +841,7 @@ fun FairValueGapsSection(
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp)),
                             color = statusColor,
-                            trackColor = NavySurfaceVariant
+                            trackColor = colors.surfaceVariant
                         )
                     }
                 }
@@ -830,15 +859,16 @@ fun LiquidityAnalysisSection(
     smc: SmcAnalysisResult,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val liquidity = smc.liquidity
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("smc_liquidity_card"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, NavyBorder)
+        border = BorderStroke(1.dp, colors.border)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -855,13 +885,13 @@ fun LiquidityAnalysisSection(
                 if (liquidity.potentialStopHuntActive) {
                     Box(
                         modifier = Modifier
-                            .background(Color(0xFFFF9800).copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                            .border(1.dp, Color(0xFFFF9800), RoundedCornerShape(6.dp))
+                            .background(colors.warningOrange.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                            .border(1.dp, colors.warningOrange, RoundedCornerShape(6.dp))
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = "POTENTIAL STOP-HUNT",
-                            color = Color(0xFFFF9800),
+                            color = colors.warningOrange,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Black
                         )
@@ -879,14 +909,14 @@ fun LiquidityAnalysisSection(
                 LiquidityTargetBox(
                     label = "BUY-SIDE LIQUIDITY (BSL)",
                     price = liquidity.bslNearestPrice,
-                    color = Color(0xFF00E5FF),
+                    color = colors.neutralCyan,
                     modifier = Modifier.weight(1f),
                     onInfoClick = { onInfoClick("BSL") }
                 )
                 LiquidityTargetBox(
                     label = "SELL-SIDE LIQUIDITY (SSL)",
                     price = liquidity.sslNearestPrice,
-                    color = Color(0xFFFF5252),
+                    color = colors.bearishRed,
                     modifier = Modifier.weight(1f),
                     onInfoClick = { onInfoClick("SSL") }
                 )
@@ -898,15 +928,15 @@ fun LiquidityAnalysisSection(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF2C1E1A), RoundedCornerShape(8.dp))
-                    .border(1.dp, Color(0xFF7A4334), RoundedCornerShape(8.dp))
+                    .background(colors.warningOrange.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                    .border(1.dp, colors.warningOrange.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                     .padding(10.dp)
             ) {
                 Row(verticalAlignment = Alignment.Top) {
                     Icon(
                         imageVector = Icons.Default.Warning,
                         contentDescription = "Advisory",
-                        tint = Color(0xFFFF9800),
+                        tint = colors.warningOrange,
                         modifier = Modifier
                             .size(16.dp)
                             .padding(top = 2.dp)
@@ -917,12 +947,12 @@ fun LiquidityAnalysisSection(
                             text = "Stop-Hunt Status: Potential Only (Not Guaranteed)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFF9800)
+                            color = colors.warningOrange
                         )
                         Text(
                             text = "Wick expansions capture liquidity pools. Always confirm with displacement candle closes before executing.",
                             fontSize = 10.sp,
-                            color = TextSecondary,
+                            color = colors.textSecondary,
                             lineHeight = 14.sp
                         )
                     }
@@ -936,7 +966,7 @@ fun LiquidityAnalysisSection(
                     text = "RECENT LIQUIDITY SWEEPS",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 liquidity.recentSweeps.take(3).forEach { sweep ->
@@ -944,7 +974,7 @@ fun LiquidityAnalysisSection(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 3.dp)
-                            .background(NavySurface, RoundedCornerShape(6.dp))
+                            .background(colors.surface, RoundedCornerShape(6.dp))
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -952,7 +982,7 @@ fun LiquidityAnalysisSection(
                         Text(
                             text = sweep.note,
                             fontSize = 10.sp,
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -964,7 +994,7 @@ fun LiquidityAnalysisSection(
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = null,
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(12.dp)
                             )
                         }
@@ -983,10 +1013,11 @@ private fun LiquidityTargetBox(
     modifier: Modifier = Modifier,
     onInfoClick: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(NavySurface)
+            .background(colors.surface)
             .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
             .clickable { onInfoClick() }
             .padding(10.dp)
@@ -998,7 +1029,7 @@ private fun LiquidityTargetBox(
                 text = price?.let { "$%.2f".format(it) } ?: "Swept / None",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Black,
-                color = TextPrimary
+                color = colors.textPrimary
             )
         }
     }
@@ -1013,6 +1044,7 @@ fun FibonacciAndSupportResistanceSection(
     smc: SmcAnalysisResult,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val fib = smc.fibonacci
     val zones = smc.priceZones
 
@@ -1020,9 +1052,9 @@ fun FibonacciAndSupportResistanceSection(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("smc_fibonacci_card"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, NavyBorder)
+        border = BorderStroke(1.dp, colors.border)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -1039,14 +1071,14 @@ fun FibonacciAndSupportResistanceSection(
                 if (fib != null) {
                     Box(
                         modifier = Modifier
-                            .background(NexusGold.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                            .background(colors.gold.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = if (fib.isUptrendSwing) "Uptrend Swing" else "Downtrend Swing",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = NexusGold
+                            color = colors.gold
                         )
                     }
                 }
@@ -1059,8 +1091,28 @@ fun FibonacciAndSupportResistanceSection(
                     text = fib.currentFibZoneDescription,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = NexusNeonGreen
+                    color = if (fib.validationReport?.isStrictlyValid == true) colors.bullishGreen else colors.gold
                 )
+
+                fib.validationReport?.let { rep ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "7-Gate Golden Zone (0.500–0.618): ${rep.passedGatesCount}/7 passed | Range $%.2f - $%.2f".format(
+                            fib.goldenZone0500To0618Low,
+                            fib.goldenZone0500To0618High
+                        ),
+                        fontSize = 10.sp,
+                        color = colors.textSecondary
+                    )
+                    Text(
+                        text = "Premium: $%.2f-$%.2f | Discount: $%.2f-$%.2f".format(
+                            fib.premiumZoneLow, fib.premiumZoneHigh,
+                            fib.discountZoneLow, fib.discountZoneHigh
+                        ),
+                        fontSize = 10.sp,
+                        color = colors.textMuted
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -1069,7 +1121,7 @@ fun FibonacciAndSupportResistanceSection(
                     text = "RETRACEMENT LEVELS (0.236, 0.382, 0.500, 0.618, 0.786)",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -1077,23 +1129,23 @@ fun FibonacciAndSupportResistanceSection(
                     val isGp = lvl.isGoldenPocket
                     val isEq = lvl.isEquilibrium
                     val rowColor = when {
-                        isGp -> NexusGold
-                        isEq -> Color(0xFF64B5F6)
-                        else -> TextPrimary
+                        isGp -> colors.gold
+                        isEq -> colors.neutralCyan
+                        else -> colors.textPrimary
                     }
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 2.dp)
-                            .background(if (isGp) NexusGold.copy(alpha = 0.08f) else NavySurface, RoundedCornerShape(6.dp))
+                            .background(if (isGp) colors.gold.copy(alpha = 0.08f) else colors.surface, RoundedCornerShape(6.dp))
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = lvl.label + (if (isGp) " (Golden Pocket)" else if (isEq) " (Equilibrium)" else ""),
+                                text = lvl.label + (if (lvl.ratio == 0.618) " (Golden Ratio 0.618)" else if (isEq) " (0.500 Golden Zone Top)" else ""),
                                 fontSize = 11.sp,
                                 fontWeight = if (isGp) FontWeight.Black else FontWeight.Normal,
                                 color = rowColor
@@ -1115,7 +1167,7 @@ fun FibonacciAndSupportResistanceSection(
                     text = "EXTENSION TARGETS (1.272, 1.618, 2.618)",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -1124,7 +1176,7 @@ fun FibonacciAndSupportResistanceSection(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 2.dp)
-                            .background(NavySurface, RoundedCornerShape(6.dp))
+                            .background(colors.surface, RoundedCornerShape(6.dp))
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -1132,14 +1184,46 @@ fun FibonacciAndSupportResistanceSection(
                         Text(
                             text = ext.label + (if (ext.ratio == 1.618) " (Golden Extension)" else ""),
                             fontSize = 11.sp,
-                            color = if (ext.ratio == 1.618) NexusGold else TextSecondary,
+                            color = if (ext.ratio == 1.618) colors.gold else colors.textSecondary,
                             fontWeight = if (ext.ratio == 1.618) FontWeight.Bold else FontWeight.Normal
                         )
                         Text(
                             text = "$%.2f".format(ext.price),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = colors.textPrimary
+                        )
+                    }
+                }
+            }
+
+            // Volume Profile (POC / VAH / VAL) & PDH/PDL/PWH/PWL
+            if (smc.volumeProfile != null || smc.previousDayHigh != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(colors.surface, RoundedCornerShape(8.dp))
+                        .padding(8.dp)
+                ) {
+                    smc.volumeProfile?.let { vp ->
+                        Text(
+                            text = "Volume Profile — POC: $%.2f | VAH: $%.2f | VAL: $%.2f".format(
+                                vp.pocPrice, vp.vahPrice, vp.valPrice
+                            ),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.gold
+                        )
+                    }
+                    if (smc.previousDayHigh != null && smc.previousDayLow != null) {
+                        Text(
+                            text = "PDH: $%.2f | PDL: $%.2f".format(smc.previousDayHigh, smc.previousDayLow) +
+                                (if (smc.previousWeekHigh != null && smc.previousWeekLow != null) {
+                                    " | PWH: $%.2f | PWL: $%.2f".format(smc.previousWeekHigh, smc.previousWeekLow)
+                                } else ""),
+                            fontSize = 10.sp,
+                            color = colors.textSecondary
                         )
                     }
                 }
@@ -1155,39 +1239,48 @@ fun FibonacciAndSupportResistanceSection(
             )
             Spacer(modifier = Modifier.height(6.dp))
 
-            zones.take(4).forEach { zone ->
+            zones.take(6).forEach { zone ->
                 val zoneColor = when (zone.type) {
-                    PriceZoneType.DEMAND, PriceZoneType.SUPPORT -> CandleGreen
-                    PriceZoneType.SUPPLY, PriceZoneType.RESISTANCE -> CandleRed
+                    PriceZoneType.DEMAND, PriceZoneType.SUPPORT -> colors.bullishGreen
+                    PriceZoneType.SUPPLY, PriceZoneType.RESISTANCE -> colors.bearishRed
                 }
 
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 2.dp)
-                        .background(NavySurface, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .background(colors.surface, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(zoneColor, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(zoneColor, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${zone.type.label} (${zone.strengthScore}/100)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = zoneColor
+                            )
+                        }
                         Text(
-                            text = zone.type.label,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = zoneColor
+                            text = "$%.2f-$%.2f (%.1f%%)".format(zone.lowerPrice, zone.upperPrice, zone.distancePercent),
+                            fontSize = 10.sp,
+                            color = colors.textPrimary
                         )
                     }
                     Text(
-                        text = "$%.2f (Delta: %.1f%%)".format(zone.centralPrice, zone.distancePercent),
-                        fontSize = 11.sp,
-                        color = TextPrimary
+                        text = zone.sourceSummary,
+                        fontSize = 9.sp,
+                        color = colors.textMuted
                     )
                 }
             }
@@ -1204,15 +1297,16 @@ fun MultiTimeframeAnalysisSection(
     smc: SmcAnalysisResult,
     onInfoClick: (String) -> Unit
 ) {
+    val colors = NexusTheme.colors
     val mtf = smc.multiTimeframe
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("smc_mtf_card"),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, NavyBorder)
+        border = BorderStroke(1.dp, colors.border)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -1228,9 +1322,9 @@ fun MultiTimeframeAnalysisSection(
 
                 if (mtf != null) {
                     val stanceColor = when (mtf.confluenceStance) {
-                        MtfConfluenceStance.STRONG_BULLISH_CONFLUENCE, MtfConfluenceStance.MODERATE_BULLISH -> CandleGreen
-                        MtfConfluenceStance.STRONG_BEARISH_CONFLUENCE, MtfConfluenceStance.MODERATE_BEARISH -> CandleRed
-                        MtfConfluenceStance.NEUTRAL_MIXED -> NexusGold
+                        MtfConfluenceStance.STRONG_BULLISH_CONFLUENCE, MtfConfluenceStance.MODERATE_BULLISH -> colors.bullishGreen
+                        MtfConfluenceStance.STRONG_BEARISH_CONFLUENCE, MtfConfluenceStance.MODERATE_BEARISH -> colors.bearishRed
+                        MtfConfluenceStance.NEUTRAL_MIXED -> colors.gold
                     }
                     Box(
                         modifier = Modifier
@@ -1255,13 +1349,13 @@ fun MultiTimeframeAnalysisSection(
                     text = mtf.agreementSummary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = NexusGold
+                    color = colors.gold
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = mtf.disagreementDetails,
                     fontSize = 10.sp,
-                    color = TextSecondary,
+                    color = colors.textSecondary,
                     lineHeight = 14.sp
                 )
 
@@ -1271,13 +1365,13 @@ fun MultiTimeframeAnalysisSection(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     mtf.snapshots.forEach { snap ->
                         val isBull = snap.isBullishBias
-                        val color = if (isBull) CandleGreen else CandleRed
+                        val color = if (isBull) colors.bullishGreen else colors.bearishRed
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(NavySurface, RoundedCornerShape(8.dp))
-                                .border(1.dp, NavyBorder, RoundedCornerShape(8.dp))
+                                .background(colors.surface, RoundedCornerShape(8.dp))
+                                .border(1.dp, colors.border, RoundedCornerShape(8.dp))
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -1285,14 +1379,14 @@ fun MultiTimeframeAnalysisSection(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .background(NexusGold.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                        .background(colors.gold.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
                                     Text(
                                         text = snap.timeframe.label,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Black,
-                                        color = NexusGold
+                                        color = colors.gold
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -1308,7 +1402,7 @@ fun MultiTimeframeAnalysisSection(
                                 Text(
                                     text = "${snap.unmitigatedOBCount} OBs • ${snap.unfilledFvgCount} FVGs",
                                     fontSize = 10.sp,
-                                    color = TextMuted
+                                    color = colors.textMuted
                                 )
                             }
                         }
@@ -1318,7 +1412,7 @@ fun MultiTimeframeAnalysisSection(
                 Text(
                     text = "Computing multi-timeframe alignment across 1m, 5m, 15m, 30m, 1h, 4h, 1D and 1W...",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
             }
         }

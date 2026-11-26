@@ -544,6 +544,90 @@ class NexusNotificationManager(context: Context? = null) {
         return true
     }
 
+    /**
+     * Part 3 Strict Qualifying Setup Push Alert Gate:
+     * Dispatches ONLY when qualityScore > 92 (i.e. >= 93), all mandatory filters pass,
+     * and NET R:R >= 1:4.0. Includes Symbol, LONG/SHORT, Entry, SL, TP1/Final TP,
+     * NET R:R, Quality Score, Setup Reason, Actual Data Source, and PKT timestamp.
+     * Deduplicated persistently across restarts; respects user settings & Android OS limits.
+     */
+    fun notifyStrictQualifiedSignal(
+        signalId: String,
+        symbol: String,
+        direction: FuturesDirection,
+        entryPriceFormatted: String,
+        stopLossFormatted: String,
+        tp1Formatted: String,
+        tpFinalFormatted: String,
+        netRiskRewardRatio: Double,
+        qualityScore: Int,
+        allMandatoryFiltersPassed: Boolean,
+        setupReason: String,
+        dataSourceName: String,
+        timestampMs: Long = System.currentTimeMillis(),
+        playSound: Boolean = isSoundAlertsEnabled()
+    ): Boolean {
+        if (!isMasterAlertsEnabled()) return false
+        if (qualityScore <= STRICT_ALERT_MIN_EXCLUSIVE_SCORE) return false
+        if (!allMandatoryFiltersPassed) return false
+        if (netRiskRewardRatio < 4.0) return false
+        val isLong = direction == FuturesDirection.LONG
+        if (isLong && !isLongSignalsEnabled()) return false
+        if (!isLong && !isShortSignalsEnabled()) return false
+        val eventKey = "strict_${signalId}_${symbol.uppercase(java.util.Locale.US)}_${direction.name}"
+        if (hasDeliveredEvent(eventKey) || isRecentlyTriggered(eventKey)) return false
+
+        markDeliveredEvent(eventKey)
+        markTriggered(eventKey)
+
+        val pktTime = TimeZoneUtils.formatKarachiTimestamp(timestampMs)
+        val isFiveToOne = netRiskRewardRatio >= 5.0
+        val alertType = if (isFiveToOne) AlertType.OPPORTUNITY_1_TO_5 else AlertType.OPPORTUNITY_1_TO_4
+        val channelId = if (isFiveToOne) CHANNEL_ID_HIGH_REWARD else CHANNEL_ID_QUALIFIED_1_4
+
+        val title = if (isFiveToOne) {
+            "NEXUS 1:5 QUALIFIED ALERT • $symbol ${direction.name} (${qualityScore}%)"
+        } else {
+            "NEXUS 1:4+ QUALIFIED ALERT • $symbol ${direction.name} (${qualityScore}%)"
+        }
+        val body = buildString {
+            append("$symbol ${direction.name} | Source: $dataSourceName | PKT: $pktTime\n")
+            append("Entry: $entryPriceFormatted | SL: $stopLossFormatted | TP1: $tp1Formatted | Final TP: $tpFinalFormatted\n")
+            append("Net R:R 1:${String.format(java.util.Locale.US, "%.2f", netRiskRewardRatio)} | Quality Score: $qualityScore/100\n")
+            append("Setup: $setupReason\n")
+            append("Alert Only — Not an Executed Order (OS background/battery limits may delay delivery when closed)")
+        }
+
+        recordAlertHistory(
+            AlertHistoryEntry(
+                eventId = eventKey,
+                symbol = symbol,
+                signalId = signalId,
+                alertType = alertType,
+                title = title,
+                message = body,
+                timestampMs = timestampMs,
+                timestampPkt = pktTime,
+                deliverySource = "Strict Signal Gate ($dataSourceName)",
+                isOrderExecution = false
+            )
+        )
+
+        postNotification(
+            title = title,
+            message = body,
+            type = alertType,
+            notifId = (eventKey.hashCode() and 0x7FFFFFFF) % 40000 + 60000,
+            eventId = eventKey,
+            symbol = symbol,
+            signalId = signalId,
+            openWorkflow = true,
+            channelId = channelId,
+            playSound = playSound
+        )
+        return true
+    }
+
     fun buildDeepLinkIntent(
         targetContext: Context,
         symbol: String?,
@@ -765,6 +849,7 @@ class NexusNotificationManager(context: Context? = null) {
     }
 
     companion object {
+        const val STRICT_ALERT_MIN_EXCLUSIVE_SCORE = 92
         const val CHANNEL_ID = "nexus_trading_alerts"
         const val CHANNEL_ID_HIGH_REWARD = "nexus_1_5_opportunities"
         const val CHANNEL_ID_QUALIFIED_1_4 = "nexus_1_4_opportunities"

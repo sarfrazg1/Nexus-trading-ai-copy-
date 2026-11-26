@@ -62,7 +62,11 @@ object TradingReasoningEngine {
         val currentPrice = asset?.currentPrice ?: futuresSignal?.currentPrice ?: completedCandles.lastOrNull()?.close ?: 0.0
 
         val instrumentType = when {
-            asset?.category == AssetCategory.COMMODITIES -> "Commodities / Macro Quote"
+            asset?.category == AssetCategory.COMMODITIES -> "Commodities (${asset.dataSourceName})"
+            asset?.category == AssetCategory.STOCKS -> "US Equity (${asset.dataSourceName})"
+            asset?.category == AssetCategory.FOREX -> "Forex (${asset.dataSourceName})"
+            asset?.category == AssetCategory.INDICES -> "Equity Index (${asset.dataSourceName})"
+            (asset?.dataSourceName ?: "").contains("bybit", ignoreCase = true) -> "Bybit V5 Linear Futures"
             (asset?.dataSourceName ?: "").contains("spot", ignoreCase = true) -> "Spot Market"
             else -> "USDT-M Perpetual Futures"
         }

@@ -92,6 +92,14 @@ class FuturesScannerRepository(
     private val _highRewardState = MutableStateFlow(HighRewardScanState())
     val highRewardState: StateFlow<HighRewardScanState> = _highRewardState.asStateFlow()
 
+    val signalStateManager = ActiveSignalStateManager()
+
+    private val _managedSignals = MutableStateFlow<List<ManagedSignalEntry>>(emptyList())
+    val managedSignals: StateFlow<List<ManagedSignalEntry>> = _managedSignals.asStateFlow()
+
+    private val _signalTransitionLog = MutableStateFlow<List<SignalTransitionRecord>>(emptyList())
+    val signalTransitionLog: StateFlow<List<SignalTransitionRecord>> = _signalTransitionLog.asStateFlow()
+
     // Alert cooldown per symbol (45 minutes = 2,700,000 ms)
     private val alertCooldowns = ConcurrentHashMap<String, Long>()
     private val COOLDOWN_DURATION_MS = 45 * 60 * 1000L
@@ -163,24 +171,54 @@ class FuturesScannerRepository(
     // ==========================================
 
     /**
-     * Ingests a new evaluation from BinanceFuturesScannerEngine.
+     * Ingests a new evaluation from BinanceFuturesScannerEngine or strict scanner,
+     * routed through ActiveSignalStateManager to prevent silent LONG<->SHORT flips,
+     * enforce deterministic IDs, log state transitions, and prevent duplicate alerts.
      */
-    fun onSignalEvaluated(signal: FuturesScanSignal) {
+    fun onSignalEvaluated(signal: FuturesScanSignal): SignalIntakeOutcome {
         val now = System.currentTimeMillis()
+        val isConfirmed = signal.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED ||
+            signal.lifecycle == FuturesSignalLifecycle.ACTIVE
+
+        val intake = signalStateManager.submitCandidate(
+            symbol = signal.symbol,
+            direction = signal.direction,
+            isConfirmed = isConfirmed,
+            entryPrice = signal.entryPrice,
+            stopLoss = signal.stopLoss,
+            takeProfit1 = signal.takeProfit1,
+            takeProfit2 = signal.takeProfit2,
+            netRiskReward = signal.riskRewardRatio,
+            qualityScore = signal.qualityScore,
+            dataSourceName = "Binance/Futures Multi-TF",
+            setupReason = signal.reasonsForEntry.firstOrNull() ?: signal.detectedPattern.label,
+            confirmationCandleCloseMs = signal.entryTimer?.triggerTimestampMs ?: signal.timestamp,
+            expiresAtMs = signal.exitPlan?.let {
+                signal.timestamp + (it.setupExpiryBars.coerceAtLeast(1) * signal.primaryTimeframe.durationMillis)
+            } ?: (now + 4 * 3_600_000L),
+            nowMs = now,
+            preferredSignalId = signal.id
+        )
+        syncManagedStateFlows()
+
+        if (!intake.accepted) {
+            return intake
+        }
 
         if (signal.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED) {
             // Check if we already have an active signal for this symbol
             val existingActive = _scannerState.value.activeSignals.firstOrNull { it.symbol == signal.symbol }
             if (existingActive != null) {
-                return // Do not duplicate active signal
+                return intake
             }
 
             // Check alert cooldown
             val lastAlertTime = alertCooldowns[signal.symbol] ?: 0L
             val canAlert = (now - lastAlertTime) > COOLDOWN_DURATION_MS
 
-            if (canAlert) {
+            if (canAlert && signalStateManager.shouldDispatchNotification(signal.id, signal.symbol, signal.direction, now)) {
                 alertCooldowns[signal.symbol] = now
+                signalStateManager.markNotificationDispatched(signal.id, signal.symbol, signal.direction, now)
                 triggerSignalNotification(signal)
             }
 
@@ -204,6 +242,75 @@ class FuturesScannerRepository(
                 )
             }
         }
+        return intake
+    }
+
+    /**
+     * Part 3 Strict Multi-Market Signal State & Notification Gate (>92% quality score + all mandatory filters).
+     */
+    fun onStrictMultiMarketEvaluated(
+        rankedBoard: RankedMultiMarketBoard,
+        nowMs: Long = System.currentTimeMillis()
+    ) {
+        for (item in rankedBoard.opportunities) {
+            val eval = item.evaluation
+            val setup = item.setup ?: continue
+            if (eval.status == SetupValidationStatus.DATA_UNAVAILABLE || eval.status == SetupValidationStatus.INVALIDATED) {
+                continue
+            }
+
+            val qualityScore = item.qualityReport?.totalScore ?: setup.score
+            val allMandatoryPassed = item.qualityReport?.allMandatoryFiltersPassed ?: true
+            val isConfirmed = item.isQualified && setup.status == SetupValidationStatus.CONFIRMED
+
+            val intake = signalStateManager.submitCandidate(
+                symbol = eval.symbol,
+                direction = setup.direction,
+                isConfirmed = isConfirmed,
+                entryPrice = setup.entryPrice,
+                stopLoss = setup.stopLoss,
+                takeProfit1 = setup.adjustedTarget1,
+                takeProfit2 = setup.adjustedTarget2,
+                netRiskReward = setup.estimatedNetRiskReward,
+                qualityScore = qualityScore,
+                dataSourceName = eval.venueName,
+                setupReason = setup.supportingConfirmations.firstOrNull() ?: setup.setupType.label,
+                confirmationCandleCloseMs = setup.confirmationCandleCloseTimeMs.takeIf { it > 0L } ?: nowMs,
+                expiresAtMs = nowMs + 6 * 3_600_000L,
+                nowMs = nowMs
+            )
+
+            if (intake.accepted && isConfirmed && !intake.isDuplicateSuppressed && intake.entry != null) {
+                val entry = intake.entry
+                if (signalStateManager.shouldDispatchNotification(entry.signalId, entry.symbol, entry.direction, nowMs)) {
+                    val dispatched = notificationManager?.notifyStrictQualifiedSignal(
+                        signalId = entry.signalId,
+                        symbol = eval.displaySymbol,
+                        direction = setup.direction,
+                        entryPriceFormatted = HighRewardOpportunity.fmtPrice(setup.entryPrice),
+                        stopLossFormatted = HighRewardOpportunity.fmtPrice(setup.stopLoss),
+                        tp1Formatted = HighRewardOpportunity.fmtPrice(setup.adjustedTarget1),
+                        tpFinalFormatted = HighRewardOpportunity.fmtPrice(setup.adjustedTarget2),
+                        netRiskRewardRatio = setup.estimatedNetRiskReward,
+                        qualityScore = qualityScore,
+                        allMandatoryFiltersPassed = allMandatoryPassed,
+                        setupReason = setup.supportingConfirmations.firstOrNull() ?: setup.setupType.label,
+                        dataSourceName = eval.venueName,
+                        timestampMs = nowMs,
+                        playSound = _scannerState.value.soundAlertsEnabled
+                    ) ?: false
+                    if (dispatched) {
+                        signalStateManager.markNotificationDispatched(entry.signalId, entry.symbol, entry.direction, nowMs)
+                    }
+                }
+            }
+        }
+        syncManagedStateFlows()
+    }
+
+    private fun syncManagedStateFlows() {
+        _managedSignals.value = signalStateManager.getAllEntries()
+        _signalTransitionLog.value = signalStateManager.getTransitionHistory()
     }
 
     /**
@@ -392,6 +499,11 @@ class FuturesScannerRepository(
 
         evaluatePaperOrdersAndTradeAlertsOnLivePrices(priceMap)
         invalidateExpiredHighRewardOpportunities(priceMap)
+        val nowMs = System.currentTimeMillis()
+        priceMap.forEach { (sym, price) ->
+            signalStateManager.evaluateMarketUpdate(sym, price, nowMs)
+        }
+        syncManagedStateFlows()
     }
 
     fun invalidateExpiredHighRewardOpportunities(
@@ -859,6 +971,7 @@ class FuturesScannerRepository(
                 put("levLimit", config.leverageLimit)
                 put("feePct", config.feeRatePercentPerSide)
                 put("slipPct", config.slippagePercentPerSide)
+                put("dailyWarnPct", config.dailyLossWarningPercent)
                 put("dailyLossPct", config.dailyLossLimitPercent)
                 put("maxTrades", config.maxTradesPerDay)
                 put("minRr", config.minRiskRewardRatio)
@@ -876,15 +989,16 @@ class FuturesScannerRepository(
             val curr = RiskCurrency.entries.firstOrNull { it.name == obj.optString("currency") } ?: RiskCurrency.USDT
             _budgetConfig.value = BudgetConfig(
                 accountBalanceUsdt = obj.optDouble("balance", 1000.0),
-                maxRiskPerTradeAmount = obj.optDouble("riskAmt", 20.0),
+                maxRiskPerTradeAmount = obj.optDouble("riskAmt", 10.0),
                 riskCurrency = curr,
                 pkrPerUsdtRate = obj.optDouble("pkrRate", 278.5),
-                maxRiskPercent = obj.optDouble("maxRiskPct", 2.0),
+                maxRiskPercent = obj.optDouble("maxRiskPct", 1.0),
                 leverageLimit = obj.optInt("levLimit", 5),
                 feeRatePercentPerSide = obj.optDouble("feePct", 0.05),
                 slippagePercentPerSide = obj.optDouble("slipPct", 0.03),
+                dailyLossWarningPercent = obj.optDouble("dailyWarnPct", 3.0),
                 dailyLossLimitPercent = obj.optDouble("dailyLossPct", 5.0),
-                maxTradesPerDay = obj.optInt("maxTrades", 5),
+                maxTradesPerDay = obj.optInt("maxTrades", 2),
                 minRiskRewardRatio = obj.optDouble("minRr", 1.5),
                 maxOpenExposurePercentOfBalance = obj.optDouble("maxExposurePct", 80.0)
             )

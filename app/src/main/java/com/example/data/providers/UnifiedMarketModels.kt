@@ -171,6 +171,51 @@ data class UnifiedHybridMarketState(
         get() = assembledAtPkt
 }
 
+enum class FuturesTelemetryStatus(val label: String) {
+    LIVE("LIVE"),
+    STALE("STALE"),
+    UNAVAILABLE("UNAVAILABLE"),
+    NOT_APPLICABLE("Not Futures / Non-Crypto")
+}
+
+data class OrderBookDepthSnapshot(
+    val symbol: String,
+    val bestBid: Double,
+    val bestAsk: Double,
+    val spreadBps: Double,
+    val topBidsNotionalUsd: Double,
+    val topAsksNotionalUsd: Double,
+    val bidAskImbalanceRatio: Double,
+    val strongestBidWallPrice: Double?,
+    val strongestAskWallPrice: Double?,
+    val fetchedAtMillis: Long
+)
+
+data class FuturesLiquiditySnapshot(
+    val symbol: String,
+    val isCryptoFutures: Boolean,
+    val status: FuturesTelemetryStatus,
+    val openInterestContracts: Double? = null,
+    val openInterestChangePercent: Double? = null,
+    val fundingRatePercent: Double? = null,
+    val longShortAccountRatio: Double? = null,
+    val takerCvd: Double? = null,
+    val lastBarVolumeDelta: Double? = null,
+    val orderBookDepth: OrderBookDepthSnapshot? = null,
+    val liquidationDataAvailable: Boolean = false,
+    val liquidationNote: String = "UNAVAILABLE: Real-time liquidation heatmap feed not connected (no synthetic clusters generated).",
+    val fetchedAtMillis: Long = 0L,
+    val maxAllowedAgeMillis: Long = 180_000L,
+    val source: String = "Binance USDT-M Futures Public REST"
+) {
+    fun isFresh(referenceTimeMs: Long = System.currentTimeMillis()): Boolean {
+        if (!isCryptoFutures) return false
+        if (status != FuturesTelemetryStatus.LIVE) return false
+        if (fetchedAtMillis <= 0L) return false
+        return (referenceTimeMs - fetchedAtMillis) <= maxAllowedAgeMillis
+    }
+}
+
 fun formatPktTimestamp(millis: Long): String =
     com.example.util.TimeZoneUtils.formatKarachiFullWithTz(millis)
 

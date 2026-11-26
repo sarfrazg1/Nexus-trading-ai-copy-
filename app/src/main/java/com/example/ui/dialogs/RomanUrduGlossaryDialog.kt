@@ -49,17 +49,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.learning.LearningContentDatabase
 import com.example.data.learning.LearningLanguageMode
 import com.example.data.smc.SmcGlossaryItem
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BearishRedBg
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurface
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 /**
  * Unified Educational Dialog serving all technical term info clicks throughout NEXUS AI.
@@ -73,6 +63,7 @@ fun RomanUrduGlossaryDialog(
     onOpenFullLesson: ((String) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     var activeLang by remember { mutableStateOf(initialLanguageMode) }
 
     // Look up enriched lesson if present in database
@@ -88,9 +79,9 @@ fun RomanUrduGlossaryDialog(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .clip(RoundedCornerShape(20.dp))
-                .border(1.dp, NexusGold.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                .border(1.dp, colors.gold.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                 .testTag("roman_urdu_glossary_dialog"),
-            colors = CardDefaults.cardColors(containerColor = NavyCard)
+            colors = CardDefaults.cardColors(containerColor = colors.card)
         ) {
             Column(
                 modifier = Modifier
@@ -108,13 +99,13 @@ fun RomanUrduGlossaryDialog(
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
-                                .background(NexusGold.copy(alpha = 0.15f), CircleShape),
+                                .background(colors.gold.copy(alpha = 0.15f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.School,
                                 contentDescription = "Education",
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -122,14 +113,14 @@ fun RomanUrduGlossaryDialog(
                         Column {
                             Box(
                                 modifier = Modifier
-                                    .background(NexusGold.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                    .background(colors.gold.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = (matchingLesson?.category?.title ?: item.category).uppercase(),
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = NexusGold
+                                    color = colors.gold
                                 )
                             }
                             Spacer(modifier = Modifier.height(2.dp))
@@ -143,7 +134,7 @@ fun RomanUrduGlossaryDialog(
                                 } ?: item.title,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Black,
-                                color = TextPrimary
+                                color = colors.textPrimary
                             )
                         }
                     }
@@ -152,12 +143,12 @@ fun RomanUrduGlossaryDialog(
                         onClick = onDismiss,
                         modifier = Modifier
                             .size(32.dp)
-                            .background(NavySurface, CircleShape)
+                            .background(colors.surface, CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close",
-                            tint = TextMuted,
+                            tint = colors.textMuted,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -170,7 +161,7 @@ fun RomanUrduGlossaryDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurface)
+                        .background(colors.surface)
                         .padding(3.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -180,7 +171,7 @@ fun RomanUrduGlossaryDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSel) NexusGold else NavySurface)
+                                .background(if (isSel) colors.gold else colors.surface)
                                 .clickable { activeLang = mode }
                                 .padding(vertical = 6.dp)
                                 .testTag("glossary_lang_${mode.id}"),
@@ -190,7 +181,7 @@ fun RomanUrduGlossaryDialog(
                                 text = mode.label,
                                 fontSize = 11.sp,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSel) NavyBackground else TextSecondary
+                                color = if (isSel) colors.onGold else colors.textSecondary
                             )
                         }
                     }
@@ -210,15 +201,15 @@ fun RomanUrduGlossaryDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(NavySurface, RoundedCornerShape(12.dp))
-                        .border(1.dp, NavyBorder, RoundedCornerShape(12.dp))
+                        .background(colors.surface, RoundedCornerShape(12.dp))
+                        .border(1.dp, colors.border, RoundedCornerShape(12.dp))
                         .padding(14.dp)
                 ) {
                     Text(
                         text = summaryText,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = NexusGold,
+                        color = colors.gold,
                         lineHeight = 20.sp
                     )
                 }
@@ -234,7 +225,7 @@ fun RomanUrduGlossaryDialog(
                     },
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
+                    color = colors.textSecondary,
                     letterSpacing = 0.5.sp
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -250,7 +241,7 @@ fun RomanUrduGlossaryDialog(
                 Text(
                     text = detailText,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextPrimary.copy(alpha = 0.9f),
+                    color = colors.textPrimary.copy(alpha = 0.9f),
                     lineHeight = 22.sp
                 )
 
@@ -265,7 +256,7 @@ fun RomanUrduGlossaryDialog(
                         },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
+                        color = colors.textSecondary,
                         letterSpacing = 0.5.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -279,13 +270,13 @@ fun RomanUrduGlossaryDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(NavySurfaceVariant, RoundedCornerShape(10.dp))
+                            .background(colors.surfaceVariant, RoundedCornerShape(10.dp))
                             .padding(12.dp)
                     ) {
                         Text(
                             text = exampleText,
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             lineHeight = 18.sp
                         )
                     }
@@ -305,15 +296,15 @@ fun RomanUrduGlossaryDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(NexusGold.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
-                        .border(1.dp, NexusGold.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                        .background(colors.gold.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                        .border(1.dp, colors.gold.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                         .padding(14.dp)
                 ) {
                     Row(verticalAlignment = Alignment.Top) {
                         Icon(
                             imageVector = Icons.Default.Lightbulb,
                             contentDescription = "Trading Tip",
-                            tint = NexusGold,
+                            tint = colors.gold,
                             modifier = Modifier
                                 .size(20.dp)
                                 .padding(top = 2.dp)
@@ -324,13 +315,13 @@ fun RomanUrduGlossaryDialog(
                                 text = "Pro Trading Tip:",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = NexusGold
+                                color = colors.gold
                             )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = tipText,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 lineHeight = 18.sp
                             )
                         }
@@ -343,15 +334,15 @@ fun RomanUrduGlossaryDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(BearishRedBg, RoundedCornerShape(10.dp))
-                            .border(1.dp, BearishRed.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                            .background(colors.bearishRedBg, RoundedCornerShape(10.dp))
+                            .border(1.dp, colors.bearishRed.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                             .padding(12.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.Warning,
                                 contentDescription = "Risk Warning",
-                                tint = BearishRed,
+                                tint = colors.bearishRed,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -361,7 +352,7 @@ fun RomanUrduGlossaryDialog(
                                     LearningLanguageMode.ROMAN_URDU, LearningLanguageMode.STANDARD_URDU -> matchingLesson.riskWarningRomanUrdu ?: matchingLesson.riskWarningEnglish
                                     LearningLanguageMode.BILINGUAL -> "${matchingLesson.riskWarningEnglish} | ${matchingLesson.riskWarningRomanUrdu ?: ""}"
                                 },
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp
                             )
@@ -384,11 +375,11 @@ fun RomanUrduGlossaryDialog(
                             .testTag("open_in_learning_center_btn"),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.MenuBook, contentDescription = null, tint = NexusGold, modifier = Modifier.size(16.dp))
+                        Icon(imageVector = Icons.Default.MenuBook, contentDescription = null, tint = colors.gold, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Study Full Lesson in Academy",
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )
@@ -402,12 +393,12 @@ fun RomanUrduGlossaryDialog(
                         .fillMaxWidth()
                         .height(44.dp)
                         .testTag("dismiss_glossary_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = NexusGold),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.gold),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Text(
                         text = "Samajh Gaya (Got It)",
-                        color = NavyBackground,
+                        color = colors.onGold,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )

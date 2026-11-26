@@ -18,6 +18,7 @@ enum class AssetCategory(val label: String) {
     ALL("All Assets"),
     CRYPTO("Crypto"),
     COMMODITIES("Commodities"),
+    STOCKS("Stocks"),
     FOREX("Forex"),
     INDICES("Indices")
 }
@@ -197,6 +198,9 @@ data class MarketNews(
     val confirmedFacts: List<String> = emptyList(),
     val aiInterpretation: String = "",
     val publishedTimestampMs: Long? = null,
+    val publishedTimestampPkt: String = "",
+    val retrievedTimestampMs: Long? = null,
+    val retrievedTimestampPkt: String = "",
     val isPreviouslySeen: Boolean = false,
     val contentStatus: ArticleContentStatus = ArticleContentStatus.PARTIAL_SUMMARY_ONLY,
     val btcImpactSummary: String = "",

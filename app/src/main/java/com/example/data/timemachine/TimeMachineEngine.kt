@@ -21,6 +21,89 @@ object TimeMachineEngine {
 
     private const val WARMUP_BARS = 20
 
+    fun runSetupModelBacktest(
+        symbol: String,
+        timeframe: CandleTimeframe,
+        setupType: com.example.data.scanner.SetupModelType,
+        direction: FuturesDirection,
+        slDistancePercent: Double,
+        tpDistancePercent: Double,
+        candles: List<Candle>,
+        config: BacktestConfig = BacktestConfig(),
+        granularSubCandlesByBarOpenTime: Map<Long, List<Candle>> = emptyMap(),
+        referenceTimeMs: Long = System.currentTimeMillis()
+    ): HistoricalBacktestResult {
+        return runBacktestInternal(
+            symbol = symbol,
+            timeframe = timeframe,
+            direction = direction,
+            slDistancePercent = slDistancePercent,
+            tpDistancePercent = tpDistancePercent,
+            candles = candles,
+            config = config,
+            granularSubCandlesByBarOpenTime = granularSubCandlesByBarOpenTime,
+            referenceTimeMs = referenceTimeMs,
+            setupType = setupType
+        )
+    }
+
+    fun runDirectionalBacktestComparison(
+        symbol: String,
+        timeframe: CandleTimeframe,
+        setupType: com.example.data.scanner.SetupModelType,
+        slDistancePercent: Double,
+        tpDistancePercent: Double,
+        candles: List<Candle>,
+        config: BacktestConfig = BacktestConfig(),
+        referenceTimeMs: Long = System.currentTimeMillis()
+    ): DirectionalSetupBacktestReport {
+        val longBt = runSetupModelBacktest(
+            symbol = symbol,
+            timeframe = timeframe,
+            setupType = setupType,
+            direction = FuturesDirection.LONG,
+            slDistancePercent = slDistancePercent,
+            tpDistancePercent = tpDistancePercent,
+            candles = candles,
+            config = config,
+            referenceTimeMs = referenceTimeMs
+        )
+        val shortBt = runSetupModelBacktest(
+            symbol = symbol,
+            timeframe = timeframe,
+            setupType = setupType,
+            direction = FuturesDirection.SHORT,
+            slDistancePercent = slDistancePercent,
+            tpDistancePercent = tpDistancePercent,
+            candles = candles,
+            config = config,
+            referenceTimeMs = referenceTimeMs
+        )
+        val summary = String.format(
+            Locale.US,
+            "%s (%s %s): LONG Win %.1f%% (n=%d, Exp %+.2fR, MaxDD %.1f%%) | SHORT Win %.1f%% (n=%d, Exp %+.2fR, MaxDD %.1f%%)",
+            setupType.label,
+            symbol,
+            timeframe.label,
+            longBt.empiricalWinRateConservativePercent,
+            longBt.sampleSize,
+            longBt.expectancyR,
+            longBt.maxDrawdownPercent,
+            shortBt.empiricalWinRateConservativePercent,
+            shortBt.sampleSize,
+            shortBt.expectancyR,
+            shortBt.maxDrawdownPercent
+        )
+        return DirectionalSetupBacktestReport(
+            symbol = symbol,
+            timeframe = timeframe,
+            setupTypeName = setupType.label,
+            longResult = longBt,
+            shortResult = shortBt,
+            comparisonSummary = summary
+        )
+    }
+
     fun runBacktest(
         symbol: String,
         timeframe: CandleTimeframe,
@@ -31,6 +114,32 @@ object TimeMachineEngine {
         config: BacktestConfig = BacktestConfig(),
         granularSubCandlesByBarOpenTime: Map<Long, List<Candle>> = emptyMap(),
         referenceTimeMs: Long = System.currentTimeMillis()
+    ): HistoricalBacktestResult {
+        return runBacktestInternal(
+            symbol = symbol,
+            timeframe = timeframe,
+            direction = direction,
+            slDistancePercent = slDistancePercent,
+            tpDistancePercent = tpDistancePercent,
+            candles = candles,
+            config = config,
+            granularSubCandlesByBarOpenTime = granularSubCandlesByBarOpenTime,
+            referenceTimeMs = referenceTimeMs,
+            setupType = null
+        )
+    }
+
+    private fun runBacktestInternal(
+        symbol: String,
+        timeframe: CandleTimeframe,
+        direction: FuturesDirection,
+        slDistancePercent: Double,
+        tpDistancePercent: Double,
+        candles: List<Candle>,
+        config: BacktestConfig,
+        granularSubCandlesByBarOpenTime: Map<Long, List<Candle>>,
+        referenceTimeMs: Long,
+        setupType: com.example.data.scanner.SetupModelType?
     ): HistoricalBacktestResult {
         val completed = TimeZoneUtils.filterCompletedCandles(candles, referenceTimeMs)
             .sortedBy { it.openTime }
@@ -71,7 +180,8 @@ object TimeMachineEngine {
                 slippagePercentPerSide = config.slippagePercentPerSide,
                 occurrences = emptyList(),
                 hasSufficientData = false,
-                missingDataAndLimitations = limitations
+                missingDataAndLimitations = limitations,
+                setupTypeName = setupType?.label
             )
         }
 
@@ -88,7 +198,12 @@ object TimeMachineEngine {
             if (i - lastTriggerIndex <= config.cooldownBarsBetweenTrades) continue
 
             val visiblePrefix = completed.subList(0, i + 1)
-            if (!matchesHistoricalSetupRule(visiblePrefix, direction)) continue
+            val matched = if (setupType != null) {
+                matchesSetupModelHistoricalRule(visiblePrefix, setupType, direction)
+            } else {
+                matchesHistoricalSetupRule(visiblePrefix, direction)
+            }
+            if (!matched) continue
 
             val entryIndex = i + 1
             val entryBar = completed[entryIndex]
@@ -230,6 +345,63 @@ object TimeMachineEngine {
             else -> 0.0
         }
 
+        // Peak-to-trough equity curve max drawdown (%)
+        var equity = 100.0
+        var peakEquity = 100.0
+        var maxDrawdownPct = 0.0
+        for (occ in occurrences) {
+            equity *= (1.0 + (occ.netReturnPercent / 100.0)).coerceAtLeast(0.01)
+            if (equity > peakEquity) peakEquity = equity
+            val dd = if (peakEquity > 0.0) ((peakEquity - equity) / peakEquity) * 100.0 else 0.0
+            if (dd > maxDrawdownPct) maxDrawdownPct = dd
+        }
+
+        // Expectancy in R and %
+        val wins = occurrences.filter { it.netReturnPercent > 0.0 }
+        val losses = occurrences.filter { it.netReturnPercent <= 0.0 }
+        val winProb = if (occurrences.isNotEmpty()) wins.size.toDouble() / occurrences.size else 0.0
+        val lossProb = if (occurrences.isNotEmpty()) losses.size.toDouble() / occurrences.size else 0.0
+        val avgWinR = if (wins.isNotEmpty()) wins.map { it.rMultiple }.average() else 0.0
+        val avgLossR = if (losses.isNotEmpty()) abs(losses.map { it.rMultiple }.average()) else 0.0
+        val expectancyR = (winProb * avgWinR) - (lossProb * avgLossR)
+        val expectancyPct = avgNetReturn
+
+        // Chronological In-Sample (first 70% bars) vs Out-of-Sample (final 30% bars)
+        val splitIndex = (completed.size * 0.70).toInt().coerceIn(WARMUP_BARS, completed.lastIndex)
+        val isOccs = occurrences.filter { it.entryIndex < splitIndex }
+        val oosOccs = occurrences.filter { it.entryIndex >= splitIndex }
+
+        fun winRateOf(list: List<BacktestTradeOccurrence>): Double {
+            val tp = list.count { it.outcome == BacktestOutcomeType.TP_FIRST }
+            val denom = list.count { it.outcome != BacktestOutcomeType.UNRESOLVED }
+            return if (denom > 0) (tp.toDouble() / denom) * 100.0 else 0.0
+        }
+
+        fun expectancyROf(list: List<BacktestTradeOccurrence>): Double =
+            if (list.isNotEmpty()) list.map { it.rMultiple }.average() else 0.0
+
+        fun pfOf(list: List<BacktestTradeOccurrence>): Double {
+            val w = list.filter { it.netReturnPercent > 0.0 }.sumOf { it.netReturnPercent }
+            val l = abs(list.filter { it.netReturnPercent < 0.0 }.sumOf { it.netReturnPercent })
+            return when {
+                l > 1e-9 -> w / l
+                w > 0.0 -> 9.99
+                else -> 0.0
+            }
+        }
+
+        val splitMetrics = InOutSampleSplitMetrics(
+            splitRatioInSample = 0.70,
+            inSampleCount = isOccs.size,
+            inSampleWinRatePercent = winRateOf(isOccs),
+            inSampleExpectancyR = expectancyROf(isOccs),
+            inSampleProfitFactor = pfOf(isOccs),
+            outOfSampleCount = oosOccs.size,
+            outOfSampleWinRatePercent = winRateOf(oosOccs),
+            outOfSampleExpectancyR = expectancyROf(oosOccs),
+            outOfSampleProfitFactor = pfOf(oosOccs)
+        )
+
         val sufficient = occurrences.size >= 6
         if (!sufficient) {
             limitations.add("Low historical occurrence count (${occurrences.size} matching setups found). Small samples have wide statistical variance.")
@@ -260,7 +432,12 @@ object TimeMachineEngine {
             slippagePercentPerSide = config.slippagePercentPerSide,
             occurrences = occurrences,
             hasSufficientData = sufficient,
-            missingDataAndLimitations = limitations
+            missingDataAndLimitations = limitations,
+            setupTypeName = setupType?.label,
+            maxDrawdownPercent = maxDrawdownPct,
+            expectancyR = expectancyR,
+            expectancyPercent = expectancyPct,
+            inOutSampleSplit = splitMetrics
         )
     }
 
@@ -546,6 +723,39 @@ object TimeMachineEngine {
             val bearishClose = current.close < current.open
             val breakdownOrRejection = current.close < prev.low || current.close < recentLow * 1.004
             belowTrend && bearishClose && breakdownOrRejection && volHealthy
+        }
+    }
+
+    internal fun matchesSetupModelHistoricalRule(
+        visiblePrefix: List<Candle>,
+        setupType: com.example.data.scanner.SetupModelType,
+        direction: FuturesDirection
+    ): Boolean {
+        if (visiblePrefix.size < WARMUP_BARS) return false
+        val current = visiblePrefix.last()
+        val prev = visiblePrefix[visiblePrefix.lastIndex - 1]
+        val priorSlice = visiblePrefix.subList(max(0, visiblePrefix.size - 12), visiblePrefix.lastIndex)
+        val priorLow = priorSlice.minOfOrNull { it.low } ?: prev.low
+        val priorHigh = priorSlice.maxOfOrNull { it.high } ?: prev.high
+
+        return when (setupType) {
+            com.example.data.scanner.SetupModelType.LIQUIDITY_SWEEP_REVERSAL -> {
+                val range = (current.high - current.low).coerceAtLeast(1e-9)
+                if (direction == FuturesDirection.LONG) {
+                    val sweptLow = current.low < priorLow || prev.low < priorLow
+                    val reclaimed = current.close > priorLow && current.close > current.open
+                    val lowerWick = min(current.open, current.close) - current.low
+                    sweptLow && reclaimed && (lowerWick / range >= 0.25 || current.close > prev.high)
+                } else {
+                    val sweptHigh = current.high > priorHigh || prev.high > priorHigh
+                    val rejected = current.close < priorHigh && current.close < current.open
+                    val upperWick = current.high - max(current.open, current.close)
+                    sweptHigh && rejected && (upperWick / range >= 0.25 || current.close < prev.low)
+                }
+            }
+            com.example.data.scanner.SetupModelType.TREND_CONTINUATION -> {
+                matchesHistoricalSetupRule(visiblePrefix, direction)
+            }
         }
     }
 

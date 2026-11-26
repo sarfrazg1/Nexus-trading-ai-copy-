@@ -117,20 +117,27 @@ class GdeltNewsProvider(
             val reliability = classifyDomainReliability(domain)
             if (!includeLowReliability && reliability == NewsReliabilityTier.LOW) continue
 
-            val formattedDate = publishedMs?.let { TimeZoneUtils.formatKarachiShort(it) } ?: "Recent Wire (${TimeZoneUtils.ASIA_KARACHI_ID})"
+            val publishedPkt = publishedMs?.let { TimeZoneUtils.formatKarachiShort(it) }
+                ?: "Publication Time Unverified (${TimeZoneUtils.ASIA_KARACHI_ID})"
+            val retrievedPkt = TimeZoneUtils.formatKarachiShort(nowMillis)
+            val isStaleWarning = ageHours != null && ageHours > 24.0
+            val formattedDate = if (isStaleWarning) "Published: $publishedPkt (Older Archive)" else "Published: $publishedPkt"
             val rawNews = MarketNews(
                 id = "gdelt_${i}_${seendate.take(10)}",
                 title = title,
                 source = "${domain.ifBlank { "Financial Wire" }} (${reliability.label})",
                 timestamp = formattedDate,
                 category = inferCategory(title),
-                summary = "Wire headline from $domain (Relevance $relevance • ${reliability.label} • $formattedDate). Partial/Summary dispatch — tap to fetch full article if publisher permits.",
+                summary = "Wire headline from $domain (Relevance $relevance • ${reliability.label} • Published $publishedPkt | Retrieved $retrievedPkt). Partial/Summary dispatch — tap to fetch full article if publisher permits.",
                 impact = NewsImpact.NEUTRAL,
-                fullContent = "Confirmed Dispatch Metadata:\n• Outlet: $domain (${reliability.label})\n• Published (${TimeZoneUtils.ASIA_KARACHI_ID}): $formattedDate\n• Relevance Score: $relevance\n\nPartial Wire Notice: GDELT provides indexed headline metadata; complete article body is fetched live from the publisher URL when technically & legally accessible.\n\nURL: $articleUrl",
+                fullContent = "Confirmed Dispatch Metadata:\n• Outlet: $domain (${reliability.label})\n• Publication Time (${TimeZoneUtils.ASIA_KARACHI_ID}): $publishedPkt\n• App Retrieval Time (${TimeZoneUtils.ASIA_KARACHI_ID}): $retrievedPkt\n• Relevance Score: $relevance\n\nPartial Wire Notice: GDELT provides indexed headline metadata; complete article body is fetched live from the publisher URL when technically & legally accessible.\n\nURL: $articleUrl",
                 url = articleUrl,
                 eventStatus = EventStatus.UNVERIFIED,
                 analysisMethod = "GDELT Filtered Wire (${reliability.name})",
                 publishedTimestampMs = publishedMs,
+                publishedTimestampPkt = publishedPkt,
+                retrievedTimestampMs = nowMillis,
+                retrievedTimestampPkt = retrievedPkt,
                 contentStatus = com.example.data.model.ArticleContentStatus.PARTIAL_SUMMARY_ONLY
             )
 

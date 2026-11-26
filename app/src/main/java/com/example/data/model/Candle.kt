@@ -60,6 +60,22 @@ enum class CandleTimeframe(
     D1("1D", "1d", "1d", "1y", "1 Day"),
     W1("1W", "1w", "1wk", "2y", "1 Week");
 
+    val durationMillis: Long
+        get() = when (this) {
+            M1 -> 60_000L
+            M3 -> 180_000L
+            M5 -> 300_000L
+            M15 -> 900_000L
+            M30 -> 1_800_000L
+            H1 -> 3_600_000L
+            H2 -> 7_200_000L
+            H4 -> 14_400_000L
+            H6 -> 21_600_000L
+            H12 -> 43_200_000L
+            D1 -> 86_400_000L
+            W1 -> 604_800_000L
+        }
+
     companion object {
         fun fromLabel(label: String): CandleTimeframe =
             entries.firstOrNull { it.label.equals(label, ignoreCase = true) } ?: H1

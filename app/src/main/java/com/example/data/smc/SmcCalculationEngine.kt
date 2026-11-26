@@ -41,11 +41,31 @@ object SmcCalculationEngine {
         // 4. Liquidity Pools (BSL, SSL, EQH, EQL, Sweeps, Stop-Hunt)
         val liquidityAnalysis = detectLiquidity(candles, structureAnalysis.swingPoints)
 
-        // 5. Support & Resistance + Supply & Demand
-        val priceZones = detectSupportResistanceAndSupplyDemand(candles, structureAnalysis)
+        // 5. Volume Profile, PDH/PDL, PWH/PWL, Advanced S/R + Supply & Demand + Breakout-Retests
+        val atr = AdvancedStructureAndFibEngine.estimateAtr(candles)
+        val volumeProfile = AdvancedStructureAndFibEngine.computeVolumeProfile(candles)
+        val periodLevels = AdvancedStructureAndFibEngine.extractPreviousPeriodLevels(candles)
+        val (advancedZones, breakoutRetests) = AdvancedStructureAndFibEngine.buildAdvancedPriceZones(
+            candles = candles,
+            structure = structureAnalysis,
+            orderBlocks = orderBlocks,
+            volumeProfile = volumeProfile,
+            periodLevels = periodLevels,
+            atr = atr
+        )
+        val priceZones = advancedZones.ifEmpty {
+            detectSupportResistanceAndSupplyDemand(candles, structureAnalysis)
+        }
 
-        // 6. Fibonacci Retracement & Extensions
-        val fibonacci = calculateFibonacciLevels(candles, structureAnalysis)
+        // 6. Strict Fibonacci Retracement & Extensions + Contextual Price Action
+        val (validatedFib, priceActionEvents) = AdvancedStructureAndFibEngine.calculateValidatedFibonacci(
+            candles = candles,
+            structure = structureAnalysis,
+            orderBlocks = orderBlocks,
+            priceZones = priceZones,
+            htfSnapshots = allTimeframeSnapshots
+        )
+        val fibonacci = validatedFib ?: calculateFibonacciLevels(candles, structureAnalysis)
 
         // 7. Multi-Timeframe Analysis
         val multiTimeframe = if (allTimeframeSnapshots.isNotEmpty()) {
@@ -65,7 +85,14 @@ object SmcCalculationEngine {
             priceZones = priceZones,
             fibonacci = fibonacci,
             multiTimeframe = multiTimeframe,
-            isInsufficientData = false
+            isInsufficientData = false,
+            volumeProfile = volumeProfile,
+            breakoutRetests = breakoutRetests,
+            priceActionPatterns = priceActionEvents,
+            previousDayHigh = periodLevels.pdh,
+            previousDayLow = periodLevels.pdl,
+            previousWeekHigh = periodLevels.pwh,
+            previousWeekLow = periodLevels.pwl
         )
     }
 
@@ -140,18 +167,19 @@ object SmcCalculationEngine {
             classifiedSwings.add(sp.copy(type = classifiedType))
         }
 
-        // Detect BOS & CHoCH breaks
+        // Detect BOS, CHoCH & MSS breaks
         val structureBreaks = mutableListOf<MarketStructureBreak>()
         var currentTrend = MarketTrendState.NEUTRAL_RANGING
         var activeSwingHigh: SwingPoint? = null
         var activeSwingLow: SwingPoint? = null
+        val avgBody = candles.map { abs(it.close - it.open) }.average().takeIf { it > 0.0 } ?: 1.0
 
         for (sp in classifiedSwings) {
             if (sp.isHigh) {
-                // Check if price broke above active swing high
                 val prevHigh = activeSwingHigh
                 if (prevHigh != null && sp.price > prevHigh.price) {
-                    val breakType = if (currentTrend == MarketTrendState.BEARISH_DOWNTREND) {
+                    val isReversalShift = currentTrend == MarketTrendState.BEARISH_DOWNTREND
+                    val breakType = if (isReversalShift) {
                         currentTrend = MarketTrendState.BULLISH_UPTREND
                         MarketStructureBreakType.CHOCH_BULLISH
                     } else {
@@ -172,13 +200,27 @@ object SmcCalculationEngine {
                                 "Bullish Structure Break (BOS) continuation above $%.2f".format(prevHigh.price)
                         )
                     )
+
+                    val breakBody = abs(candles[sp.index].close - candles[sp.index].open)
+                    if (isReversalShift && breakBody >= avgBody * 1.15) {
+                        structureBreaks.add(
+                            MarketStructureBreak(
+                                type = MarketStructureBreakType.MSS_BULLISH,
+                                breakPrice = sp.price,
+                                brokenSwingPrice = prevHigh.price,
+                                breakCandleIndex = sp.index,
+                                timestamp = sp.timestamp,
+                                description = "Bullish Market Structure Shift (MSS) displacement above $%.2f".format(prevHigh.price)
+                            )
+                        )
+                    }
                 }
                 activeSwingHigh = sp
             } else {
-                // Check if price broke below active swing low
                 val prevLow = activeSwingLow
                 if (prevLow != null && sp.price < prevLow.price) {
-                    val breakType = if (currentTrend == MarketTrendState.BULLISH_UPTREND) {
+                    val isReversalShift = currentTrend == MarketTrendState.BULLISH_UPTREND
+                    val breakType = if (isReversalShift) {
                         currentTrend = MarketTrendState.BEARISH_DOWNTREND
                         MarketStructureBreakType.CHOCH_BEARISH
                     } else {
@@ -199,6 +241,20 @@ object SmcCalculationEngine {
                                 "Bearish Structure Break (BOS) continuation below $%.2f".format(prevLow.price)
                         )
                     )
+
+                    val breakBody = abs(candles[sp.index].close - candles[sp.index].open)
+                    if (isReversalShift && breakBody >= avgBody * 1.15) {
+                        structureBreaks.add(
+                            MarketStructureBreak(
+                                type = MarketStructureBreakType.MSS_BEARISH,
+                                breakPrice = sp.price,
+                                brokenSwingPrice = prevLow.price,
+                                breakCandleIndex = sp.index,
+                                timestamp = sp.timestamp,
+                                description = "Bearish Market Structure Shift (MSS) displacement below $%.2f".format(prevLow.price)
+                            )
+                        )
+                    }
                 }
                 activeSwingLow = sp
             }
@@ -237,7 +293,9 @@ object SmcCalculationEngine {
             isBullishBOSPresent = structureBreaks.any { it.type == MarketStructureBreakType.BOS_BULLISH },
             isBearishBOSPresent = structureBreaks.any { it.type == MarketStructureBreakType.BOS_BEARISH },
             isBullishCHoCHPresent = structureBreaks.any { it.type == MarketStructureBreakType.CHOCH_BULLISH },
-            isBearishCHoCHPresent = structureBreaks.any { it.type == MarketStructureBreakType.CHOCH_BEARISH }
+            isBearishCHoCHPresent = structureBreaks.any { it.type == MarketStructureBreakType.CHOCH_BEARISH },
+            isBullishMSSPresent = structureBreaks.any { it.type == MarketStructureBreakType.MSS_BULLISH },
+            isBearishMSSPresent = structureBreaks.any { it.type == MarketStructureBreakType.MSS_BEARISH }
         )
     }
 

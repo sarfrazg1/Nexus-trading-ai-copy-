@@ -145,10 +145,96 @@ class BybitV5PublicProvider(
         )
     }
 
+    suspend fun fetchLinearCandles(
+        symbol: String,
+        timeframe: com.example.data.model.CandleTimeframe,
+        limit: Int = 200
+    ): ProviderFetchOutcome<List<com.example.data.model.Candle>> = withContext(Dispatchers.IO) {
+        val interval = toBybitInterval(timeframe)
+        val clampedLimit = limit.coerceIn(1, 200)
+        val url = "$baseUrl/v5/market/kline?category=linear&symbol=${symbol.uppercase()}&interval=$interval&limit=$clampedLimit"
+
+        val outcome = http.getWithCacheAndRetry(
+            providerId = "${PROVIDER_ID}_kline",
+            providerName = "$PROVIDER_NAME (Linear Kline)",
+            url = url,
+            cacheEntry = null,
+            cacheTtlMillis = 0L,
+            maxAttempts = 2
+        )
+
+        val body = outcome.data ?: return@withContext ProviderFetchOutcome(null, outcome.metadata)
+        val parsed = parseLinearKlineBody(body, timeframe.durationMillis)
+        if (parsed.isEmpty()) {
+            return@withContext ProviderFetchOutcome(
+                data = null,
+                metadata = outcome.metadata.copy(
+                    dataStatus = MarketDataStatus.UNAVAILABLE,
+                    health = ProviderHealthStatus.UNAVAILABLE,
+                    errorMessage = "Bybit V5 linear kline returned 0 bars for $symbol"
+                )
+            )
+        }
+        ProviderFetchOutcome(data = parsed, metadata = outcome.metadata)
+    }
+
     companion object {
         const val PROVIDER_ID = "bybit_v5_public"
         const val PROVIDER_NAME = "Bybit V5 Public Market"
         const val EXCHANGE_LABEL = "Bybit V5"
         const val DEFAULT_BASE_URL = "https://api.bybit.com"
+
+        fun toBybitInterval(timeframe: com.example.data.model.CandleTimeframe): String = when (timeframe) {
+            com.example.data.model.CandleTimeframe.M1 -> "1"
+            com.example.data.model.CandleTimeframe.M3 -> "3"
+            com.example.data.model.CandleTimeframe.M5 -> "5"
+            com.example.data.model.CandleTimeframe.M15 -> "15"
+            com.example.data.model.CandleTimeframe.M30 -> "30"
+            com.example.data.model.CandleTimeframe.H1 -> "60"
+            com.example.data.model.CandleTimeframe.H2 -> "120"
+            com.example.data.model.CandleTimeframe.H4 -> "240"
+            com.example.data.model.CandleTimeframe.H6 -> "360"
+            com.example.data.model.CandleTimeframe.H12 -> "720"
+            com.example.data.model.CandleTimeframe.D1 -> "D"
+            com.example.data.model.CandleTimeframe.W1 -> "W"
+        }
+
+        fun parseLinearKlineBody(
+            body: String,
+            timeframeDurationMillis: Long
+        ): List<com.example.data.model.Candle> {
+            return runCatching {
+                val root = JSONObject(body)
+                if (root.optInt("retCode", -1) != 0) return emptyList()
+                val list = root.optJSONObject("result")?.optJSONArray("list") ?: return emptyList()
+                val candles = ArrayList<com.example.data.model.Candle>(list.length())
+                for (i in 0 until list.length()) {
+                    val row = list.optJSONArray(i) ?: continue
+                    val startTime = row.optString(0).toLongOrNull() ?: continue
+                    val open = row.optString(1).toDoubleOrNull() ?: continue
+                    val high = row.optString(2).toDoubleOrNull() ?: continue
+                    val low = row.optString(3).toDoubleOrNull() ?: continue
+                    val close = row.optString(4).toDoubleOrNull() ?: continue
+                    val volume = row.optString(5).toDoubleOrNull() ?: 0.0
+                    val turnover = row.optString(6).toDoubleOrNull() ?: 0.0
+                    if (close > 0.0 && high >= low) {
+                        candles.add(
+                            com.example.data.model.Candle(
+                                openTime = startTime,
+                                open = open,
+                                high = high,
+                                low = low,
+                                close = close,
+                                volume = volume,
+                                closeTime = startTime + timeframeDurationMillis - 1L,
+                                quoteVolume = turnover
+                            )
+                        )
+                    }
+                }
+                // Bybit V5 returns newest-first; sort ascending chronologically
+                candles.sortedBy { it.openTime }
+            }.getOrDefault(emptyList())
+        }
     }
 }

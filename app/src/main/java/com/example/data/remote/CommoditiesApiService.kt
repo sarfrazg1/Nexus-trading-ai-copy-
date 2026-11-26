@@ -40,6 +40,14 @@ class CommoditiesApiService(
         "NATGAS" to "NG=F" // Natural Gas
     )
 
+    private val stockAndMacroSymbols = mapOf(
+        "NVDA" to "NVDA",
+        "GOOG" to "GOOG",
+        "GOOGL" to "GOOGL",
+        "EURUSD" to "EURUSD=X",
+        "SPX" to "^GSPC"
+    )
+
     suspend fun fetchCommodityQuotes(
         userApiKey: String = ""
     ): Map<String, CommodityQuote> = withContext(Dispatchers.IO) {
@@ -50,7 +58,7 @@ class CommoditiesApiService(
             tryTwelveData(userApiKey, results)
         }
 
-        // For any remaining commodities, try legitimate free public delayed quotes
+        // For any remaining commodities, try legitimate free public quotes from COMEX/NYMEX (Yahoo Finance)
         for ((id, ticker) in commoditySymbols) {
             if (results.containsKey(id)) continue
             val quote = fetchPublicYahooQuote(id, ticker)
@@ -59,6 +67,17 @@ class CommoditiesApiService(
             }
         }
 
+        results
+    }
+
+    suspend fun fetchStocksAndMacroQuotes(): Map<String, CommodityQuote> = withContext(Dispatchers.IO) {
+        val results = mutableMapOf<String, CommodityQuote>()
+        for ((id, ticker) in stockAndMacroSymbols) {
+            val quote = fetchPublicYahooQuote(id, ticker)
+            if (quote != null) {
+                results[id] = quote
+            }
+        }
         results
     }
 
@@ -93,6 +112,14 @@ class CommoditiesApiService(
                 val volRaw = meta.optLong("regularMarketVolume", 0L)
                 val volStr = if (volRaw > 0) formatVolume(volRaw, id) else null
 
+                val marketTimeSec = meta.optLong("regularMarketTime", 0L)
+                val quoteTimestampMs = if (marketTimeSec > 0L) marketTimeSec * 1000L else System.currentTimeMillis()
+                val ageMs = (System.currentTimeMillis() - quoteTimestampMs).coerceAtLeast(0L)
+                val resolvedStatus = when {
+                    ageMs > 7L * 24L * 60L * 60L * 1000L -> MarketDataStatus.STALE
+                    else -> MarketDataStatus.DELAYED
+                }
+
                 // Extract sparkline points from indicators if available
                 val sparkline = mutableListOf<Float>()
                 val indicators = first.optJSONObject("indicators")
@@ -107,13 +134,18 @@ class CommoditiesApiService(
                     }
                 }
 
-                val (symbolDisplay, nameDisplay) = when (id) {
-                    "XAU" -> "XAU/USD" to "Gold Spot (COMEX)"
-                    "XAG" -> "XAG/USD" to "Silver Spot (COMEX)"
-                    "WTI" -> "WTI/USD" to "WTI Crude Oil"
-                    "BRENT" -> "BRENT/USD" to "Brent Crude Oil"
-                    "NATGAS" -> "NG/USD" to "Natural Gas"
-                    else -> id to id
+                val (symbolDisplay, nameDisplay, sourceLabel) = when (id) {
+                    "XAU" -> Triple("XAU/USD", "Gold Spot (COMEX)", "COMEX / Yahoo Finance (Delayed)")
+                    "XAG" -> Triple("XAG/USD", "Silver Spot (COMEX)", "COMEX / Yahoo Finance (Delayed)")
+                    "WTI" -> Triple("WTI/USD", "WTI Crude Oil", "NYMEX / Yahoo Finance (Delayed)")
+                    "BRENT" -> Triple("BRENT/USD", "Brent Crude Oil", "ICE / Yahoo Finance (Delayed)")
+                    "NATGAS" -> Triple("NG/USD", "Natural Gas", "NYMEX / Yahoo Finance (Delayed)")
+                    "NVDA" -> Triple("NVDA", "NVIDIA Corporation", "NASDAQ / Yahoo Finance (Delayed)")
+                    "GOOG" -> Triple("GOOG", "Alphabet Inc. (Class C)", "NASDAQ / Yahoo Finance (Delayed)")
+                    "GOOGL" -> Triple("GOOGL", "Alphabet Inc. (Class A)", "NASDAQ / Yahoo Finance (Delayed)")
+                    "EURUSD" -> Triple("EUR/USD", "Euro / US Dollar", "Interbank FX / Yahoo Finance (Delayed)")
+                    "SPX" -> Triple("SPX500", "S&P 500 Index", "US Equity Index / Yahoo Finance (Delayed)")
+                    else -> Triple(id, id, "Yahoo Finance (Delayed)")
                 }
 
                 return CommodityQuote(
@@ -126,9 +158,9 @@ class CommoditiesApiService(
                     high24h = high,
                     low24h = low,
                     volume = volStr,
-                    status = MarketDataStatus.DELAYED,
-                    sourceName = "NYMEX/COMEX (Exchange Delayed)",
-                    timestamp = System.currentTimeMillis(),
+                    status = resolvedStatus,
+                    sourceName = sourceLabel,
+                    timestamp = quoteTimestampMs,
                     sparkline = sparkline
                 )
             }
@@ -179,6 +211,7 @@ class CommoditiesApiService(
             "XAU", "XAG" -> "oz"
             "WTI", "BRENT" -> "bbl"
             "NATGAS" -> "MMBtu"
+            "NVDA", "GOOG", "GOOGL" -> "shs"
             else -> ""
         }
         return when {

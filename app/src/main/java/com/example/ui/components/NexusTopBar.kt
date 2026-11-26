@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MarketDataStatus
 import com.example.ui.theme.NexusTheme
-import com.example.ui.theme.WarningOrange
 
 @Composable
 fun NexusTopBar(
@@ -97,7 +96,7 @@ fun NexusTopBar(
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = "Nexus AI",
-                        tint = colors.card,
+                        tint = colors.onGold,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -131,7 +130,7 @@ fun NexusTopBar(
                             isWebSocketLive -> colors.bullishGreen
                             btcStatus == MarketDataStatus.LIVE -> colors.bullishGreen
                             btcStatus == MarketDataStatus.DELAYED -> colors.gold
-                            btcStatus == MarketDataStatus.STALE -> WarningOrange
+                            btcStatus == MarketDataStatus.STALE -> colors.warningOrange
                             else -> colors.bearishRed
                         }
 

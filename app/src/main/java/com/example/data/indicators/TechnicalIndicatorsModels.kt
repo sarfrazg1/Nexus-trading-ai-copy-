@@ -21,13 +21,65 @@ enum class IndicatorCategory(val label: String) {
     VOLUME("Volume")
 }
 
+enum class IndicatorValidationStatus(val label: String) {
+    VALID("Valid"),
+    INSUFFICIENT_DATA("Insufficient Data"),
+    UNAVAILABLE("Unavailable"),
+    STALE("Stale"),
+    INVALID("Invalid")
+}
+
+enum class VolatilityRegime(val label: String) {
+    NORMAL("Normal Volatility"),
+    SQUEEZE("BB/Keltner Squeeze"),
+    EXPANSION("Volatility Expansion"),
+    EXTREME_UNSTABLE("Extreme / Unstable Volatility")
+}
+
+enum class RsiDivergenceType(val label: String) {
+    NONE("No Divergence"),
+    BULLISH_REGULAR("Bullish Swing Divergence"),
+    BEARISH_REGULAR("Bearish Swing Divergence")
+}
+
+data class RsiDivergenceResult(
+    val type: RsiDivergenceType,
+    val swing1Index: Int,
+    val swing2Index: Int,
+    val swing1Price: Double,
+    val swing2Price: Double,
+    val swing1Rsi: Double,
+    val swing2Rsi: Double,
+    val isConfirmedClosedSwings: Boolean = true,
+    val description: String
+)
+
+data class PivotPointsResult(
+    val pivotPoint: Double,
+    val r1: Double,
+    val r2: Double,
+    val s1: Double,
+    val s2: Double,
+    val sourceTimestampMs: Long
+)
+
+data class EmaSlopeEvaluation(
+    val ema20SlopePercent: Double?,
+    val ema50SlopePercent: Double?,
+    val ema200SlopePercent: Double?,
+    val isBullishAlignedWithSlope: Boolean,
+    val isBearishAlignedWithSlope: Boolean,
+    val summary: String
+)
+
 // ---- Trend Group Models ----
 data class EmaSet(
     val ema9: Double?,
     val ema20: Double?,
     val ema50: Double?,
     val ema100: Double?,
-    val ema200: Double?
+    val ema200: Double?,
+    val slopeEvaluation: EmaSlopeEvaluation? = null
 )
 
 data class SmaSet(
@@ -42,7 +94,8 @@ data class SupertrendResult(
     val isBullish: Boolean,
     val upperBand: Double,
     val lowerBand: Double,
-    val stance: IndicatorStance
+    val stance: IndicatorStance,
+    val isCloseConfirmed: Boolean = true
 )
 
 data class AdxResult(
@@ -50,7 +103,14 @@ data class AdxResult(
     val plusDI: Double,
     val minusDI: Double,
     val stance: IndicatorStance,
-    val strengthDescription: String
+    val strengthDescription: String,
+    val isTrending: Boolean = adx >= 20.0,
+    val isStrongTrend: Boolean = adx >= 25.0,
+    val dmiDirection: IndicatorStance = when {
+        plusDI > minusDI -> IndicatorStance.BULLISH
+        minusDI > plusDI -> IndicatorStance.BEARISH
+        else -> IndicatorStance.NEUTRAL
+    }
 )
 
 data class IchimokuResult(
@@ -60,7 +120,10 @@ data class IchimokuResult(
     val senkouSpanB: Double,
     val chikouSpan: Double,
     val stance: IndicatorStance,
-    val cloudDescription: String
+    val cloudDescription: String,
+    val isTenkanAboveKijun: Boolean = tenkanSen > kijunSen,
+    val isChikouConfirmedBullish: Boolean = false,
+    val isChikouConfirmedBearish: Boolean = false
 )
 
 data class TrendIndicators(
@@ -109,7 +172,8 @@ data class MomentumIndicators(
     val williamsR: Double?,
     val williamsRStance: IndicatorStance,
     val roc: Double?,
-    val rocStance: IndicatorStance
+    val rocStance: IndicatorStance,
+    val rsiDivergence: RsiDivergenceResult? = null
 )
 
 // ---- Volatility Group Models ----
@@ -146,7 +210,10 @@ data class VolatilityIndicators(
     val bollingerBands: BollingerResult?,
     val atr: AtrResult?,
     val keltnerChannels: KeltnerResult?,
-    val donchianChannels: DonchianResult?
+    val donchianChannels: DonchianResult?,
+    val volatilityRegime: VolatilityRegime = VolatilityRegime.NORMAL,
+    val isBbInsideKeltnerSqueeze: Boolean = false,
+    val pivotPoints: PivotPointsResult? = null
 )
 
 // ---- Volume Group Models ----
@@ -174,7 +241,8 @@ data class VolumeIndicators(
     val cmfStance: IndicatorStance,
     val relativeVolume: Double?,
     val relativeVolumeStance: IndicatorStance,
-    val volumeDelta: VolumeDeltaResult?
+    val volumeDelta: VolumeDeltaResult?,
+    val hasReliableVolume: Boolean = true
 )
 
 // ---- UI Presentation Card Model ----

@@ -34,16 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MarketAlert
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavyHover
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 import java.util.Locale
 
 @Composable
@@ -53,13 +44,14 @@ fun AlertItemCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = modifier
             .fillMaxWidth()
             .testTag("alert_card_${alert.id}"),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (alert.isTriggered) NexusGold else NavyBorder)
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (alert.isTriggered) colors.gold else colors.border)
     ) {
         Row(
             modifier = Modifier
@@ -76,13 +68,13 @@ fun AlertItemCard(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (alert.isActive) NavySurfaceVariant else NavyHover),
+                        .background(if (alert.isActive) colors.surfaceVariant else colors.hover),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (alert.isActive) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
                         contentDescription = null,
-                        tint = if (alert.isTriggered) NexusGold else if (alert.isActive) BullishGreen else TextMuted,
+                        tint = if (alert.isTriggered) colors.gold else if (alert.isActive) colors.bullishGreen else colors.textMuted,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -94,7 +86,7 @@ fun AlertItemCard(
                         Text(
                             text = alert.assetSymbol,
                             style = MaterialTheme.typography.titleSmall.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -102,7 +94,7 @@ fun AlertItemCard(
                         Text(
                             text = "${alert.direction.symbol} ${String.format(Locale.US, "$%,.2f", alert.targetPrice)}",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontWeight = FontWeight.SemiBold
                             )
                         )
@@ -113,7 +105,7 @@ fun AlertItemCard(
                         Text(
                             text = alert.note,
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = TextSecondary,
+                                color = colors.textSecondary,
                                 fontSize = 11.sp
                             ),
                             maxLines = 1
@@ -124,7 +116,7 @@ fun AlertItemCard(
                         Text(
                             text = "TARGET REACHED",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = BullishGreen,
+                                color = colors.bullishGreen,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 9.sp
                             )
@@ -139,10 +131,10 @@ fun AlertItemCard(
                     onCheckedChange = onToggle,
                     modifier = Modifier.testTag("alert_toggle_${alert.id}"),
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = NavyCard,
-                        checkedTrackColor = NexusGold,
-                        uncheckedThumbColor = TextMuted,
-                        uncheckedTrackColor = NavySurfaceVariant
+                        checkedThumbColor = colors.onGold,
+                        checkedTrackColor = colors.gold,
+                        uncheckedThumbColor = colors.textMuted,
+                        uncheckedTrackColor = colors.surfaceVariant
                     )
                 )
 
@@ -153,7 +145,7 @@ fun AlertItemCard(
                     Icon(
                         imageVector = Icons.Default.DeleteOutline,
                         contentDescription = "Delete Alert",
-                        tint = BearishRed.copy(alpha = 0.8f),
+                        tint = colors.bearishRed.copy(alpha = 0.8f),
                         modifier = Modifier.size(18.dp)
                     )
                 }

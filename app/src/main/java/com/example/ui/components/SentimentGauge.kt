@@ -28,17 +28,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun SentimentGauge(
@@ -50,11 +40,12 @@ fun SentimentGauge(
     sourceLabel: String = "Alternative.me F&G",
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = NavyCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Brush.verticalGradient(listOf(NavyBorder, NavyBorder.copy(alpha = 0.4f))))
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Brush.verticalGradient(listOf(colors.border, colors.border.copy(alpha = 0.4f))))
     ) {
         Column(
             modifier = Modifier
@@ -69,7 +60,7 @@ fun SentimentGauge(
                 Text(
                     text = "MARKET SENTIMENT",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        color = NexusGold,
+                        color = colors.gold,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.2.sp
                     )
@@ -77,7 +68,7 @@ fun SentimentGauge(
                 Text(
                     text = "Breadth: $volatilityState",
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = TextSecondary,
+                        color = colors.textSecondary,
                         fontSize = 11.sp
                     )
                 )
@@ -102,7 +93,7 @@ fun SentimentGauge(
 
                         // Background track arc
                         drawArc(
-                            color = Color(0xFF1B2A4A),
+                            color = colors.surfaceVariant,
                             startAngle = 150f,
                             sweepAngle = 240f,
                             useCenter = false,
@@ -115,9 +106,9 @@ fun SentimentGauge(
                             val normalized = (fearAndGreedIndex.coerceIn(0, 100) / 100f) * 240f
                             drawArc(
                                 brush = Brush.sweepGradient(
-                                    0.0f to BearishRed,
-                                    0.5f to NexusGold,
-                                    1.0f to BullishGreen
+                                    0.0f to colors.bearishRed,
+                                    0.5f to colors.gold,
+                                    1.0f to colors.bullishGreen
                                 ),
                                 startAngle = 150f,
                                 sweepAngle = normalized,
@@ -133,7 +124,7 @@ fun SentimentGauge(
                         Text(
                             text = if (hasLiveSentiment) "$fearAndGreedIndex" else "--",
                             style = MaterialTheme.typography.headlineMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 24.sp
                             )
@@ -142,10 +133,10 @@ fun SentimentGauge(
                             text = sentimentLabel.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = when {
-                                    !hasLiveSentiment -> TextMuted
-                                    fearAndGreedIndex >= 55 -> BullishGreen
-                                    fearAndGreedIndex <= 45 -> BearishRed
-                                    else -> NexusGold
+                                    !hasLiveSentiment -> colors.textMuted
+                                    fearAndGreedIndex >= 55 -> colors.bullishGreen
+                                    fearAndGreedIndex <= 45 -> colors.bearishRed
+                                    else -> colors.gold
                                 },
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 9.sp
@@ -168,14 +159,14 @@ fun SentimentGauge(
                         Text(
                             text = if (hasLiveSentiment || safeBullPct > 0) "Bulls: $safeBullPct%" else "Bulls: --",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = BullishGreen,
+                                color = colors.bullishGreen,
                                 fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
                             text = if (hasLiveSentiment || safeBullPct > 0) "Bears: ${100 - safeBullPct}%" else "Bears: --",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = BearishRed,
+                                color = colors.bearishRed,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -188,8 +179,8 @@ fun SentimentGauge(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp),
-                        color = BullishGreen,
-                        trackColor = if (hasLiveSentiment || safeBullPct > 0) BearishRed else Color(0xFF1B2A4A)
+                        color = colors.bullishGreen,
+                        trackColor = if (hasLiveSentiment || safeBullPct > 0) colors.bearishRed else colors.surfaceVariant
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -200,11 +191,11 @@ fun SentimentGauge(
                     ) {
                         Text(
                             text = "Alternative.me F&G",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 11.sp)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 11.sp)
                         )
                         Text(
                             text = sourceLabel,
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 10.sp)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 10.sp)
                         )
                     }
                 }

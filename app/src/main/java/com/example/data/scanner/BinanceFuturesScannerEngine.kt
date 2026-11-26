@@ -326,15 +326,28 @@ object BinanceFuturesScannerEngine {
             reasons.addAll(patternDetection.reasons.take(2))
         }
 
-        // Determine Direction & Confluence
-        val isLongEligible = bullishScore >= 60 && bullishScore > bearishScore + 15
-        val isShortEligible = bearishScore >= 60 && bearishScore > bullishScore + 15
+        // Determine Direction & Confluence (including strict HTF contradiction guard)
+        val hasBullSweepReversal = (hasBullishChoch || smc15m.marketStructure.isBullishMSSPresent) &&
+            (smc15m.liquidity.recentSweeps.isNotEmpty() || smc1h.liquidity.recentSweeps.isNotEmpty())
+        val hasBearSweepReversal = (hasBearishChoch || smc15m.marketStructure.isBearishMSSPresent) &&
+            (smc15m.liquidity.recentSweeps.isNotEmpty() || smc1h.liquidity.recentSweeps.isNotEmpty())
+
+        val isLongEligible = bullishScore >= 60 && bullishScore > bearishScore + 15 &&
+            (!isHtfBearish || hasBullSweepReversal)
+        val isShortEligible = bearishScore >= 60 && bearishScore > bullishScore + 15 &&
+            (!isHtfBullish || hasBearSweepReversal)
 
         if (!isLongEligible && !isShortEligible) {
             return ScanEvaluationResult(
                 signal = null,
                 isNoTrade = true,
-                noTradeReason = "Conflicting multi-timeframe conditions on $symbol (Bullish $bullishScore vs Bearish $bearishScore). Awaiting clear structural alignment."
+                noTradeReason = if (isHtfBearish && bullishScore >= 60) {
+                    "Blocked counter-HTF LONG on $symbol: strong 1H/4H bearish trend without validated liquidity sweep reversal."
+                } else if (isHtfBullish && bearishScore >= 60) {
+                    "Blocked counter-HTF SHORT on $symbol: strong 1H/4H bullish trend without validated liquidity sweep reversal."
+                } else {
+                    "Conflicting multi-timeframe conditions on $symbol (Bullish $bullishScore vs Bearish $bearishScore). Awaiting clear structural alignment."
+                }
             )
         }
 

@@ -61,17 +61,8 @@ import com.example.data.news.EconomicGlossaryDatabase
 import com.example.data.news.EconomicTerm
 import com.example.data.news.NewsLanguageOption
 import com.example.data.news.TranslatedNewsArticle
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
+import com.example.ui.theme.NexusTheme
 import com.example.ui.theme.NotoNastaliqUrduFontFamily
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -87,6 +78,7 @@ fun NewsDetailDialog(
     onSelectLanguage: (NewsLanguageOption) -> Unit = {},
     onRetryTranslation: () -> Unit = {}
 ) {
+    val colors = NexusTheme.colors
     val context = LocalContext.current
     val detectedTerms = remember(news.title) {
         EconomicGlossaryDatabase.detectTermsInText(news.title)
@@ -99,14 +91,18 @@ fun NewsDetailDialog(
     val contentFont = if (isUrduScript) NotoNastaliqUrduFontFamily else FontFamily.Default
     val contentDirection = if (isUrduScript) LayoutDirection.Rtl else LayoutDirection.Ltr
 
+    val pubPkt = news.publishedTimestampPkt.ifBlank { news.timestamp }
+    val retrievedPkt = news.retrievedTimestampPkt
+
     val displayTitle = activeTrans?.title?.ifBlank { news.title } ?: news.title
     val displayBody = activeTrans?.body?.ifBlank { news.fullContent } ?: news.fullContent
     val displayFacts = activeTrans?.confirmedFacts?.takeIf { it.isNotEmpty() }
         ?: news.confirmedFacts.ifEmpty {
-            listOf(
+            listOfNotNull(
                 "Reported Headline: ${news.title}",
                 "Source: ${news.source}",
-                "Timestamp (Asia/Karachi PKT): ${news.timestamp}",
+                "Publication Time (PKT): $pubPkt",
+                retrievedPkt.takeIf { it.isNotBlank() }?.let { "App Retrieval Time (PKT): $it" },
                 "Status: ${news.eventStatus.label}"
             )
         }
@@ -120,7 +116,7 @@ fun NewsDetailDialog(
     val displayLongTerm = activeTrans?.longTermScenario?.ifBlank { news.longTermScenario } ?: news.longTermScenario
     val displayUncertainty = activeTrans?.uncertaintyAndRisks?.ifBlank { news.uncertaintyAndRisks }
         ?: news.uncertaintyAndRisks.ifBlank {
-            "News reactions are probabilistic and depend on Binance Futures positioning, liquidity, and confirmed candle closes."
+            "News reactions are probabilistic and depend on futures positioning, liquidity, and confirmed candle closes."
         }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -130,8 +126,8 @@ fun NewsDetailDialog(
                 .padding(vertical = 12.dp)
                 .testTag("news_detail_dialog"),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = NavyCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+            colors = CardDefaults.cardColors(containerColor = colors.card),
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
         ) {
             Column(
                 modifier = Modifier
@@ -153,13 +149,13 @@ fun NewsDetailDialog(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(NavySurfaceVariant)
+                                .background(colors.surfaceVariant)
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
                                 text = news.category.uppercase(),
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
@@ -167,9 +163,9 @@ fun NewsDetailDialog(
                         }
 
                         val impactColor = when (news.impact) {
-                            NewsImpact.BULLISH -> BullishGreen
-                            NewsImpact.BEARISH -> BearishRed
-                            NewsImpact.NEUTRAL -> TextMuted
+                            NewsImpact.BULLISH -> colors.bullishGreen
+                            NewsImpact.BEARISH -> colors.bearishRed
+                            NewsImpact.NEUTRAL -> colors.textMuted
                         }
 
                         Text(
@@ -184,7 +180,7 @@ fun NewsDetailDialog(
                         Text(
                             text = "• ${news.impactLevel.label}",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = TextMuted,
+                                color = colors.textMuted,
                                 fontSize = 10.sp
                             )
                         )
@@ -198,14 +194,14 @@ fun NewsDetailDialog(
                             Icon(
                                 imageVector = if (news.isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                                 contentDescription = "Bookmark article",
-                                tint = if (news.isSaved) NexusGold else TextMuted
+                                tint = if (news.isSaved) colors.gold else colors.textMuted
                             )
                         }
                         IconButton(
                             onClick = onDismiss,
                             modifier = Modifier.testTag("news_detail_close_btn")
                         ) {
-                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close dialog", tint = TextSecondary)
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close dialog", tint = colors.textSecondary)
                         }
                     }
                 }
@@ -221,10 +217,10 @@ fun NewsDetailDialog(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background((if (isComplete) BullishGreen else NexusGold).copy(alpha = 0.14f))
+                            .background((if (isComplete) colors.bullishGreen else colors.gold).copy(alpha = 0.14f))
                             .border(
                                 1.dp,
-                                (if (isComplete) BullishGreen else NexusGold).copy(alpha = 0.45f),
+                                (if (isComplete) colors.bullishGreen else colors.gold).copy(alpha = 0.45f),
                                 RoundedCornerShape(6.dp)
                             )
                             .padding(horizontal = 8.dp, vertical = 3.dp)
@@ -237,7 +233,7 @@ fun NewsDetailDialog(
                                 "PARTIAL / SUMMARY ONLY"
                             },
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isComplete) BullishGreen else NexusGold,
+                                color = if (isComplete) colors.bullishGreen else colors.gold,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 9.sp
                             )
@@ -247,13 +243,13 @@ fun NewsDetailDialog(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(NavySurfaceVariant)
+                            .background(colors.surfaceVariant)
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = news.eventStatus.label.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (news.eventStatus == EventStatus.CONFIRMED) BullishGreen else NexusGold,
+                                color = if (news.eventStatus == EventStatus.CONFIRMED) colors.bullishGreen else colors.gold,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -268,12 +264,12 @@ fun NewsDetailDialog(
                             .fillMaxWidth()
                             .height(3.dp)
                             .clip(RoundedCornerShape(2.dp)),
-                        color = NexusGold,
-                        trackColor = NavySurfaceVariant
+                        color = colors.gold,
+                        trackColor = colors.surfaceVariant
                     )
                     Text(
                         text = "Fetching full publisher article where permitted...",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp)
                     )
                 }
 
@@ -284,8 +280,8 @@ fun NewsDetailDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.7f))
-                        .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                        .background(colors.surfaceVariant.copy(alpha = 0.7f))
+                        .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                         .padding(8.dp)
                 ) {
                     Row(
@@ -297,14 +293,14 @@ fun NewsDetailDialog(
                             Icon(
                                 imageVector = Icons.Default.Translate,
                                 contentDescription = "Article language selector",
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "ARTICLE LANGUAGE (NUMBERS PRESERVED)",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 9.sp,
                                     letterSpacing = 0.6.sp
@@ -316,8 +312,8 @@ fun NewsDetailDialog(
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(NavyCard)
-                                    .border(1.dp, NexusGold.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                    .background(colors.card)
+                                    .border(1.dp, colors.gold.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
                                     .clickable(enabled = !isTranslating) { onRetryTranslation() }
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                                     .testTag("retry_news_translation_btn"),
@@ -326,14 +322,14 @@ fun NewsDetailDialog(
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Retry online translation",
-                                    tint = NexusGold,
+                                    tint = colors.gold,
                                     modifier = Modifier.size(12.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Retry",
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = NexusGold,
+                                        color = colors.gold,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp
                                     )
@@ -355,8 +351,8 @@ fun NewsDetailDialog(
                                     .weight(1f)
                                     .minimumInteractiveComponentSize()
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (selected) NexusGold else NavyCard)
-                                    .border(1.dp, if (selected) NexusGold else NavyBorder, RoundedCornerShape(8.dp))
+                                    .background(if (selected) colors.gold else colors.card)
+                                    .border(1.dp, if (selected) colors.gold else colors.border, RoundedCornerShape(8.dp))
                                     .clickable { onSelectLanguage(lang) }
                                     .padding(vertical = 8.dp, horizontal = 4.dp)
                                     .testTag("news_lang_tab_${lang.name.lowercase()}"),
@@ -365,7 +361,7 @@ fun NewsDetailDialog(
                                 Text(
                                     text = lang.label,
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (selected) NavyBackground else TextPrimary,
+                                        color = if (selected) colors.onGold else colors.textPrimary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = if (lang == NewsLanguageOption.URDU_SCRIPT) 12.sp else 10.sp,
                                         fontFamily = if (lang == NewsLanguageOption.URDU_SCRIPT) NotoNastaliqUrduFontFamily else FontFamily.Default
@@ -382,8 +378,8 @@ fun NewsDetailDialog(
                                 .fillMaxWidth()
                                 .height(3.dp)
                                 .clip(RoundedCornerShape(2.dp)),
-                            color = NexusGold,
-                            trackColor = NavyCard
+                            color = colors.gold,
+                            trackColor = colors.card
                         )
                     }
 
@@ -393,7 +389,7 @@ fun NewsDetailDialog(
                         Text(
                             text = badge,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (trans.errorNote != null) NexusGold else BullishGreen,
+                                color = if (trans.errorNote != null) colors.gold else colors.bullishGreen,
                                 fontSize = 9.sp
                             ),
                             modifier = Modifier.testTag("news_translation_provenance")
@@ -402,7 +398,7 @@ fun NewsDetailDialog(
                             Text(
                                 text = note,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = TextMuted,
+                                    color = colors.textMuted,
                                     fontSize = 9.sp,
                                     lineHeight = 13.sp
                                 )
@@ -413,11 +409,21 @@ fun NewsDetailDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Source & PKT Timestamp
+                // Distinct Publication PKT vs App Retrieval PKT Timestamps
                 Text(
-                    text = "${news.source} • ${news.timestamp}",
-                    style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontSize = 11.sp)
+                    text = "Source: ${news.source}",
+                    style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                 )
+                Text(
+                    text = "Published (PKT): $pubPkt",
+                    style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary, fontSize = 10.sp)
+                )
+                if (retrievedPkt.isNotBlank()) {
+                    Text(
+                        text = "App Retrieved (PKT): $retrievedPkt",
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp)
+                    )
+                }
 
                 // Affected Assets Row
                 if (news.affectedAssets.isNotEmpty()) {
@@ -428,21 +434,21 @@ fun NewsDetailDialog(
                     ) {
                         Text(
                             "Affected Assets:",
-                            style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp),
+                            style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp),
                             modifier = Modifier.align(Alignment.CenterVertically)
                         )
                         news.affectedAssets.forEach { asset ->
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(NavySurfaceVariant)
-                                    .border(1.dp, NexusGold.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                    .background(colors.surfaceVariant)
+                                    .border(1.dp, colors.gold.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = asset,
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = NexusGold,
+                                        color = colors.gold,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -459,14 +465,14 @@ fun NewsDetailDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(NexusGold.copy(alpha = 0.08f))
-                            .border(1.dp, NexusGold.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                            .background(colors.gold.copy(alpha = 0.08f))
+                            .border(1.dp, colors.gold.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
                             .padding(10.dp)
                     ) {
                         Text(
                             text = "ECONOMIC TERMS EXPLANATION (ROMAN URDU)",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,
                                 letterSpacing = 0.8.sp
@@ -481,7 +487,7 @@ fun NewsDetailDialog(
                                 Row(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(NavySurfaceVariant)
+                                        .background(colors.surfaceVariant)
                                         .clickable { onOpenGlossaryTerm?.invoke(term) }
                                         .padding(horizontal = 8.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -489,14 +495,14 @@ fun NewsDetailDialog(
                                     Icon(
                                         imageVector = Icons.Default.Info,
                                         contentDescription = "Explain ${term.abbreviation}",
-                                        tint = NexusGold,
+                                        tint = colors.gold,
                                         modifier = Modifier.size(12.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = "${term.abbreviation} Wazaahat",
                                         style = MaterialTheme.typography.labelSmall.copy(
-                                            color = TextPrimary,
+                                            color = colors.textPrimary,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
@@ -512,11 +518,10 @@ fun NewsDetailDialog(
                 // Language-direction-aware Content Body & Structured Analysis Sections
                 CompositionLocalProvider(LocalLayoutDirection provides contentDirection) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Title
                         Text(
                             text = displayTitle,
                             style = MaterialTheme.typography.titleMedium.copy(
-                                color = TextPrimary,
+                                color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold,
                                 lineHeight = if (isUrduScript) 28.sp else 22.sp,
                                 fontFamily = contentFont
@@ -531,15 +536,15 @@ fun NewsDetailDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(BullishGreen.copy(alpha = 0.08f))
-                                .border(1.dp, BullishGreen.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                .background(colors.bullishGreen.copy(alpha = 0.08f))
+                                .border(1.dp, colors.bullishGreen.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                                 .padding(10.dp)
                                 .testTag("news_confirmed_facts_box")
                         ) {
                             Text(
                                 text = if (isUrduScript) "تصدیق شدہ حقائق (CONFIRMED FACTS)" else "CONFIRMED FACTS",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = BullishGreen,
+                                    color = colors.bullishGreen,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp,
                                     letterSpacing = 0.6.sp,
@@ -551,7 +556,7 @@ fun NewsDetailDialog(
                                 Text(
                                     text = "• $fact",
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = TextPrimary,
+                                        color = colors.textPrimary,
                                         fontSize = if (isUrduScript) 13.sp else 11.sp,
                                         lineHeight = if (isUrduScript) 22.sp else 16.sp,
                                         fontFamily = contentFont
@@ -567,15 +572,15 @@ fun NewsDetailDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(NavySurfaceVariant.copy(alpha = 0.7f))
-                                .border(1.dp, NexusGold.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                .background(colors.surfaceVariant.copy(alpha = 0.7f))
+                                .border(1.dp, colors.gold.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                                 .padding(10.dp)
                                 .testTag("news_ai_interpretation_box")
                         ) {
                             Text(
                                 text = if (isUrduScript) "اے آئی تجزیہ (ممکنہ اثرات)" else "AI / NLP INTERPRETATION (PROBABILISTIC)",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NexusGold,
+                                    color = colors.gold,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp,
                                     letterSpacing = 0.6.sp,
@@ -586,7 +591,7 @@ fun NewsDetailDialog(
                             Text(
                                 text = displayInterpretation,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = TextSecondary,
+                                    color = colors.textSecondary,
                                     fontSize = if (isUrduScript) 13.sp else 11.sp,
                                     lineHeight = if (isUrduScript) 22.sp else 16.sp,
                                     fontFamily = contentFont
@@ -601,15 +606,15 @@ fun NewsDetailDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(NavySurfaceVariant.copy(alpha = 0.55f))
-                                    .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                                    .background(colors.surfaceVariant.copy(alpha = 0.55f))
+                                    .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                                     .padding(10.dp)
                                     .testTag("news_crypto_impact_box")
                             ) {
                                 Text(
-                                    text = if (isUrduScript) "بٹ کوائن اور آلٹ کوائنز پر ممکنہ اثر" else "POTENTIAL BTC & ALTCOIN IMPACT",
+                                    text = if (isUrduScript) "بٹ کوائن اور آلٹ کوائنز پر ممکنہ اثر" else "POTENTIAL ASSET IMPACT",
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = NexusGold,
+                                        color = colors.gold,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp,
                                         fontFamily = contentFont
@@ -620,7 +625,7 @@ fun NewsDetailDialog(
                                     Text(
                                         text = displayBtcImpact,
                                         style = MaterialTheme.typography.bodySmall.copy(
-                                            color = TextPrimary,
+                                            color = colors.textPrimary,
                                             fontSize = if (isUrduScript) 13.sp else 11.sp,
                                             lineHeight = if (isUrduScript) 22.sp else 16.sp,
                                             fontFamily = contentFont
@@ -632,7 +637,7 @@ fun NewsDetailDialog(
                                     Text(
                                         text = displayAltcoinImpact,
                                         style = MaterialTheme.typography.bodySmall.copy(
-                                            color = TextSecondary,
+                                            color = colors.textSecondary,
                                             fontSize = if (isUrduScript) 13.sp else 11.sp,
                                             lineHeight = if (isUrduScript) 22.sp else 16.sp,
                                             fontFamily = contentFont
@@ -644,7 +649,7 @@ fun NewsDetailDialog(
                                     Text(
                                         text = if (isUrduScript) "قلیل و طویل مدتی منظرنامے" else "SHORT-TERM & LONG-TERM SCENARIOS",
                                         style = MaterialTheme.typography.labelSmall.copy(
-                                            color = BullishGreen,
+                                            color = colors.bullishGreen,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 10.sp,
                                             fontFamily = contentFont
@@ -655,7 +660,7 @@ fun NewsDetailDialog(
                                         Text(
                                             text = displayShortTerm,
                                             style = MaterialTheme.typography.bodySmall.copy(
-                                                color = TextSecondary,
+                                                color = colors.textSecondary,
                                                 fontSize = if (isUrduScript) 13.sp else 11.sp,
                                                 lineHeight = if (isUrduScript) 22.sp else 16.sp,
                                                 fontFamily = contentFont
@@ -667,7 +672,7 @@ fun NewsDetailDialog(
                                         Text(
                                             text = displayLongTerm,
                                             style = MaterialTheme.typography.bodySmall.copy(
-                                                color = TextSecondary,
+                                                color = colors.textSecondary,
                                                 fontSize = if (isUrduScript) 13.sp else 11.sp,
                                                 lineHeight = if (isUrduScript) 22.sp else 16.sp,
                                                 fontFamily = contentFont
@@ -684,15 +689,15 @@ fun NewsDetailDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(BearishRed.copy(alpha = 0.08f))
-                                .border(1.dp, BearishRed.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                .background(colors.bearishRed.copy(alpha = 0.08f))
+                                .border(1.dp, colors.bearishRed.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                                 .padding(10.dp)
                                 .testTag("news_uncertainty_risks_box")
                         ) {
                             Text(
                                 text = if (isUrduScript) "غیر یقینی صورتحال اور خطرات" else "UNCERTAINTY & RISKS",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = BearishRed,
+                                    color = colors.bearishRed,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp,
                                     fontFamily = contentFont
@@ -702,7 +707,7 @@ fun NewsDetailDialog(
                             Text(
                                 text = displayUncertainty,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = TextSecondary,
+                                    color = colors.textSecondary,
                                     fontSize = if (isUrduScript) 13.sp else 11.sp,
                                     lineHeight = if (isUrduScript) 22.sp else 16.sp,
                                     fontFamily = contentFont
@@ -720,7 +725,7 @@ fun NewsDetailDialog(
                                 if (isUrduScript) "دستیاب خلاصہ (مکمل متن ناشر کی طرف سے محدود ہے)" else "AVAILABLE SUMMARY ONLY (FULL ARTICLE RESTRICTED / UNAVAILABLE)"
                             },
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = NexusGold,
+                                color = colors.gold,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,
                                 fontFamily = contentFont
@@ -730,7 +735,7 @@ fun NewsDetailDialog(
                         Text(
                             text = displayBody,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = TextSecondary,
+                                color = colors.textSecondary,
                                 lineHeight = if (isUrduScript) 25.sp else 20.sp,
                                 fontSize = if (isUrduScript) 14.sp else 13.sp,
                                 fontFamily = contentFont
@@ -755,7 +760,7 @@ fun NewsDetailDialog(
                             .minimumInteractiveComponentSize()
                             .testTag("open_article_link_btn"),
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NexusGold)
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.gold)
                     ) {
                         Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
@@ -770,25 +775,25 @@ fun NewsDetailDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurfaceVariant.copy(alpha = 0.5f))
+                        .background(colors.surfaceVariant.copy(alpha = 0.5f))
                         .padding(10.dp)
                 ) {
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = "Analysis Method: ",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 10.sp)
+                                style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 10.sp)
                             )
                             Text(
                                 text = news.analysisMethod,
-                                style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                             )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "⚠️ Caution: Market reactions to macroeconomic news are probabilistic. Do not confuse possible market reactions with guaranteed price movements.",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = TextMuted,
+                                color = colors.textMuted,
                                 fontSize = 10.sp,
                                 lineHeight = 14.sp
                             )

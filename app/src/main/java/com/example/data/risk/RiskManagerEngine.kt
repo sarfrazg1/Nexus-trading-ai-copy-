@@ -87,7 +87,8 @@ object RiskManagerEngine {
         }
         checks.add(maxLossCheck)
 
-        // 3. Daily Loss Limit
+        // 3. Daily Loss Warning (3% default) & Daily Loss Hard Cap (5% default)
+        val dailyLossWarningUsdt = budgetConfig.accountBalanceUsdt * (budgetConfig.dailyLossWarningPercent.coerceAtLeast(0.5) / 100.0)
         val maxDailyLossUsdt = budgetConfig.accountBalanceUsdt * (budgetConfig.dailyLossLimitPercent / 100.0)
         val currentDailyLoss = (-dailyLedger.realizedPnlUsdtToday).coerceAtLeast(0.0)
         val projectedDailyLoss = currentDailyLoss + budgetPlan.maximumPlannedLossUsdt
@@ -95,21 +96,28 @@ object RiskManagerEngine {
             currentDailyLoss >= maxDailyLossUsdt -> RiskCheckItem(
                 category = RiskCheckCategory.DAILY_LOSS_LIMIT,
                 decision = RiskDecision.BLOCK,
-                reason = "Daily realized loss ($${fmt(currentDailyLoss)}) has already reached the daily loss cap ($${fmt(maxDailyLossUsdt)}). Trading halted for today.",
+                reason = "Daily realized loss ($${fmt(currentDailyLoss)}) has reached the hard daily loss cap ($${fmt(maxDailyLossUsdt)}). Trading halted for today.",
                 actualValue = "$${fmt(currentDailyLoss)}",
                 limitValue = "< $${fmt(maxDailyLossUsdt)}"
             )
             projectedDailyLoss > maxDailyLossUsdt -> RiskCheckItem(
                 category = RiskCheckCategory.DAILY_LOSS_LIMIT,
                 decision = RiskDecision.WARNING,
-                reason = "If this trade stops out, cumulative daily loss ($${fmt(projectedDailyLoss)}) would exceed daily cap ($${fmt(maxDailyLossUsdt)}).",
+                reason = "If this trade stops out, cumulative daily loss ($${fmt(projectedDailyLoss)}) would exceed hard daily cap ($${fmt(maxDailyLossUsdt)}).",
                 actualValue = "$${fmt(projectedDailyLoss)} est.",
                 limitValue = "<= $${fmt(maxDailyLossUsdt)}"
+            )
+            currentDailyLoss >= dailyLossWarningUsdt || projectedDailyLoss >= dailyLossWarningUsdt -> RiskCheckItem(
+                category = RiskCheckCategory.DAILY_LOSS_LIMIT,
+                decision = RiskDecision.WARNING,
+                reason = "Daily Loss Warning (${String.format(Locale.US, "%.1f%%", budgetConfig.dailyLossWarningPercent)} threshold): realized/projected loss ($${fmt(maxOf(currentDailyLoss, projectedDailyLoss))}) reaches $${fmt(dailyLossWarningUsdt)} warning level.",
+                actualValue = "$${fmt(maxOf(currentDailyLoss, projectedDailyLoss))}",
+                limitValue = "Warn >= ${String.format(Locale.US, "%.1f%%", budgetConfig.dailyLossWarningPercent)} ($${fmt(dailyLossWarningUsdt)})"
             )
             else -> RiskCheckItem(
                 category = RiskCheckCategory.DAILY_LOSS_LIMIT,
                 decision = RiskDecision.PASS,
-                reason = "Daily loss budget has ample headroom.",
+                reason = "Daily loss budget has ample headroom (warning at ${String.format(Locale.US, "%.1f%%", budgetConfig.dailyLossWarningPercent)}).",
                 actualValue = "$${fmt(currentDailyLoss)} used",
                 limitValue = "<= $${fmt(maxDailyLossUsdt)}"
             )

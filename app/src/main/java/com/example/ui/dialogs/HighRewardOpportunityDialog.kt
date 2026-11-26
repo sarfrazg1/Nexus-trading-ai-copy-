@@ -59,18 +59,8 @@ import com.example.data.scanner.FuturesDirection
 import com.example.data.scanner.HighRewardOpportunity
 import com.example.data.scanner.OpportunityPriorityTier
 import com.example.data.scanner.OpportunityStatus
-import com.example.ui.theme.BearishRed
-import com.example.ui.theme.BullishGreen
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurface
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
+import com.example.ui.theme.NexusTheme
 import com.example.ui.theme.NotoNastaliqUrduFontFamily
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
 import java.util.Locale
 
 @Composable
@@ -79,18 +69,19 @@ fun HighRewardOpportunityDialog(
     appLanguageMode: LearningLanguageMode = LearningLanguageMode.ROMAN_URDU,
     onDismiss: () -> Unit
 ) {
+    val colors = NexusTheme.colors
     val context = LocalContext.current
     var showUrduScript by remember(appLanguageMode) {
         mutableStateOf(appLanguageMode == LearningLanguageMode.STANDARD_URDU)
     }
 
     val isTopPriority = opportunity.tier == OpportunityPriorityTier.HIGHEST_1_TO_5_PLUS
-    val accentColor = if (isTopPriority) BullishGreen else NexusGold
-    val dirColor = if (opportunity.direction == FuturesDirection.LONG) BullishGreen else BearishRed
+    val accentColor = if (isTopPriority) colors.bullishGreen else colors.gold
+    val dirColor = if (opportunity.direction == FuturesDirection.LONG) colors.bullishGreen else colors.bearishRed
     val statusColor = when (opportunity.status) {
-        OpportunityStatus.ACTIVE -> BullishGreen
-        OpportunityStatus.INVALIDATED -> BearishRed
-        OpportunityStatus.EXPIRED -> TextMuted
+        OpportunityStatus.ACTIVE -> colors.bullishGreen
+        OpportunityStatus.INVALIDATED -> colors.bearishRed
+        OpportunityStatus.EXPIRED -> colors.textMuted
     }
 
     val activeExplanation = if (showUrduScript) {
@@ -112,7 +103,7 @@ fun HighRewardOpportunityDialog(
                 .clip(RoundedCornerShape(18.dp))
                 .border(1.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
                 .testTag("high_reward_detail_dialog"),
-            colors = CardDefaults.cardColors(containerColor = NavyCard)
+            colors = CardDefaults.cardColors(containerColor = colors.card)
         ) {
             Column(
                 modifier = Modifier
@@ -168,7 +159,7 @@ fun HighRewardOpportunityDialog(
                             Text(
                                 text = opportunity.symbol,
                                 style = MaterialTheme.typography.titleLarge.copy(
-                                    color = TextPrimary,
+                                    color = colors.textPrimary,
                                     fontWeight = FontWeight.ExtraBold
                                 )
                             )
@@ -191,11 +182,11 @@ fun HighRewardOpportunityDialog(
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = "Trigger (PKT): ${opportunity.entryTriggerTimestampPkt}",
-                            style = MaterialTheme.typography.bodySmall.copy(color = NexusGold, fontSize = 11.sp)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.gold, fontSize = 11.sp)
                         )
                         Text(
                             text = "Expires (PKT): ${opportunity.expiresAtPkt}",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 10.sp)
                         )
                     }
 
@@ -205,7 +196,7 @@ fun HighRewardOpportunityDialog(
                             .minimumInteractiveComponentSize()
                             .testTag("close_high_reward_dialog_btn")
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close Opportunity Detail", tint = TextSecondary)
+                        Icon(Icons.Default.Close, contentDescription = "Close Opportunity Detail", tint = colors.textSecondary)
                     }
                 }
 
@@ -214,14 +205,14 @@ fun HighRewardOpportunityDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurface)
-                        .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                        .background(colors.surface)
+                        .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                         .padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    LevelMetric("ENTRY", opportunity.entryFormatted, TextPrimary)
-                    LevelMetric("STOP LOSS", opportunity.stopLossFormatted, BearishRed)
-                    LevelMetric("TAKE PROFIT", opportunity.takeProfitFormatted, BullishGreen)
+                    LevelMetric("ENTRY", opportunity.entryFormatted, colors.textPrimary)
+                    LevelMetric("STOP LOSS", opportunity.stopLossFormatted, colors.bearishRed)
+                    LevelMetric("TAKE PROFIT", opportunity.takeProfitFormatted, colors.bullishGreen)
                 }
 
                 // Net R:R & $1 vs $5 Financial Breakdown Card
@@ -231,7 +222,7 @@ fun HighRewardOpportunityDialog(
                         .clip(RoundedCornerShape(12.dp))
                         .background(
                             Brush.horizontalGradient(
-                                listOf(NavySurface, accentColor.copy(alpha = 0.1f), NavySurface)
+                                listOf(colors.surface, accentColor.copy(alpha = 0.1f), colors.surface)
                             )
                         )
                         .border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
@@ -251,24 +242,24 @@ fun HighRewardOpportunityDialog(
                         )
                         Text(
                             text = "Gross: 1:${fmt2(opportunity.grossRiskRewardRatio)}",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                            style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary)
                         )
                     }
                     Text(
                         text = "$1.00 Risk -> $${fmt2(opportunity.normalizedNetRewardUsd)} Net Reward (after ${fmt2(opportunity.feeRatePercentPerSide * 2)}% fees + ${fmt2(opportunity.slippagePercentPerSide * 2)}% slippage + funding ${String.format(Locale.US, "%+.4f%%", opportunity.fundingRatePercent)})",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 11.sp
                         )
                     )
                     Text(
                         text = "Est. Net Profit: +$${fmt2(opportunity.estimatedNetProfitUsdt)} (+${fmt1(opportunity.estimatedNetRoiPercent)}% ROI) | Est. Net Loss: -$${fmt2(opportunity.estimatedNetLossUsdt)} (-${fmt1(opportunity.estimatedRiskMarginPercent)}% margin)",
-                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp)
                     )
                     Text(
                         text = "Assumptions: $${fmt2(opportunity.budgetMarginUsdt)} isolated margin @ ${opportunity.leverageAssumed}x leverage (Notional $${fmt2(opportunity.notionalUsdt)}) | Fees $${fmt2(opportunity.estimatedFeesUsdt)} | Slippage $${fmt2(opportunity.estimatedSlippageUsdt)} | Funding Reserve $${fmt2(opportunity.estimatedFundingReserveUsdt)}",
-                        style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp)
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 10.sp)
                     )
                 }
 
@@ -277,7 +268,7 @@ fun HighRewardOpportunityDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurfaceVariant)
+                        .background(colors.surfaceVariant)
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -287,7 +278,7 @@ fun HighRewardOpportunityDialog(
                     ) {
                         Text(
                             text = "Model Confidence: ${opportunity.modelConfidencePercent}%",
-                            style = MaterialTheme.typography.labelMedium.copy(color = NexusGold, fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.labelMedium.copy(color = colors.gold, fontWeight = FontWeight.Bold)
                         )
                         val histLabel = opportunity.historicalTargetHitProbabilityPercent?.let {
                             "Historical Hit Rate: ${fmt1(it)}% (n=${opportunity.historicalSampleSize})"
@@ -295,14 +286,14 @@ fun HighRewardOpportunityDialog(
                         Text(
                             text = histLabel,
                             style = MaterialTheme.typography.labelMedium.copy(
-                                color = if (opportunity.historicalTargetHitProbabilityPercent != null) BullishGreen else TextMuted,
+                                color = if (opportunity.historicalTargetHitProbabilityPercent != null) colors.bullishGreen else colors.textMuted,
                                 fontWeight = FontWeight.Bold
                             )
                         )
                     }
                     Text(
                         text = opportunity.historicalProbabilityNote,
-                        style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp)
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 10.sp)
                     )
                 }
 
@@ -311,8 +302,8 @@ fun HighRewardOpportunityDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(NavySurface)
-                        .border(1.dp, NexusGold.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        .background(colors.surface)
+                        .border(1.dp, colors.gold.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -322,24 +313,24 @@ fun HighRewardOpportunityDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Translate, contentDescription = null, tint = NexusGold, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Translate, contentDescription = null, tint = colors.gold, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "TRADE EXPLANATION (URDU / ROMAN URDU)",
-                                style = MaterialTheme.typography.labelSmall.copy(color = NexusGold, fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold)
                             )
                         }
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(NavyCard)
-                                .border(1.dp, NavyBorder, RoundedCornerShape(8.dp))
+                                .background(colors.card)
+                                .border(1.dp, colors.border, RoundedCornerShape(8.dp))
                                 .padding(2.dp)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (!showUrduScript) NexusGold else NavyCard)
+                                    .background(if (!showUrduScript) colors.gold else colors.card)
                                     .clickable { showUrduScript = false }
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                                     .testTag("toggle_roman_urdu_btn")
@@ -347,7 +338,7 @@ fun HighRewardOpportunityDialog(
                                 Text(
                                     text = "Roman Urdu",
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (!showUrduScript) NavyBackground else TextSecondary,
+                                        color = if (!showUrduScript) colors.onGold else colors.textSecondary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp
                                     )
@@ -356,7 +347,7 @@ fun HighRewardOpportunityDialog(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (showUrduScript) NexusGold else NavyCard)
+                                    .background(if (showUrduScript) colors.gold else colors.card)
                                     .clickable { showUrduScript = true }
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                                     .testTag("toggle_urdu_script_btn")
@@ -364,7 +355,7 @@ fun HighRewardOpportunityDialog(
                                 Text(
                                     text = "اردو",
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (showUrduScript) NavyBackground else TextSecondary,
+                                        color = if (showUrduScript) colors.onGold else colors.textSecondary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp
                                     )
@@ -412,7 +403,7 @@ fun HighRewardOpportunityDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(NavySurface)
+                        .background(colors.surface)
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -422,16 +413,16 @@ fun HighRewardOpportunityDialog(
                         Text("QUALIFICATION & INVALIDATION DETAILS", style = MaterialTheme.typography.labelSmall.copy(color = accentColor, fontWeight = FontWeight.Bold))
                     }
                     opportunity.qualificationReasons.forEach { reason ->
-                        Text("• $reason", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp))
+                        Text("• $reason", style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp))
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = BearishRed, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = colors.bearishRed, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("MAIN RISKS & CANCELLATION", style = MaterialTheme.typography.labelSmall.copy(color = BearishRed, fontWeight = FontWeight.Bold))
+                        Text("MAIN RISKS & CANCELLATION", style = MaterialTheme.typography.labelSmall.copy(color = colors.bearishRed, fontWeight = FontWeight.Bold))
                     }
                     opportunity.risksAndInvalidations.forEach { risk ->
-                        Text("• $risk", style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 11.sp))
+                        Text("• $risk", style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 11.sp))
                     }
                 }
 
@@ -448,15 +439,15 @@ fun HighRewardOpportunityDialog(
                         },
                         modifier = Modifier.weight(1f).minimumInteractiveComponentSize()
                     ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp), tint = NexusGold)
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp), tint = colors.gold)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Copy Alert", color = NexusGold, fontSize = 12.sp)
+                        Text("Copy Alert", color = colors.gold, fontSize = 12.sp)
                     }
                     OutlinedButton(
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f).minimumInteractiveComponentSize()
                     ) {
-                        Text("Close", color = TextPrimary, fontSize = 12.sp)
+                        Text("Close", color = colors.textPrimary, fontSize = 12.sp)
                     }
                 }
 
@@ -464,15 +455,15 @@ fun HighRewardOpportunityDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(NavySurfaceVariant)
+                        .background(colors.surfaceVariant)
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = NexusGold, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = colors.gold, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Alert & Analysis Only: Never executes live orders automatically and never guarantees profits. Background WorkManager scans run at Android's 15-min minimum interval when closed; continuous sub-minute monitoring requires Foreground Scanner Service or external FCM push server.",
-                        style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 9.sp, lineHeight = 13.sp)
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 9.sp, lineHeight = 13.sp)
                     )
                 }
             }
@@ -482,8 +473,9 @@ fun HighRewardOpportunityDialog(
 
 @Composable
 private fun LevelMetric(label: String, value: String, valueColor: androidx.compose.ui.graphics.Color) {
+    val colors = NexusTheme.colors
     Column {
-        Text(text = label, style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
+        Text(text = label, style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted, fontSize = 9.sp))
         Text(
             text = value,
             style = MaterialTheme.typography.titleSmall.copy(color = valueColor, fontWeight = FontWeight.Bold)
@@ -493,18 +485,19 @@ private fun LevelMetric(label: String, value: String, valueColor: androidx.compo
 
 @Composable
 private fun ExplanationBlock(title: String, body: String, fontFamily: FontFamily) {
+    val colors = NexusTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(NavyCard)
+            .background(colors.card)
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         Text(
             text = title,
             style = MaterialTheme.typography.labelSmall.copy(
-                color = NexusGold,
+                color = colors.gold,
                 fontWeight = FontWeight.Bold,
                 fontFamily = fontFamily,
                 lineHeight = 18.sp
@@ -513,7 +506,7 @@ private fun ExplanationBlock(title: String, body: String, fontFamily: FontFamily
         Text(
             text = body,
             style = MaterialTheme.typography.bodySmall.copy(
-                color = TextPrimary,
+                color = colors.textPrimary,
                 fontSize = 12.sp,
                 fontFamily = fontFamily,
                 lineHeight = 20.sp

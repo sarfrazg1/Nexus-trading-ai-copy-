@@ -39,14 +39,7 @@ import com.example.data.model.NewsImpactLevel
 import com.example.data.news.EconomicGlossaryDatabase
 import com.example.data.news.EconomicTerm
 import com.example.ui.components.NewsItemCard
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NavySurfaceVariant
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun NewsScreen(
@@ -59,6 +52,7 @@ fun NewsScreen(
     onOpenGlossaryTerm: (EconomicTerm) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     // 8 Required Part A Filters + Saved
     val filters = listOf(
         "ALL",
@@ -108,7 +102,7 @@ fun NewsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(NavyBackground)
+            .background(colors.background)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -123,7 +117,7 @@ fun NewsScreen(
                     Text(
                         text = "FINANCIAL NEWS & MACRO MONITOR • ASIA/KARACHI (PKT)",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.0.sp
                         )
@@ -131,7 +125,7 @@ fun NewsScreen(
                     Text(
                         text = "Global Crypto & Macro Wire",
                         style = MaterialTheme.typography.titleLarge.copy(
-                            color = TextPrimary,
+                            color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -144,7 +138,7 @@ fun NewsScreen(
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Refresh News",
-                        tint = NexusGold
+                        tint = colors.gold
                     )
                 }
             }
@@ -156,8 +150,8 @@ fun NewsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(NavySurfaceVariant.copy(alpha = 0.6f))
-                    .border(1.dp, NavyBorder, RoundedCornerShape(10.dp))
+                    .background(colors.surfaceVariant.copy(alpha = 0.6f))
+                    .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -166,14 +160,14 @@ fun NewsScreen(
                     Icon(
                         imageVector = Icons.Default.Info,
                         contentDescription = null,
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Urdu Glossary:",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = NexusGold,
+                            color = colors.gold,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
@@ -186,7 +180,7 @@ fun NewsScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(NavyCard)
+                                .background(colors.card)
                                 .clickable { onOpenGlossaryTerm(term) }
                                 .padding(horizontal = 6.dp, vertical = 3.dp)
                                 .testTag("glossary_chip_${key.lowercase()}"),
@@ -195,7 +189,7 @@ fun NewsScreen(
                             Text(
                                 text = "$key (i)",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = TextPrimary,
+                                    color = colors.textPrimary,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -217,7 +211,8 @@ fun NewsScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSel) NexusGold else NavyCard)
+                            .background(if (isSel) colors.gold else colors.card)
+                            .border(1.dp, if (isSel) colors.gold else colors.border, RoundedCornerShape(20.dp))
                             .clickable { onFilterSelected(filter) }
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                             .testTag("news_filter_${filter.lowercase().replace(" ", "_")}"),
@@ -226,7 +221,7 @@ fun NewsScreen(
                         Text(
                             text = filter,
                             style = MaterialTheme.typography.labelMedium.copy(
-                                color = if (isSel) NavyBackground else TextSecondary,
+                                color = if (isSel) colors.onGold else colors.textSecondary,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                 fontSize = 11.sp
                             )
@@ -241,7 +236,7 @@ fun NewsScreen(
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     Text(
                         text = if (newsFilter == "SAVED") "No saved articles yet. Bookmark an article to read later." else "No news matching '$newsFilter'",
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontSize = 13.sp
                     )
                 }

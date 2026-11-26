@@ -44,13 +44,7 @@ import com.example.data.model.AssetCategory
 import com.example.data.model.MarketAsset
 import com.example.data.model.MarketDataStatus
 import com.example.ui.components.PriceTickerCard
-import com.example.ui.theme.NavyBackground
-import com.example.ui.theme.NavyBorder
-import com.example.ui.theme.NavyCard
-import com.example.ui.theme.NexusGold
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.NexusTheme
 
 @Composable
 fun MarketsScreen(
@@ -68,6 +62,7 @@ fun MarketsScreen(
     onToggleFavorite: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val colors = NexusTheme.colors
     val statusFilters = listOf("ALL", "WATCHLIST", "LIVE", "DELAYED", "STALE", "UNAVAILABLE")
 
     val filteredAssets = assets.filter { asset ->
@@ -91,7 +86,7 @@ fun MarketsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(NavyBackground)
+            .background(colors.background)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -100,7 +95,7 @@ fun MarketsScreen(
             Text(
                 text = "GLOBAL MARKETS DIRECTORY",
                 style = MaterialTheme.typography.labelSmall.copy(
-                    color = NexusGold,
+                    color = colors.gold,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.2.sp
                 )
@@ -108,7 +103,7 @@ fun MarketsScreen(
             Text(
                 text = "Multi-Asset Price Board",
                 style = MaterialTheme.typography.titleLarge.copy(
-                    color = TextPrimary,
+                    color = colors.textPrimary,
                     fontWeight = FontWeight.Bold
                 )
             )
@@ -121,8 +116,8 @@ fun MarketsScreen(
                     .fillMaxWidth()
                     .clickable { onOpenTechnicalAnalysis("BTC") }
                     .testTag("markets_open_analysis_card"),
-                colors = CardDefaults.cardColors(containerColor = NavyCard),
-                border = BorderStroke(1.dp, NexusGold.copy(alpha = 0.5f)),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
+                border = BorderStroke(1.dp, colors.gold.copy(alpha = 0.5f)),
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Row(
@@ -134,13 +129,13 @@ fun MarketsScreen(
                         Box(
                             modifier = Modifier
                                 .size(32.dp)
-                                .background(NexusGold.copy(alpha = 0.15f), CircleShape),
+                                .background(colors.gold.copy(alpha = 0.15f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Timeline,
                                 contentDescription = null,
-                                tint = NexusGold,
+                                tint = colors.gold,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -150,19 +145,19 @@ fun MarketsScreen(
                                 text = "Technical Indicators Engine",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = colors.textPrimary
                             )
                             Text(
                                 text = "22 Real Indicators (Trend, Momentum, Volatility, Volume)",
                                 fontSize = 11.sp,
-                                color = TextSecondary
+                                color = colors.textSecondary
                             )
                         }
                     }
                     Icon(
                         imageVector = Icons.Default.ArrowForward,
                         contentDescription = "Open Analysis",
-                        tint = NexusGold,
+                        tint = colors.gold,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -174,15 +169,15 @@ fun MarketsScreen(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
-                placeholder = { Text("Search by name or symbol (e.g. BTC, ETH, Gold, WTI)...", fontSize = 12.sp, color = TextMuted) },
+                placeholder = { Text("Search by name or symbol (e.g. BTC, ETH, Gold, WTI)...", fontSize = 12.sp, color = colors.textMuted) },
                 singleLine = true,
                 leadingIcon = {
-                    Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = NexusGold, modifier = Modifier.size(18.dp))
+                    Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = colors.gold, modifier = Modifier.size(18.dp))
                 },
                 trailingIcon = {
                     if (searchQuery.isNotBlank()) {
                         IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                            Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear", tint = colors.textSecondary, modifier = Modifier.size(16.dp))
                         }
                     }
                 },
@@ -191,12 +186,12 @@ fun MarketsScreen(
                     .testTag("markets_search_input"),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NexusGold,
-                    unfocusedBorderColor = NavyBorder,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary,
-                    focusedContainerColor = NavyCard,
-                    unfocusedContainerColor = NavyCard
+                    focusedBorderColor = colors.gold,
+                    unfocusedBorderColor = colors.border,
+                    focusedTextColor = colors.textPrimary,
+                    unfocusedTextColor = colors.textPrimary,
+                    focusedContainerColor = colors.card,
+                    unfocusedContainerColor = colors.card
                 )
             )
 
@@ -212,7 +207,7 @@ fun MarketsScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSel) NexusGold else NavyCard)
+                            .background(if (isSel) colors.gold else colors.card)
                             .clickable { onCategorySelected(cat) }
                             .padding(horizontal = 14.dp, vertical = 7.dp)
                             .testTag("market_filter_${cat.name.lowercase()}"),
@@ -221,7 +216,7 @@ fun MarketsScreen(
                         Text(
                             text = cat.label,
                             style = MaterialTheme.typography.labelMedium.copy(
-                                color = if (isSel) NavyBackground else TextSecondary,
+                                color = if (isSel) colors.onGold else colors.textSecondary,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                 fontSize = 12.sp
                             )
@@ -242,7 +237,7 @@ fun MarketsScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (isSel) NavyBorder else NavyCard)
+                            .background(if (isSel) colors.hover else colors.card)
                             .clickable { onStatusFilterSelected(status) }
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                             .testTag("market_status_filter_${status.lowercase()}"),
@@ -251,7 +246,7 @@ fun MarketsScreen(
                         Text(
                             text = status,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isSel) NexusGold else TextMuted,
+                                color = if (isSel) colors.gold else colors.textMuted,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                 fontSize = 10.sp
                             )
@@ -264,7 +259,7 @@ fun MarketsScreen(
 
             Text(
                 text = "${filteredAssets.size} Markets Listed • Real Quotes Streamed",
-                style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 11.sp)
+                style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted, fontSize = 11.sp)
             )
         }
 
@@ -278,7 +273,7 @@ fun MarketsScreen(
                 ) {
                     Text(
                         text = "No markets found matching '$searchQuery'",
-                        color = TextMuted,
+                        color = colors.textMuted,
                         fontSize = 13.sp
                     )
                 }

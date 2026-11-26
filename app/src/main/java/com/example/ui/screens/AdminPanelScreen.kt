@@ -88,7 +88,6 @@ import com.example.data.subscription.SubscriptionStatus
 import com.example.data.subscription.SupportConfig
 import com.example.data.subscription.UserSubscriptionRecord
 import com.example.ui.theme.NexusTheme
-import com.example.ui.theme.WarningOrange
 import com.example.ui.viewmodel.AdminCollectionState
 import com.example.ui.viewmodel.SubscriptionUiActionState
 import com.google.firebase.Timestamp
@@ -352,7 +351,7 @@ fun AdminPanelScreen(
                                         shape = RoundedCornerShape(12.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = colors.gold,
-                                            contentColor = colors.background
+                                            contentColor = colors.onGold
                                         ),
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -361,7 +360,7 @@ fun AdminPanelScreen(
                                     ) {
                                         if (actionState.isAdminActionBusy) {
                                             CircularProgressIndicator(
-                                                color = colors.background,
+                                                color = colors.onGold,
                                                 modifier = Modifier.size(18.dp),
                                                 strokeWidth = 2.dp
                                             )
@@ -438,7 +437,7 @@ fun AdminPanelScreen(
                                     ) {
                                         Text(
                                             text = "${filter.label} ($count)",
-                                            color = if (selected) colors.background else colors.textSecondary,
+                                            color = if (selected) colors.onGold else colors.textSecondary,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp
                                         )
@@ -657,7 +656,7 @@ fun AdminPanelScreen(
                                         shape = RoundedCornerShape(12.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = colors.gold,
-                                            contentColor = colors.background
+                                            contentColor = colors.onGold
                                         ),
                                         modifier = Modifier
                                             .weight(1f)
@@ -744,7 +743,7 @@ private fun AdminCodeCard(
     val badgeColor = when (status) {
         ActivationCodeStatus.UNUSED -> colors.gold
         ActivationCodeStatus.ACTIVATED -> colors.bullishGreen
-        ActivationCodeStatus.EXPIRED -> WarningOrange
+        ActivationCodeStatus.EXPIRED -> colors.warningOrange
         ActivationCodeStatus.REVOKED -> colors.bearishRed
     }
 
@@ -815,7 +814,7 @@ private fun AdminCodeCard(
                 if (record.expiresAt != null) {
                     Text(
                         text = "Expires: ${formatTs(record.expiresAt)}",
-                        color = if (status == ActivationCodeStatus.EXPIRED) WarningOrange else colors.textSecondary,
+                        color = if (status == ActivationCodeStatus.EXPIRED) colors.warningOrange else colors.textSecondary,
                         fontSize = 11.sp
                     )
                 }
@@ -873,7 +872,7 @@ private fun AdminUserCard(
     val badgeColor = when {
         record.accountDisabled -> colors.bearishRed
         status == SubscriptionStatus.ACTIVE -> colors.bullishGreen
-        status == SubscriptionStatus.EXPIRED -> WarningOrange
+        status == SubscriptionStatus.EXPIRED -> colors.warningOrange
         status == SubscriptionStatus.REVOKED -> colors.bearishRed
         else -> colors.textMuted
     }
@@ -953,7 +952,7 @@ private fun AdminUserCard(
                     onClick = { onToggleDisabled(!record.accountDisabled) },
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = if (record.accountDisabled) colors.bullishGreen else WarningOrange
+                        contentColor = if (record.accountDisabled) colors.bullishGreen else colors.warningOrange
                     ),
                     modifier = Modifier.height(48.dp)
                 ) {
