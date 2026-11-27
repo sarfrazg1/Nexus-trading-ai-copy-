@@ -65,6 +65,13 @@ object TimeZoneUtils {
         return fmt.format(Date(millis))
     }
 
+    fun formatKarachiMonthKey(millis: Long): String {
+        if (millis <= 0L) return "Unavailable"
+        val fmt = SimpleDateFormat("yyyy-MM", Locale.US)
+        fmt.timeZone = karachiTimeZone()
+        return fmt.format(Date(millis))
+    }
+
     fun formatKarachiCompact(millis: Long): String {
         if (millis <= 0L) return "Unavailable"
         val fmt = SimpleDateFormat("dd/MM HH:mm 'PKT'", Locale.US)

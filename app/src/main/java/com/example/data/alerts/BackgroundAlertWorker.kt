@@ -77,44 +77,40 @@ class BackgroundAlertWorker(
                 }
             }
 
-            // Part 4/5: Closed-app / background periodic scan for genuine >=1:4 and >=1:5 setups
+            // Central Signal Authority periodic scan (foreground/background parity) while lifecycle alerts remain active above
             notifManager.setMasterAlertsEnabled(settingsRepo.alertNotificationsEnabled.value)
             if (settingsRepo.alertNotificationsEnabled.value) {
                 val playSound = notifManager.isSoundAlertsEnabled() &&
                     (settingsRepo.soundEffectsEnabled.value || scannerRepo.scannerState.value.soundAlertsEnabled)
-                val budgetConfig = scannerRepo.budgetConfig.value
                 for (pair in watchlistPairs.take(6)) {
                     try {
                         val c15m = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.M15, limit = 50)
                         val c1h = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H1, limit = 50)
                         val c4h = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H4, limit = 30)
                         val c5m = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.M5, limit = 30)
+                        val resolvedStatus = apiClient.resolveCandleFetchStatus(pair.symbol, CandleTimeframe.M15, c15m)
                         val completed15m = TimeZoneUtils.filterCompletedCandles(c15m)
                         val currentPrice = livePrices[pair.symbol]?.takeIf { it > 0.0 }
                             ?: completed15m.lastOrNull()?.close
                             ?: 0.0
-                        if (currentPrice > 0.0) {
-                            val fundingSnap = apiClient.fetchFundingRateSnapshot(pair.symbol)
-                            val hrResult = HighRewardOpportunityDetector.scanPair(
-                                symbol = pair.symbol,
-                                baseAsset = pair.baseAsset,
-                                currentPrice = currentPrice,
-                                candles4h = c4h,
-                                candles1h = c1h,
-                                candles15m = c15m,
-                                candles5m = c5m,
-                                fundingRatePercent = fundingSnap?.ratePercent,
-                                budgetConfig = budgetConfig,
-                                fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
-                                isFundingDataStale = fundingSnap == null
-                            )
-                            scannerRepo.onHighRewardScanEvaluated(
-                                symbol = pair.symbol,
-                                result = hrResult,
-                                playSound = playSound,
-                                source = "WorkManager Background Scanner (15m)"
-                            )
-                        }
+                        val fundingSnap = if (currentPrice > 0.0) apiClient.fetchFundingRateSnapshot(pair.symbol) else null
+                        scannerRepo.evaluatePairWithCentralAuthority(
+                            symbol = pair.symbol,
+                            baseAsset = pair.baseAsset,
+                            currentPrice = currentPrice,
+                            candles4h = c4h,
+                            candles1h = c1h,
+                            candles15m = c15m,
+                            candles5m = c5m,
+                            fundingRatePercent = fundingSnap?.ratePercent,
+                            fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                            isFundingDataStale = fundingSnap == null,
+                            marketDataTimestampMs = resolvedStatus.fetchedAtMs,
+                            dataStatus = resolvedStatus.dataStatus,
+                            dataSourceName = resolvedStatus.dataSourceName,
+                            playSound = playSound,
+                            source = "WorkManager Background Scanner (15m)"
+                        )
                     } catch (_: Exception) {
                     }
                 }

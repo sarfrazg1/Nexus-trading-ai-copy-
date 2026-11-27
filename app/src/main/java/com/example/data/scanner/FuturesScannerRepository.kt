@@ -9,9 +9,23 @@ import com.example.data.alerts.TradeAlertRule
 import com.example.data.broker.ExecutionMode
 import com.example.data.broker.PaperOrderRecord
 import com.example.data.broker.PaperOrderStatus
+import com.example.data.model.Candle
+import com.example.data.model.CandleTimeframe
+import com.example.data.model.MarketDataStatus
+import com.example.data.providers.FuturesLiquiditySnapshot
+import com.example.data.providers.FuturesTelemetryStatus
 import com.example.data.risk.BudgetConfig
 import com.example.data.risk.DailyRiskLedger
 import com.example.data.risk.RiskCurrency
+import com.example.data.signal.CentralCandidateAdapters
+import com.example.data.signal.CentralEvaluationContext
+import com.example.data.signal.CentralForwardValidationRecord
+import com.example.data.signal.CentralSignalAuthority
+import com.example.data.signal.CentralSignalCandidate
+import com.example.data.signal.CentralSignalVerdict
+import com.example.data.signal.ForwardValidationOutcome
+import com.example.data.signal.StrictSignalQualityEngine
+import com.example.data.signal.StrictSignalQualityReport
 import com.example.util.NexusNotificationManager
 import com.example.util.TimeZoneUtils
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +66,8 @@ class FuturesScannerRepository(
             loadPaperOrdersFromStorage()
             loadDailyLedgerFromStorage()
             loadTradeAlertRulesFromStorage()
+            loadCentralSignalStateFromStorage()
+            loadForwardValidationFromStorage()
         }
     }
 
@@ -93,12 +109,17 @@ class FuturesScannerRepository(
     val highRewardState: StateFlow<HighRewardScanState> = _highRewardState.asStateFlow()
 
     val signalStateManager = ActiveSignalStateManager()
+    val centralAuthority = CentralSignalAuthority(signalStateManager)
+    val centralVerdicts: StateFlow<List<CentralSignalVerdict>> = centralAuthority.verdicts
 
     private val _managedSignals = MutableStateFlow<List<ManagedSignalEntry>>(emptyList())
     val managedSignals: StateFlow<List<ManagedSignalEntry>> = _managedSignals.asStateFlow()
 
     private val _signalTransitionLog = MutableStateFlow<List<SignalTransitionRecord>>(emptyList())
     val signalTransitionLog: StateFlow<List<SignalTransitionRecord>> = _signalTransitionLog.asStateFlow()
+
+    private val _forwardValidationRecords = MutableStateFlow<List<CentralForwardValidationRecord>>(emptyList())
+    val forwardValidationRecords: StateFlow<List<CentralForwardValidationRecord>> = _forwardValidationRecords.asStateFlow()
 
     // Alert cooldown per symbol (45 minutes = 2,700,000 ms)
     private val alertCooldowns = ConcurrentHashMap<String, Long>()
@@ -112,6 +133,8 @@ class FuturesScannerRepository(
         loadPaperOrdersFromStorage()
         loadDailyLedgerFromStorage()
         loadTradeAlertRulesFromStorage()
+        loadCentralSignalStateFromStorage()
+        loadForwardValidationFromStorage()
     }
 
     // ==========================================
@@ -167,62 +190,251 @@ class FuturesScannerRepository(
     }
 
     // ==========================================
-    // LIVE SIGNAL INTAKE & STATE MACHINE
+    // CENTRAL SIGNAL AUTHORITY & LIVE INTAKE
     // ==========================================
 
     /**
-     * Ingests a new evaluation from BinanceFuturesScannerEngine or strict scanner,
-     * routed through ActiveSignalStateManager to prevent silent LONG<->SHORT flips,
-     * enforce deterministic IDs, log state transitions, and prevent duplicate alerts.
+     * Single entry point for evaluating normalized candidates and dispatching NEW LONG/SHORT push alerts.
+     * No scanner, ranker, or ViewModel may send new-signal notifications outside this method.
      */
-    fun onSignalEvaluated(signal: FuturesScanSignal): SignalIntakeOutcome {
-        val now = System.currentTimeMillis()
-        val isConfirmed = signal.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED ||
-            signal.lifecycle == FuturesSignalLifecycle.ACTIVE
-
-        val intake = signalStateManager.submitCandidate(
-            symbol = signal.symbol,
-            direction = signal.direction,
-            isConfirmed = isConfirmed,
-            entryPrice = signal.entryPrice,
-            stopLoss = signal.stopLoss,
-            takeProfit1 = signal.takeProfit1,
-            takeProfit2 = signal.takeProfit2,
-            netRiskReward = signal.riskRewardRatio,
-            qualityScore = signal.qualityScore,
-            dataSourceName = "Binance/Futures Multi-TF",
-            setupReason = signal.reasonsForEntry.firstOrNull() ?: signal.detectedPattern.label,
-            confirmationCandleCloseMs = signal.entryTimer?.triggerTimestampMs ?: signal.timestamp,
-            expiresAtMs = signal.exitPlan?.let {
-                signal.timestamp + (it.setupExpiryBars.coerceAtLeast(1) * signal.primaryTimeframe.durationMillis)
-            } ?: (now + 4 * 3_600_000L),
-            nowMs = now,
-            preferredSignalId = signal.id
-        )
+    fun evaluateThroughCentralAuthority(
+        context: CentralEvaluationContext,
+        candidates: List<CentralSignalCandidate>,
+        playSound: Boolean = _scannerState.value.soundAlertsEnabled,
+        source: String = "Central Signal Authority"
+    ): CentralSignalVerdict {
+        val verdict = centralAuthority.evaluateAndDecide(context, candidates)
+        if (verdict.state.isApproved) {
+            recordApprovedForwardValidation(verdict)
+        }
+        if (centralAuthority.isNotificationEligible(verdict)) {
+            val dispatched = notificationManager?.notifyCentralApprovedSignal(
+                verdict = verdict,
+                playSound = playSound,
+                source = source,
+                nowMs = context.referenceTimeMs
+            ) ?: false
+            if (dispatched) {
+                centralAuthority.markNewSignalNotificationDispatched(verdict, context.referenceTimeMs)
+            }
+        }
         syncManagedStateFlows()
+        saveCentralSignalStateToStorage()
+        return verdict
+    }
 
-        if (!intake.accepted) {
-            return intake
+    /**
+     * Shared Foreground + Background scanner evaluation pipeline so foreground service,
+     * WorkManager background worker, and on-demand UI scans enforce identical rules.
+     */
+    suspend fun evaluatePairWithCentralAuthority(
+        symbol: String,
+        baseAsset: String,
+        currentPrice: Double,
+        candles4h: List<Candle>,
+        candles1h: List<Candle>,
+        candles15m: List<Candle>,
+        candles5m: List<Candle> = emptyList(),
+        fundingRatePercent: Double? = null,
+        fundingDataTimestampMs: Long? = null,
+        isFundingDataStale: Boolean = false,
+        marketDataTimestampMs: Long = System.currentTimeMillis(),
+        dataStatus: MarketDataStatus = MarketDataStatus.LIVE,
+        dataSourceName: String = "Binance USDT-M Futures Public REST",
+        futuresLiquidity: FuturesLiquiditySnapshot? = null,
+        playSound: Boolean = _scannerState.value.soundAlertsEnabled,
+        source: String = "Central Signal Authority",
+        referenceTimeMs: Long = System.currentTimeMillis()
+    ): CentralSignalVerdict {
+        val normSymbol = CentralCandidateAdapters.normalizeSymbol(symbol)
+        val completed15m = TimeZoneUtils.filterCompletedCandles(candles15m, referenceTimeMs)
+
+        val scanResult = if (currentPrice > 0.0 && completed15m.isNotEmpty()) {
+            BinanceFuturesScannerEngine.evaluatePair(
+                symbol = normSymbol,
+                baseAsset = baseAsset,
+                currentPrice = currentPrice,
+                candles4h = candles4h,
+                candles1h = candles1h,
+                candles15m = candles15m,
+                candles5m = candles5m,
+                fundingRate = fundingRatePercent,
+                isMarketDataStale = dataStatus == MarketDataStatus.STALE || dataStatus == MarketDataStatus.UNAVAILABLE,
+                dataTimestampMs = marketDataTimestampMs,
+                referenceTimeMs = referenceTimeMs
+            )
+        } else null
+
+        val hrResult = if (currentPrice > 0.0 && completed15m.isNotEmpty()) {
+            HighRewardOpportunityDetector.scanPair(
+                symbol = normSymbol,
+                baseAsset = baseAsset,
+                currentPrice = currentPrice,
+                candles4h = candles4h,
+                candles1h = candles1h,
+                candles15m = candles15m,
+                candles5m = candles5m,
+                fundingRatePercent = fundingRatePercent,
+                budgetConfig = _budgetConfig.value,
+                referenceTimeMs = referenceTimeMs,
+                fundingDataTimestampMs = fundingDataTimestampMs,
+                isFundingDataStale = isFundingDataStale
+            )
+        } else null
+
+        val effectiveLiq = futuresLiquidity ?: FuturesLiquiditySnapshot(
+            symbol = normSymbol,
+            isCryptoFutures = true,
+            status = when {
+                isFundingDataStale -> FuturesTelemetryStatus.STALE
+                fundingRatePercent != null -> FuturesTelemetryStatus.LIVE
+                else -> FuturesTelemetryStatus.UNAVAILABLE
+            },
+            fundingRatePercent = fundingRatePercent,
+            liquidationDataAvailable = false,
+            fetchedAtMillis = fundingDataTimestampMs ?: 0L,
+            source = dataSourceName
+        )
+
+        val strictReport = if (currentPrice > 0.0 && completed15m.size >= 30) {
+            StrictSignalQualityEngine.evaluateSetup(
+                symbol = normSymbol,
+                assetName = baseAsset,
+                currentPrice = currentPrice,
+                dataStatus = dataStatus,
+                primaryTimeframe = CandleTimeframe.M15,
+                candles = candles15m,
+                candles15m = candles15m,
+                candles1h = candles1h,
+                candles4h = candles4h,
+                futuresLiquidity = effectiveLiq,
+                referenceTimeMs = referenceTimeMs
+            )
+        } else null
+
+        val candidates = buildList {
+            scanResult?.signal?.let {
+                add(
+                    CentralCandidateAdapters.fromBinanceFuturesSignal(
+                        signal = it,
+                        dataStatus = dataStatus,
+                        candleCount = completed15m.size,
+                        liquidity = effectiveLiq
+                    )
+                )
+            }
+            if (hrResult != null) {
+                addAll(
+                    CentralCandidateAdapters.fromHighRewardScanResult(
+                        result = hrResult,
+                        dataStatus = dataStatus,
+                        dataSourceName = dataSourceName,
+                        candleCount = completed15m.size,
+                        referenceTimeMs = referenceTimeMs
+                    )
+                )
+            }
+            strictReport?.let {
+                add(
+                    CentralCandidateAdapters.fromStrictQualityReport(
+                        report = it,
+                        dataStatus = dataStatus,
+                        dataSourceName = dataSourceName,
+                        candleCount = completed15m.size,
+                        confirmationCandleCloseMs = completed15m.lastOrNull()?.closeTime ?: referenceTimeMs,
+                        timeframe = CandleTimeframe.M15
+                    )
+                )
+            }
         }
 
+        // Preserve existing scanner/radar UI lists without letting them send independent notifications
+        scanResult?.signal?.let { updateScannerSignalListsOnly(it) }
+        if (hrResult != null) {
+            updateHighRewardStateOnly(normSymbol, hrResult, referenceTimeMs)
+        }
+
+        val fundStatusLabel = when {
+            isFundingDataStale -> "STALE"
+            fundingRatePercent != null && (fundingDataTimestampMs == null || (referenceTimeMs - fundingDataTimestampMs) <= 10 * 60_000L) -> "LIVE"
+            else -> "UNAVAILABLE"
+        }
+
+        val evalContext = CentralEvaluationContext(
+            symbol = normSymbol,
+            timeframe = CandleTimeframe.M15,
+            dataStatus = dataStatus,
+            dataSourceName = dataSourceName,
+            currentPrice = currentPrice,
+            snapshotTimestampMs = marketDataTimestampMs,
+            completedCandleCount = completed15m.size,
+            hasClosedCandleConfirmation = completed15m.isNotEmpty(),
+            strictQualityReport = strictReport,
+            fundingStatus = fundStatusLabel,
+            liquidationStatus = if (effectiveLiq.liquidationDataAvailable) "LIVE" else "UNAVAILABLE",
+            minNetRiskReward = StrictSignalQualityEngine.MIN_NET_RR,
+            requireNetRiskRewardCheck = true,
+            referenceTimeMs = referenceTimeMs
+        )
+
+        return evaluateThroughCentralAuthority(
+            context = evalContext,
+            candidates = candidates,
+            playSound = playSound,
+            source = source
+        )
+    }
+
+    /**
+     * Ingests a FuturesScanSignal into scanner UI state and routes approval/notification
+     * exclusively through CentralSignalAuthority.
+     */
+    fun onSignalEvaluated(
+        signal: FuturesScanSignal,
+        strictQualityReport: StrictSignalQualityReport? = null,
+        dataStatus: MarketDataStatus = MarketDataStatus.LIVE
+    ): SignalIntakeOutcome {
+        val now = System.currentTimeMillis()
+        updateScannerSignalListsOnly(signal)
+
+        val candidate = CentralCandidateAdapters.fromBinanceFuturesSignal(
+            signal = signal,
+            dataStatus = dataStatus
+        ).copy(strictQualityReport = strictQualityReport)
+
+        val verdict = evaluateThroughCentralAuthority(
+            context = CentralEvaluationContext(
+                symbol = signal.symbol,
+                timeframe = signal.primaryTimeframe,
+                dataStatus = dataStatus,
+                dataSourceName = signal.dataSource,
+                currentPrice = signal.currentPrice,
+                snapshotTimestampMs = signal.timestamp,
+                completedCandleCount = 50,
+                hasClosedCandleConfirmation = candidate.hasClosedCandleConfirmation,
+                strictQualityReport = strictQualityReport,
+                minNetRiskReward = StrictSignalQualityEngine.MIN_NET_RR,
+                requireNetRiskRewardCheck = true,
+                referenceTimeMs = now
+            ),
+            candidates = listOf(candidate),
+            source = "Futures Scanner -> Central Authority"
+        )
+
+        val entry = signalStateManager.getEntryForSymbol(signal.symbol)
+        return SignalIntakeOutcome(
+            accepted = verdict.state.isApproved || entry?.state?.isOpenOrLive == true,
+            entry = entry,
+            transition = signalStateManager.getTransitionHistory().firstOrNull { it.symbol == signal.symbol },
+            rejectionReason = verdict.rejectionReasons.firstOrNull(),
+            isDuplicateSuppressed = verdict.suppressedAsDuplicate
+        )
+    }
+
+    private fun updateScannerSignalListsOnly(signal: FuturesScanSignal) {
         if (signal.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED) {
-            // Check if we already have an active signal for this symbol
             val existingActive = _scannerState.value.activeSignals.firstOrNull { it.symbol == signal.symbol }
-            if (existingActive != null) {
-                return intake
-            }
-
-            // Check alert cooldown
-            val lastAlertTime = alertCooldowns[signal.symbol] ?: 0L
-            val canAlert = (now - lastAlertTime) > COOLDOWN_DURATION_MS
-
-            if (canAlert && signalStateManager.shouldDispatchNotification(signal.id, signal.symbol, signal.direction, now)) {
-                alertCooldowns[signal.symbol] = now
-                signalStateManager.markNotificationDispatched(signal.id, signal.symbol, signal.direction, now)
-                triggerSignalNotification(signal)
-            }
-
-            // Add to active signals
+            if (existingActive != null) return
             _scannerState.update { state ->
                 val updatedActive = listOf(signal) + state.activeSignals.filterNot { it.symbol == signal.symbol }
                 val updatedSetups = state.watchlistSetups.filterNot { it.symbol == signal.symbol }
@@ -233,7 +445,6 @@ class FuturesScannerRepository(
                 )
             }
         } else if (signal.lifecycle == FuturesSignalLifecycle.WATCHLIST_SETUP) {
-            // Update or add developing setup
             _scannerState.update { state ->
                 val updatedSetups = listOf(signal) + state.watchlistSetups.filterNot { it.symbol == signal.symbol }
                 state.copy(
@@ -242,70 +453,43 @@ class FuturesScannerRepository(
                 )
             }
         }
-        return intake
     }
 
     /**
-     * Part 3 Strict Multi-Market Signal State & Notification Gate (>92% quality score + all mandatory filters).
+     * Part 3 Strict Multi-Market Signal State & CentralSignalAuthority Gate.
      */
     fun onStrictMultiMarketEvaluated(
         rankedBoard: RankedMultiMarketBoard,
         nowMs: Long = System.currentTimeMillis()
-    ) {
+    ): List<CentralSignalVerdict> {
+        val verdicts = mutableListOf<CentralSignalVerdict>()
         for (item in rankedBoard.opportunities) {
             val eval = item.evaluation
-            val setup = item.setup ?: continue
-            if (eval.status == SetupValidationStatus.DATA_UNAVAILABLE || eval.status == SetupValidationStatus.INVALIDATED) {
-                continue
-            }
-
-            val qualityScore = item.qualityReport?.totalScore ?: setup.score
-            val allMandatoryPassed = item.qualityReport?.allMandatoryFiltersPassed ?: true
-            val isConfirmed = item.isQualified && setup.status == SetupValidationStatus.CONFIRMED
-
-            val intake = signalStateManager.submitCandidate(
+            val candidate = CentralCandidateAdapters.fromRankedOpportunity(item, snapshotTimestampMs = nowMs)
+            val context = CentralEvaluationContext(
                 symbol = eval.symbol,
-                direction = setup.direction,
-                isConfirmed = isConfirmed,
-                entryPrice = setup.entryPrice,
-                stopLoss = setup.stopLoss,
-                takeProfit1 = setup.adjustedTarget1,
-                takeProfit2 = setup.adjustedTarget2,
-                netRiskReward = setup.estimatedNetRiskReward,
-                qualityScore = qualityScore,
+                timeframe = CandleTimeframe.M15,
+                dataStatus = item.dataStatus,
                 dataSourceName = eval.venueName,
-                setupReason = setup.supportingConfirmations.firstOrNull() ?: setup.setupType.label,
-                confirmationCandleCloseMs = setup.confirmationCandleCloseTimeMs.takeIf { it > 0L } ?: nowMs,
-                expiresAtMs = nowMs + 6 * 3_600_000L,
-                nowMs = nowMs
+                currentPrice = eval.currentPrice.takeIf { it > 0.0 },
+                snapshotTimestampMs = nowMs,
+                completedCandleCount = eval.mtfHierarchy?.fifteenMin?.candleCount ?: 0,
+                hasClosedCandleConfirmation = (item.setup?.confirmationCandleCloseTimeMs ?: 0L) > 0L,
+                strictQualityReport = item.qualityReport,
+                minNetRiskReward = StrictMultiMarketSetupEngine.MIN_NET_RR_FOR_CONFIRMATION,
+                requireNetRiskRewardCheck = true,
+                referenceTimeMs = nowMs
             )
-
-            if (intake.accepted && isConfirmed && !intake.isDuplicateSuppressed && intake.entry != null) {
-                val entry = intake.entry
-                if (signalStateManager.shouldDispatchNotification(entry.signalId, entry.symbol, entry.direction, nowMs)) {
-                    val dispatched = notificationManager?.notifyStrictQualifiedSignal(
-                        signalId = entry.signalId,
-                        symbol = eval.displaySymbol,
-                        direction = setup.direction,
-                        entryPriceFormatted = HighRewardOpportunity.fmtPrice(setup.entryPrice),
-                        stopLossFormatted = HighRewardOpportunity.fmtPrice(setup.stopLoss),
-                        tp1Formatted = HighRewardOpportunity.fmtPrice(setup.adjustedTarget1),
-                        tpFinalFormatted = HighRewardOpportunity.fmtPrice(setup.adjustedTarget2),
-                        netRiskRewardRatio = setup.estimatedNetRiskReward,
-                        qualityScore = qualityScore,
-                        allMandatoryFiltersPassed = allMandatoryPassed,
-                        setupReason = setup.supportingConfirmations.firstOrNull() ?: setup.setupType.label,
-                        dataSourceName = eval.venueName,
-                        timestampMs = nowMs,
-                        playSound = _scannerState.value.soundAlertsEnabled
-                    ) ?: false
-                    if (dispatched) {
-                        signalStateManager.markNotificationDispatched(entry.signalId, entry.symbol, entry.direction, nowMs)
-                    }
-                }
-            }
+            verdicts.add(
+                evaluateThroughCentralAuthority(
+                    context = context,
+                    candidates = listOf(candidate),
+                    playSound = _scannerState.value.soundAlertsEnabled,
+                    source = "Multi-Market Ranker -> Central Authority"
+                )
+            )
         }
-        syncManagedStateFlows()
+        return verdicts
     }
 
     private fun syncManagedStateFlows() {
@@ -314,26 +498,55 @@ class FuturesScannerRepository(
     }
 
     /**
-     * Part 4: Ingests HighRewardScanResult for a symbol, notifies via NexusNotificationManager
-     * without duplicate alerts, and prioritizes >= 1:5.0 setups ahead of 1:4.0–4.99.
+     * Part 4: Ingests HighRewardScanResult for a symbol into highRewardState and routes
+     * approval & push notifications exclusively through CentralSignalAuthority.
      */
     fun onHighRewardScanEvaluated(
         symbol: String,
         result: HighRewardScanResult,
         playSound: Boolean = _scannerState.value.soundAlertsEnabled,
-        source: String = "NEXUS 1:5 Opportunity Detector"
+        source: String = "NEXUS 1:5 Opportunity Detector",
+        strictQualityReport: StrictSignalQualityReport? = null,
+        dataStatus: MarketDataStatus = MarketDataStatus.LIVE
     ) {
         val nowMs = System.currentTimeMillis()
-        result.qualifiedOpportunities.forEach { opp ->
-            if (opp.isQualified && opp.status == OpportunityStatus.ACTIVE) {
-                notificationManager?.notifyHighRewardOpportunity(
-                    opportunity = opp,
-                    playSound = playSound,
-                    source = source
-                )
-            }
-        }
+        updateHighRewardStateOnly(symbol, result, nowMs)
 
+        val candidates = CentralCandidateAdapters.fromHighRewardScanResult(
+            result = result,
+            dataStatus = dataStatus,
+            dataSourceName = source,
+            referenceTimeMs = nowMs
+        )
+        val firstOpp = result.qualifiedOpportunities.firstOrNull()
+        evaluateThroughCentralAuthority(
+            context = CentralEvaluationContext(
+                symbol = symbol,
+                timeframe = CandleTimeframe.M15,
+                dataStatus = dataStatus,
+                dataSourceName = source,
+                currentPrice = firstOpp?.currentPrice,
+                snapshotTimestampMs = firstOpp?.detectedAtTimestampMs ?: nowMs,
+                completedCandleCount = if (firstOpp != null) 50 else 0,
+                hasClosedCandleConfirmation = firstOpp != null,
+                strictQualityReport = strictQualityReport,
+                fundingStatus = if (firstOpp?.fundingRateTimestampMs != null) "LIVE" else "UNAVAILABLE",
+                liquidationStatus = "UNAVAILABLE",
+                minNetRiskReward = StrictSignalQualityEngine.MIN_NET_RR,
+                requireNetRiskRewardCheck = true,
+                referenceTimeMs = nowMs
+            ),
+            candidates = candidates,
+            playSound = playSound,
+            source = source
+        )
+    }
+
+    private fun updateHighRewardStateOnly(
+        symbol: String,
+        result: HighRewardScanResult,
+        nowMs: Long = System.currentTimeMillis()
+    ) {
         _highRewardState.update { prev ->
             val archivedNewly = mutableListOf<HighRewardOpportunity>()
             val existingRetained = prev.activeOpportunities
@@ -501,9 +714,11 @@ class FuturesScannerRepository(
         invalidateExpiredHighRewardOpportunities(priceMap)
         val nowMs = System.currentTimeMillis()
         priceMap.forEach { (sym, price) ->
-            signalStateManager.evaluateMarketUpdate(sym, price, nowMs)
+            centralAuthority.onMarketPriceUpdate(sym, price, nowMs)
         }
+        evaluateForwardValidationOnLivePrices(priceMap, nowMs)
         syncManagedStateFlows()
+        saveCentralSignalStateToStorage()
     }
 
     fun invalidateExpiredHighRewardOpportunities(
@@ -760,22 +975,6 @@ class FuturesScannerRepository(
 
     private fun currentPktDateKey(): String =
         TimeZoneUtils.formatKarachiShort(System.currentTimeMillis()).substringBefore(",")
-
-    // ==========================================
-    // NOTIFICATION TRIGGER
-    // ==========================================
-
-    private fun triggerSignalNotification(signal: FuturesScanSignal) {
-        notificationManager?.notifyFuturesScanSignal(
-            symbol = signal.symbol,
-            isLong = signal.direction == FuturesDirection.LONG,
-            entryZone = signal.entryZoneFormatted,
-            sl = signal.stopLossFormatted,
-            tp1 = signal.tp1Formatted,
-            qualityScore = signal.qualityScore,
-            signalId = signal.id
-        )
-    }
 
     // ==========================================
     // STATISTICS CALCULATION
@@ -1188,6 +1387,234 @@ class FuturesScannerRepository(
         }
     }
 
+    private fun saveCentralSignalStateToStorage() {
+        try {
+            prefs?.edit()
+                ?.putString(KEY_ACTIVE_SIGNAL_STATE, signalStateManager.exportStateJson())
+                ?.putString(KEY_CENTRAL_DEDUP_STATE, centralAuthority.exportDedupStateJson())
+                ?.apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadCentralSignalStateFromStorage() {
+        try {
+            prefs?.getString(KEY_ACTIVE_SIGNAL_STATE, null)?.let {
+                signalStateManager.restoreStateJson(it)
+            }
+            prefs?.getString(KEY_CENTRAL_DEDUP_STATE, null)?.let {
+                centralAuthority.restoreDedupStateJson(it)
+            }
+            syncManagedStateFlows()
+        } catch (_: Exception) {
+        }
+    }
+
+    fun recordApprovedForwardValidation(verdict: CentralSignalVerdict) {
+        val dir = verdict.approvedDirection ?: return
+        if (!verdict.state.isApproved || verdict.entryPrice <= 0.0 || verdict.stopLoss <= 0.0 || verdict.takeProfit1 <= 0.0) {
+            return
+        }
+        val current = _forwardValidationRecords.value
+        val exists = current.any {
+            (verdict.dedupKey.isNotBlank() && it.dedupKey == verdict.dedupKey) ||
+                (verdict.signalId.isNotBlank() && it.signalId == verdict.signalId)
+        }
+        if (exists) return
+
+        val record = CentralForwardValidationRecord(
+            verdictId = verdict.verdictId,
+            signalId = verdict.signalId,
+            dedupKey = verdict.dedupKey,
+            symbol = verdict.symbol,
+            direction = dir,
+            timeframe = verdict.timeframe,
+            qualityScore = verdict.finalQualityScore ?: CentralSignalAuthority.MIN_APPROVAL_SCORE,
+            entryPrice = verdict.entryPrice,
+            stopLoss = verdict.stopLoss,
+            takeProfit1 = verdict.takeProfit1,
+            takeProfit2 = verdict.takeProfit2.takeIf { it > 0.0 } ?: verdict.takeProfit1,
+            netRiskReward = verdict.netRiskReward,
+            dataSourceName = verdict.dataSourceName,
+            approvedAtMs = verdict.evaluatedAtMs,
+            approvedAtPkt = verdict.evaluatedAtPkt,
+            expiresAtMs = verdict.expiresAtMs
+        )
+        _forwardValidationRecords.value = (listOf(record) + current).take(150)
+        saveForwardValidationToStorage()
+    }
+
+    fun evaluateForwardValidationOnLivePrices(
+        priceMap: Map<String, Double>,
+        nowMs: Long = System.currentTimeMillis()
+    ) {
+        val current = _forwardValidationRecords.value
+        if (current.isEmpty()) return
+
+        var changed = false
+        val updated = current.map { rec ->
+            if (rec.isResolved) return@map rec
+
+            val price = priceMap[rec.symbol]?.takeIf { it.isFinite() && it > 0.0 }
+            val isLong = rec.direction == FuturesDirection.LONG
+            val nextFav = if (price != null) {
+                if (isLong) maxOf(rec.maxFavorablePrice, price) else minOf(rec.maxFavorablePrice, price)
+            } else rec.maxFavorablePrice
+            val nextAdv = if (price != null) {
+                if (isLong) minOf(rec.maxAdversePrice, price) else maxOf(rec.maxAdversePrice, price)
+            } else rec.maxAdversePrice
+
+            val slHit = price != null && if (isLong) price <= rec.stopLoss else price >= rec.stopLoss
+            val tp2Hit = price != null && rec.takeProfit2 > 0.0 && if (isLong) price >= rec.takeProfit2 else price <= rec.takeProfit2
+            val tp1Hit = price != null && if (isLong) price >= rec.takeProfit1 else price <= rec.takeProfit1
+            val verdictState = centralAuthority.getVerdictForSymbol(rec.symbol)
+            val isStructureInvalidated = verdictState?.signalId == rec.signalId &&
+                verdictState.state == com.example.data.signal.CentralSignalState.INVALIDATED &&
+                !slHit
+
+            val resolvedRec = when {
+                slHit -> rec.copy(
+                    outcome = ForwardValidationOutcome.SL_HIT,
+                    maxFavorablePrice = nextFav,
+                    maxAdversePrice = nextAdv,
+                    resolvedAtMs = nowMs,
+                    resolvedAtPkt = TimeZoneUtils.formatKarachiTimestamp(nowMs),
+                    resolutionPrice = rec.stopLoss,
+                    resolutionNote = "Stop Loss reached conservatively at ${rec.stopLoss}"
+                )
+                tp2Hit -> rec.copy(
+                    outcome = ForwardValidationOutcome.TP2_HIT,
+                    maxFavorablePrice = nextFav,
+                    maxAdversePrice = nextAdv,
+                    resolvedAtMs = nowMs,
+                    resolvedAtPkt = TimeZoneUtils.formatKarachiTimestamp(nowMs),
+                    resolutionPrice = rec.takeProfit2,
+                    resolutionNote = "Final target TP2 reached at ${rec.takeProfit2}"
+                )
+                tp1Hit -> rec.copy(
+                    outcome = ForwardValidationOutcome.TP1_HIT,
+                    maxFavorablePrice = nextFav,
+                    maxAdversePrice = nextAdv,
+                    resolvedAtMs = nowMs,
+                    resolvedAtPkt = TimeZoneUtils.formatKarachiTimestamp(nowMs),
+                    resolutionPrice = rec.takeProfit1,
+                    resolutionNote = "Take Profit 1 reached at ${rec.takeProfit1}"
+                )
+                isStructureInvalidated -> rec.copy(
+                    outcome = ForwardValidationOutcome.INVALIDATED,
+                    maxFavorablePrice = nextFav,
+                    maxAdversePrice = nextAdv,
+                    resolvedAtMs = nowMs,
+                    resolvedAtPkt = TimeZoneUtils.formatKarachiTimestamp(nowMs),
+                    resolutionPrice = price,
+                    resolutionNote = verdictState?.explanation ?: "Structure invalidated before target"
+                )
+                rec.expiresAtMs > 0L && nowMs >= rec.expiresAtMs -> rec.copy(
+                    outcome = ForwardValidationOutcome.EXPIRED,
+                    maxFavorablePrice = nextFav,
+                    maxAdversePrice = nextAdv,
+                    resolvedAtMs = nowMs,
+                    resolvedAtPkt = TimeZoneUtils.formatKarachiTimestamp(nowMs),
+                    resolutionPrice = price,
+                    resolutionNote = "Validity window expired at ${TimeZoneUtils.formatKarachiTimestamp(rec.expiresAtMs)}"
+                )
+                nextFav != rec.maxFavorablePrice || nextAdv != rec.maxAdversePrice -> rec.copy(
+                    maxFavorablePrice = nextFav,
+                    maxAdversePrice = nextAdv
+                )
+                else -> rec
+            }
+            if (resolvedRec != rec) changed = true
+            resolvedRec
+        }
+        if (changed) {
+            _forwardValidationRecords.value = updated
+            saveForwardValidationToStorage()
+        }
+    }
+
+    private fun saveForwardValidationToStorage() {
+        try {
+            val arr = JSONArray()
+            _forwardValidationRecords.value.take(150).forEach { r ->
+                arr.put(
+                    JSONObject().apply {
+                        put("verdictId", r.verdictId)
+                        put("signalId", r.signalId)
+                        put("dedupKey", r.dedupKey)
+                        put("symbol", r.symbol)
+                        put("direction", r.direction.name)
+                        put("tf", r.timeframe.name)
+                        put("score", r.qualityScore)
+                        put("entry", r.entryPrice)
+                        put("sl", r.stopLoss)
+                        put("tp1", r.takeProfit1)
+                        put("tp2", r.takeProfit2)
+                        put("netRr", r.netRiskReward)
+                        put("source", r.dataSourceName)
+                        put("approvedAtMs", r.approvedAtMs)
+                        put("approvedAtPkt", r.approvedAtPkt)
+                        put("expiresAtMs", r.expiresAtMs)
+                        put("outcome", r.outcome.name)
+                        put("maxFav", r.maxFavorablePrice)
+                        put("maxAdv", r.maxAdversePrice)
+                        r.resolvedAtMs?.let { put("resolvedAtMs", it) }
+                        r.resolvedAtPkt?.let { put("resolvedAtPkt", it) }
+                        r.resolutionPrice?.let { put("resPrice", it) }
+                        put("resNote", r.resolutionNote)
+                    }
+                )
+            }
+            prefs?.edit()?.putString(KEY_FORWARD_VALIDATION, arr.toString())?.apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadForwardValidationFromStorage() {
+        val raw = prefs?.getString(KEY_FORWARD_VALIDATION, null) ?: return
+        try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<CentralForwardValidationRecord>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val dir = FuturesDirection.entries.firstOrNull { it.name == o.optString("direction") } ?: FuturesDirection.LONG
+                val tf = CandleTimeframe.entries.firstOrNull { it.name == o.optString("tf") } ?: CandleTimeframe.M15
+                val out = ForwardValidationOutcome.entries.firstOrNull { it.name == o.optString("outcome") }
+                    ?: ForwardValidationOutcome.STILL_OPEN
+                val approvedMs = o.optLong("approvedAtMs", 0L)
+                list.add(
+                    CentralForwardValidationRecord(
+                        verdictId = o.optString("verdictId"),
+                        signalId = o.optString("signalId"),
+                        dedupKey = o.optString("dedupKey"),
+                        symbol = o.optString("symbol"),
+                        direction = dir,
+                        timeframe = tf,
+                        qualityScore = o.optInt("score", CentralSignalAuthority.MIN_APPROVAL_SCORE),
+                        entryPrice = o.optDouble("entry", 0.0),
+                        stopLoss = o.optDouble("sl", 0.0),
+                        takeProfit1 = o.optDouble("tp1", 0.0),
+                        takeProfit2 = o.optDouble("tp2", 0.0),
+                        netRiskReward = o.optDouble("netRr", 0.0),
+                        dataSourceName = o.optString("source", "Binance USDT-M Futures Public REST"),
+                        approvedAtMs = approvedMs,
+                        approvedAtPkt = o.optString("approvedAtPkt").ifBlank { TimeZoneUtils.formatKarachiTimestamp(approvedMs) },
+                        expiresAtMs = o.optLong("expiresAtMs", 0L),
+                        outcome = out,
+                        maxFavorablePrice = o.optDouble("maxFav", o.optDouble("entry", 0.0)),
+                        maxAdversePrice = o.optDouble("maxAdv", o.optDouble("entry", 0.0)),
+                        resolvedAtMs = if (o.has("resolvedAtMs")) o.optLong("resolvedAtMs") else null,
+                        resolvedAtPkt = if (o.has("resolvedAtPkt")) o.optString("resolvedAtPkt") else null,
+                        resolutionPrice = if (o.has("resPrice")) o.optDouble("resPrice") else null,
+                        resolutionNote = o.optString("resNote", "")
+                    )
+                )
+            }
+            _forwardValidationRecords.value = list
+        } catch (_: Exception) {
+        }
+    }
+
     companion object {
         private const val TAG = "FuturesScannerRepo"
         private const val PREFS_NAME = "nexus_futures_scanner_prefs"
@@ -1198,6 +1625,9 @@ class FuturesScannerRepository(
         private const val KEY_PAPER_ORDERS = "paper_orders_json"
         private const val KEY_DAILY_LEDGER = "daily_risk_ledger_json"
         private const val KEY_TRADE_ALERT_RULES = "trade_alert_rules_json"
+        private const val KEY_ACTIVE_SIGNAL_STATE = "active_signal_state_json"
+        private const val KEY_CENTRAL_DEDUP_STATE = "central_dedup_state_json"
+        private const val KEY_FORWARD_VALIDATION = "central_forward_validation_json"
 
         // Singleton instance holder for service and UI coordination
         @Volatile

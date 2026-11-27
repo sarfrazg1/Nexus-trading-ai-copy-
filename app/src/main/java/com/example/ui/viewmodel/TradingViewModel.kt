@@ -182,6 +182,8 @@ data class TradingUiState(
     val multiMarketSetupDirectionalReport: com.example.data.timemachine.DirectionalSetupBacktestReport? = null,
     val managedSignals: List<com.example.data.scanner.ManagedSignalEntry> = emptyList(),
     val signalTransitionLog: List<com.example.data.scanner.SignalTransitionRecord> = emptyList(),
+    val centralVerdicts: List<com.example.data.signal.CentralSignalVerdict> = emptyList(),
+    val forwardValidationRecords: List<com.example.data.signal.CentralForwardValidationRecord> = emptyList(),
     val budgetConfig: com.example.data.risk.BudgetConfig = com.example.data.risk.BudgetConfig(),
     val dailyRiskLedger: com.example.data.risk.DailyRiskLedger = com.example.data.risk.DailyRiskLedger(),
 
@@ -452,6 +454,8 @@ class TradingViewModel(
             multiMarketSetupDirectionalReport = _multiMarketSetupDirectionalReport.value,
             managedSignals = futuresScannerRepo.managedSignals.value,
             signalTransitionLog = futuresScannerRepo.signalTransitionLog.value,
+            centralVerdicts = futuresScannerRepo.centralVerdicts.value,
+            forwardValidationRecords = futuresScannerRepo.forwardValidationRecords.value,
             budgetConfig = futuresScannerRepo.budgetConfig.value,
             dailyRiskLedger = futuresScannerRepo.dailyRiskLedger.value,
             paperPortfolio = _paperPortfolio.value,
@@ -522,6 +526,16 @@ class TradingViewModel(
             }
         }
         viewModelScope.launch {
+            futuresScannerRepo.centralVerdicts.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
+            futuresScannerRepo.forwardValidationRecords.collect {
+                _learningUpdate.value++
+            }
+        }
+        viewModelScope.launch {
             futuresScannerRepo.budgetConfig.collect {
                 _learningUpdate.value++
             }
@@ -537,6 +551,7 @@ class TradingViewModel(
                 val priceMap = buildLivePriceMap(assets)
                 if (priceMap.isNotEmpty()) {
                     paperTradingRepo.onLivePricesUpdated(priceMap)
+                    futuresScannerRepo.onLivePricesUpdated(priceMap)
                 }
             }
         }
@@ -982,48 +997,39 @@ class TradingViewModel(
                     val c1h = repository.futuresApiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H1, limit = 50)
                     val c4h = repository.futuresApiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H4, limit = 30)
                     val c5m = repository.futuresApiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.M5, limit = 30)
-                    val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m)
+                    val nowScanMs = System.currentTimeMillis()
+                    val resolvedStatus = repository.futuresApiClient.resolveCandleFetchStatus(
+                        symbol = pair.symbol,
+                        timeframe = CandleTimeframe.M15,
+                        candles = c15m,
+                        nowMs = nowScanMs
+                    )
+                    val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m, nowScanMs)
                     val currentPrice = pair.currentPrice.takeIf { it > 0.0 }
                         ?: completed15m.lastOrNull()?.close
                         ?: 0.0
-                    if (currentPrice > 0.0) {
-                        val fundingSnap = repository.futuresApiClient.fetchFundingRateSnapshot(pair.symbol)
-                        val funding = fundingSnap?.ratePercent
-                        val result = com.example.data.scanner.BinanceFuturesScannerEngine.evaluatePair(
-                            symbol = pair.symbol,
-                            baseAsset = pair.baseAsset,
-                            currentPrice = currentPrice,
-                            candles4h = c4h,
-                            candles1h = c1h,
-                            candles15m = c15m,
-                            candles5m = c5m,
-                            fundingRate = funding
-                        )
-                        result.signal?.let { futuresScannerRepo.onSignalEvaluated(it) }
-
-                        val playHrSound = repository.notificationManager.isSoundAlertsEnabled() &&
-                            (appSettingsRepo.soundEffectsEnabled.value || futuresScannerRepo.scannerState.value.soundAlertsEnabled)
-                        val hrResult = com.example.data.scanner.HighRewardOpportunityDetector.scanPair(
-                            symbol = pair.symbol,
-                            baseAsset = pair.baseAsset,
-                            currentPrice = currentPrice,
-                            candles4h = c4h,
-                            candles1h = c1h,
-                            candles15m = c15m,
-                            candles5m = c5m,
-                            fundingRatePercent = funding,
-                            budgetConfig = futuresScannerRepo.budgetConfig.value,
-                            fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
-                            isFundingDataStale = fundingSnap == null
-                        )
-                        futuresScannerRepo.onHighRewardScanEvaluated(
-                            symbol = pair.symbol,
-                            result = hrResult,
-                            playSound = playHrSound,
-                            source = "On-Demand 1:5 Radar"
-                        )
-                        scannedCount++
-                    }
+                    val fundingSnap = if (currentPrice > 0.0) repository.futuresApiClient.fetchFundingRateSnapshot(pair.symbol) else null
+                    val playHrSound = repository.notificationManager.isSoundAlertsEnabled() &&
+                        (appSettingsRepo.soundEffectsEnabled.value || futuresScannerRepo.scannerState.value.soundAlertsEnabled)
+                    futuresScannerRepo.evaluatePairWithCentralAuthority(
+                        symbol = pair.symbol,
+                        baseAsset = pair.baseAsset,
+                        currentPrice = currentPrice,
+                        candles4h = c4h,
+                        candles1h = c1h,
+                        candles15m = c15m,
+                        candles5m = c5m,
+                        fundingRatePercent = fundingSnap?.ratePercent,
+                        fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                        isFundingDataStale = fundingSnap == null,
+                        marketDataTimestampMs = resolvedStatus.fetchedAtMs,
+                        dataStatus = resolvedStatus.dataStatus,
+                        dataSourceName = resolvedStatus.dataSourceName,
+                        playSound = playHrSound,
+                        source = "On-Demand Central Scanner",
+                        referenceTimeMs = nowScanMs
+                    )
+                    scannedCount++
                 } catch (_: Exception) {
                 }
             }
@@ -1031,8 +1037,9 @@ class TradingViewModel(
                 status = com.example.data.scanner.ScannerStatus.IDLE,
                 currentlyScanning = null
             )
+            val approvedCount = futuresScannerRepo.centralVerdicts.value.count { it.state.isApproved }
             val hrCount = futuresScannerRepo.highRewardState.value.activeOpportunities.size
-            _userMessage.value = "Futures scan completed ($scannedCount pairs | $hrCount active >=1:4/1:5 setups)"
+            _userMessage.value = "Scan completed ($scannedCount pairs | $approvedCount Central Approved >=92 | $hrCount radar candidates)"
         }
     }
 
@@ -1918,6 +1925,7 @@ class TradingViewModel(
                 val assetsMap = repository.assets.value.associateBy { it.id.uppercase() }
                 val results = mutableListOf<com.example.data.scanner.StrictMultiMarketEvaluation>()
                 val statusMap = mutableMapOf<String, MarketDataStatus>()
+                val qualityReportsMap = mutableMapOf<String, com.example.data.signal.StrictSignalQualityReport>()
 
                 for (spec in specs) {
                     val asset = assetsMap[spec.canonicalId]
@@ -1925,16 +1933,18 @@ class TradingViewModel(
                     val c1h = repository.getCandles(spec.canonicalId, CandleTimeframe.H1, 160)
                     val c4h = repository.getCandles(spec.canonicalId, CandleTimeframe.H4, 120)
                     val c1d = repository.getCandles(spec.canonicalId, CandleTimeframe.D1, 90)
-                    val isStale = asset?.dataStatus == MarketDataStatus.UNAVAILABLE ||
-                        asset?.dataStatus == MarketDataStatus.STALE
+                    val dataStatus = asset?.dataStatus ?: MarketDataStatus.UNAVAILABLE
+                    val isStale = dataStatus == MarketDataStatus.UNAVAILABLE ||
+                        dataStatus == MarketDataStatus.STALE
 
                     if (asset != null) {
-                        statusMap[spec.canonicalId.uppercase()] = asset.dataStatus
+                        statusMap[spec.canonicalId.uppercase()] = dataStatus
                     }
 
+                    val livePrice = asset?.currentPrice ?: c15m.lastOrNull()?.close
                     val eval = com.example.data.scanner.StrictMultiMarketSetupEngine.evaluate(
                         symbol = spec.canonicalId,
-                        currentPrice = asset?.currentPrice ?: c15m.lastOrNull()?.close,
+                        currentPrice = livePrice,
                         dataSourceName = asset?.dataSourceName ?: spec.primaryVenue.displayName,
                         candles1d = c1d,
                         candles4h = c4h,
@@ -1943,20 +1953,40 @@ class TradingViewModel(
                         isDataStale = isStale
                     )
                     results.add(eval)
+
+                    val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m)
+                    if (completed15m.size >= 30 && livePrice != null && livePrice > 0.0) {
+                        val strictReport = com.example.data.signal.StrictSignalQualityEngine.evaluateSetup(
+                            symbol = spec.canonicalId,
+                            assetName = spec.displayName,
+                            currentPrice = livePrice,
+                            dataStatus = dataStatus,
+                            primaryTimeframe = CandleTimeframe.M15,
+                            candles = c15m,
+                            candles15m = c15m,
+                            candles1h = c1h,
+                            candles4h = c4h,
+                            candles1d = c1d,
+                            hybridState = repository.hybridMarketState.value
+                        )
+                        qualityReportsMap[spec.canonicalId.uppercase()] = strictReport
+                    }
                 }
 
                 val rankedBoard = com.example.data.scanner.MultiMarketOpportunityRanker.rank(
                     evaluations = results,
-                    dataStatusesBySymbol = statusMap
+                    dataStatusesBySymbol = statusMap,
+                    qualityReportsBySymbol = qualityReportsMap
                 )
                 _multiMarketStrictEvaluations.value = rankedBoard.opportunities.map { it.evaluation }
                 _rankedMultiMarketBoard.value = rankedBoard
-                futuresScannerRepo.onStrictMultiMarketEvaluated(rankedBoard)
+                val verdicts = futuresScannerRepo.onStrictMultiMarketEvaluated(rankedBoard)
+                val centralApproved = verdicts.count { it.state.isApproved }
 
-                _userMessage.value = if (rankedBoard.qualifiedCount == 0) {
+                _userMessage.value = if (centralApproved == 0 && rankedBoard.qualifiedCount == 0) {
                     "${rankedBoard.emptyHeadline}: ${rankedBoard.emptyReason ?: "Waiting for confirmed >=1:4 setup"}"
                 } else {
-                    "Multi-Market scan: ${rankedBoard.qualifiedCount} qualified (${rankedBoard.preferredFiveToOneCount} >=1:5) | ${rankedBoard.unavailableCount} unavailable"
+                    "Multi-Market scan: $centralApproved Central Approved (>=92) | ${rankedBoard.qualifiedCount} ranked (${rankedBoard.preferredFiveToOneCount} >=1:5) | ${rankedBoard.unavailableCount} unavailable"
                 }
             } catch (e: Exception) {
                 _userMessage.value = "Multi-Market scan failed: ${e.message ?: "Network error"}"
@@ -2016,34 +2046,41 @@ class TradingViewModel(
                     val c1h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H1, limit = 50)
                     val c4h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H4, limit = 30)
                     val c5m = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.M5, limit = 30)
-                    val price = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m).lastOrNull()?.close ?: 0.0
-                    if (price > 0.0) {
-                        val fundingSnap = repository.futuresApiClient.fetchFundingRateSnapshot(normSym)
-                        val hrResult = com.example.data.scanner.HighRewardOpportunityDetector.scanPair(
-                            symbol = normSym,
-                            baseAsset = base,
-                            currentPrice = price,
-                            candles4h = c4h,
-                            candles1h = c1h,
-                            candles15m = c15m,
-                            candles5m = c5m,
-                            fundingRatePercent = fundingSnap?.ratePercent,
-                            budgetConfig = futuresScannerRepo.budgetConfig.value,
-                            fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
-                            isFundingDataStale = fundingSnap == null
-                        )
-                        futuresScannerRepo.onHighRewardScanEvaluated(
-                            symbol = normSym,
-                            result = hrResult,
-                            playSound = false,
-                            source = "Deep-Link Re-Validation"
-                        )
-                        val liveOpp = hrResult.qualifiedOpportunities.firstOrNull()
-                        if (liveOpp != null) {
-                            openHighRewardDetail(liveOpp)
-                        } else {
-                            _userMessage.value = hrResult.bestDiagnostic.reason
-                        }
+                    val nowDlMs = System.currentTimeMillis()
+                    val resolvedStatus = repository.futuresApiClient.resolveCandleFetchStatus(
+                        symbol = normSym,
+                        timeframe = CandleTimeframe.M15,
+                        candles = c15m,
+                        nowMs = nowDlMs
+                    )
+                    val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m, nowDlMs)
+                    val price = completed15m.lastOrNull()?.close ?: 0.0
+                    val fundingSnap = if (price > 0.0) repository.futuresApiClient.fetchFundingRateSnapshot(normSym) else null
+                    val verdict = futuresScannerRepo.evaluatePairWithCentralAuthority(
+                        symbol = normSym,
+                        baseAsset = base,
+                        currentPrice = price,
+                        candles4h = c4h,
+                        candles1h = c1h,
+                        candles15m = c15m,
+                        candles5m = c5m,
+                        fundingRatePercent = fundingSnap?.ratePercent,
+                        fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                        isFundingDataStale = fundingSnap == null,
+                        marketDataTimestampMs = resolvedStatus.fetchedAtMs,
+                        dataStatus = resolvedStatus.dataStatus,
+                        dataSourceName = resolvedStatus.dataSourceName,
+                        playSound = false,
+                        source = "Deep-Link Re-Validation",
+                        referenceTimeMs = nowDlMs
+                    )
+                    val liveOpp = futuresScannerRepo.highRewardState.value.activeOpportunities.firstOrNull {
+                        it.symbol.equals(normSym, ignoreCase = true)
+                    }
+                    if (verdict.state.isApproved && liveOpp != null) {
+                        openHighRewardDetail(liveOpp)
+                    } else {
+                        _userMessage.value = verdict.explanation
                     }
                 } catch (_: Exception) {
                     _userMessage.value = "Opened 1:5 Radar for $symbol"
@@ -2067,24 +2104,41 @@ class TradingViewModel(
                     val c1h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H1, limit = 60)
                     val c4h = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.H4, limit = 30)
                     val c5m = repository.futuresApiClient.fetchFuturesCandles(normSym, CandleTimeframe.M5, limit = 30)
-                    val price = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m).lastOrNull()?.close ?: 0.0
-                    if (price > 0.0) {
-                        val eval = com.example.data.scanner.BinanceFuturesScannerEngine.evaluatePair(
-                            symbol = normSym,
-                            baseAsset = base,
-                            currentPrice = price,
-                            candles4h = c4h,
-                            candles1h = c1h,
-                            candles15m = c15m,
-                            candles5m = c5m
-                        )
-                        val sig = eval.signal
-                        if (sig != null) {
-                            futuresScannerRepo.onSignalEvaluated(sig)
-                            openTradeWorkflow(sig)
-                        } else {
-                            _userMessage.value = eval.noTradeReason ?: "No qualifying setup currently active on $normSym"
-                        }
+                    val nowDlMs = System.currentTimeMillis()
+                    val resolvedStatus = repository.futuresApiClient.resolveCandleFetchStatus(
+                        symbol = normSym,
+                        timeframe = CandleTimeframe.M15,
+                        candles = c15m,
+                        nowMs = nowDlMs
+                    )
+                    val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(c15m, nowDlMs)
+                    val price = completed15m.lastOrNull()?.close ?: 0.0
+                    val fundingSnap = if (price > 0.0) repository.futuresApiClient.fetchFundingRateSnapshot(normSym) else null
+                    val verdict = futuresScannerRepo.evaluatePairWithCentralAuthority(
+                        symbol = normSym,
+                        baseAsset = base,
+                        currentPrice = price,
+                        candles4h = c4h,
+                        candles1h = c1h,
+                        candles15m = c15m,
+                        candles5m = c5m,
+                        fundingRatePercent = fundingSnap?.ratePercent,
+                        fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                        isFundingDataStale = fundingSnap == null,
+                        marketDataTimestampMs = resolvedStatus.fetchedAtMs,
+                        dataStatus = resolvedStatus.dataStatus,
+                        dataSourceName = resolvedStatus.dataSourceName,
+                        playSound = false,
+                        source = "Deep-Link Re-Validation",
+                        referenceTimeMs = nowDlMs
+                    )
+                    val sig = futuresScannerRepo.scannerState.value.activeSignals.firstOrNull {
+                        it.symbol.equals(normSym, ignoreCase = true)
+                    }
+                    if (verdict.state.isApproved && sig != null) {
+                        openTradeWorkflow(sig)
+                    } else {
+                        _userMessage.value = verdict.explanation
                     }
                 } catch (_: Exception) {
                     _userMessage.value = "Opened Scanner for $symbol"

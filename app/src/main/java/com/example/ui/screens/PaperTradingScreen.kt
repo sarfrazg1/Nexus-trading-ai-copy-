@@ -82,6 +82,8 @@ import com.example.data.paper.formatUsdt
 import com.example.data.scanner.ManagedSignalEntry
 import com.example.data.scanner.ManagedSignalState
 import com.example.data.scanner.SignalTransitionRecord
+import com.example.data.signal.CentralForwardValidationRecord
+import com.example.data.signal.ForwardValidationOutcome
 import com.example.data.timemachine.MultiCoinBacktestReport
 import com.example.ui.theme.NexusTheme
 import java.util.Locale
@@ -109,6 +111,7 @@ fun PaperTradingScreen(
     onClearPrefill: () -> Unit,
     onDismissFeedback: () -> Unit,
     onRunSixMonthBacktest: (symbols: List<String>, lookbackDays: Int) -> Unit,
+    forwardValidationRecords: List<CentralForwardValidationRecord> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val colors = NexusTheme.colors
@@ -238,6 +241,7 @@ fun PaperTradingScreen(
                 portfolio = portfolio,
                 managedSignals = managedSignals,
                 transitionLog = transitionLog,
+                forwardValidationRecords = forwardValidationRecords,
                 report = backtestReport,
                 isRunning = isRunningBacktest,
                 progressText = backtestProgress,
@@ -906,6 +910,7 @@ private fun SixMonthBacktestAndComparisonTab(
     portfolio: PaperPortfolioSnapshot,
     managedSignals: List<ManagedSignalEntry>,
     transitionLog: List<SignalTransitionRecord>,
+    forwardValidationRecords: List<CentralForwardValidationRecord>,
     report: MultiCoinBacktestReport?,
     isRunning: Boolean,
     progressText: String?,
@@ -921,12 +926,27 @@ private fun SixMonthBacktestAndComparisonTab(
     val liveWins = resolvedLive.count { it.state == ManagedSignalState.TARGET_HIT }
     val liveWinRate = if (resolvedLive.isNotEmpty()) (liveWins.toDouble() / resolvedLive.size * 100.0) else null
 
+    val fwdOpenCount = forwardValidationRecords.count { it.outcome == ForwardValidationOutcome.STILL_OPEN }
+    val fwdWinsCount = forwardValidationRecords.count {
+        it.outcome == ForwardValidationOutcome.TP1_HIT || it.outcome == ForwardValidationOutcome.TP2_HIT
+    }
+    val fwdLossCount = forwardValidationRecords.count { it.outcome == ForwardValidationOutcome.SL_HIT }
+    val fwdExpInvCount = forwardValidationRecords.count {
+        it.outcome == ForwardValidationOutcome.EXPIRED || it.outcome == ForwardValidationOutcome.INVALIDATED
+    }
+    val fwdDecisive = fwdWinsCount + fwdLossCount
+    val fwdWinRateText = if (fwdDecisive > 0) {
+        "${String.format(Locale.US, "%.1f%%", (fwdWinsCount.toDouble() / fwdDecisive) * 100.0)} (${fwdWinsCount} TP / ${fwdLossCount} SL)"
+    } else {
+        "Awaiting TP/SL resolution ($fwdOpenCount open)"
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Explicit Separation Card: Backtest vs Paper Trading vs Live Signal Outcomes
+        // Explicit Separation Card: Backtest vs Paper Trading vs Forward-Validation Ledger
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.card),
@@ -940,7 +960,7 @@ private fun SixMonthBacktestAndComparisonTab(
                         style = MaterialTheme.typography.titleSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold)
                     )
                     Text(
-                        text = "Historical Backtest, Live Paper Trading, and Tracked Live Signals are measured separately and NEVER mixed.",
+                        text = "Historical Backtest, Live Paper Trading, and Forward-Validation Ledger are measured separately and NEVER mixed.",
                         style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted)
                     )
 
@@ -963,13 +983,40 @@ private fun SixMonthBacktestAndComparisonTab(
                         )
                     }
                     ComparisonMiniCard(
-                        title = "Live Signal Tracking (${managedSignals.size} signals / ${transitionLog.size} transitions)",
+                        title = "Forward-Validation Ledger (${forwardValidationRecords.size} Central-Approved Signals)",
+                        primary = fwdWinRateText,
+                        secondary = "Open: $fwdOpenCount • TP1/TP2: $fwdWinsCount • SL: $fwdLossCount • Exp/Inv: $fwdExpInvCount • Setup quality >=92 measures confluence, NOT win probability.",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (forwardValidationRecords.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.surfaceVariant.copy(alpha = 0.45f))
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Recent Forward-Validated Signals (Live Post-Approval):",
+                                style = MaterialTheme.typography.labelSmall.copy(color = colors.gold, fontWeight = FontWeight.Bold)
+                            )
+                            forwardValidationRecords.take(5).forEach { rec ->
+                                Text(
+                                    text = "${rec.symbol} ${rec.direction.name} (${rec.qualityScore}/100, 1:${String.format(Locale.US, "%.1f", rec.netRiskReward)}) • ${rec.outcome.label} • ${rec.approvedAtPkt}",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary, fontSize = 10.sp)
+                                )
+                            }
+                        }
+                    }
+                    ComparisonMiniCard(
+                        title = "Live Lifecycle State Log (${managedSignals.size} signals / ${transitionLog.size} transitions)",
                         primary = if (liveWinRate != null) {
                             "${resolvedLive.size} resolved (${liveWins} TP / ${resolvedLive.size - liveWins} SL) • ${String.format(Locale.US, "%.1f%%", liveWinRate)} Win Rate"
                         } else {
                             "Awaiting resolved live outcomes (Active: ${managedSignals.count { it.state.isOpenOrLive }})"
                         },
-                        secondary = "Note: Setup quality >=92/100 measures confluence score, NOT guaranteed win probability.",
+                        secondary = "Tracked independently from historical simulation & paper wallet.",
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -1057,6 +1104,10 @@ private fun BacktestResultsCard(report: MultiCoinBacktestReport) {
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(report.statusSummary, style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary, fontWeight = FontWeight.SemiBold))
+            Text(
+                text = "Timeframe: ${report.timeframeLabel} • Funnel: ${report.eligibleSignalsCount} directional bars -> ${report.approvedSignalsCount} approved / ${report.rejectedSignalsCount} rejected",
+                style = MaterialTheme.typography.labelSmall.copy(color = colors.gold)
+            )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 MetricCol("Trades", "${agg.totalTrades}")
                 MetricCol("Win Rate", String.format(Locale.US, "%.1f%%", agg.winRatePercent))
@@ -1069,17 +1120,44 @@ private fun BacktestResultsCard(report: MultiCoinBacktestReport) {
                 MetricCol("Costs", formatUsdt(agg.totalCostsUsdt))
                 MetricCol("Same-Bar Loss", "${agg.ambiguousSameCandle}")
             }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MetricCol("Avg Win", formatUsdt(agg.averageWinningTradeUsdt), colors.bullishGreen)
+                MetricCol("Avg Loss", formatUsdt(-agg.averageLosingTradeUsdt), colors.bearishRed)
+                MetricCol("Avg Net R:R", String.format(Locale.US, "1:%.2f", agg.averageRewardRisk))
+                MetricCol("Unresolved", "${agg.unresolvedAtHorizon}")
+            }
             Text(
                 text = "LONG: ${agg.longStats.trades} (${String.format(Locale.US, "%.1f%%", agg.longStats.winRatePercent)} WR, ${formatUsdt(agg.longStats.netPnlUsdt)}) | SHORT: ${agg.shortStats.trades} (${String.format(Locale.US, "%.1f%%", agg.shortStats.winRatePercent)} WR, ${formatUsdt(agg.shortStats.netPnlUsdt)})",
                 style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary)
             )
+            if (report.rejectionReasonCounts.isNotEmpty()) {
+                HorizontalDivider(color = colors.border.copy(alpha = 0.5f))
+                Text("TOP SIGNAL REJECTION REASONS", fontWeight = FontWeight.Bold, color = colors.gold, fontSize = 11.sp)
+                report.rejectionReasonCounts.entries.take(4).forEach { (reason, count) ->
+                    Text(
+                        text = "• $reason: $count",
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary)
+                    )
+                }
+            }
             HorizontalDivider(color = colors.border.copy(alpha = 0.5f))
-            Text("70% IN-SAMPLE vs 30% OUT-OF-SAMPLE", fontWeight = FontWeight.Bold, color = colors.gold, fontSize = 11.sp)
+            Text("70% IN-SAMPLE vs 30% OUT-OF-SAMPLE (PKT)", fontWeight = FontWeight.Bold, color = colors.gold, fontSize = 11.sp)
             Text(
-                text = "In-Sample (70%): ${split.inSampleCount} trades • ${String.format(Locale.US, "%.1f%%", split.inSampleWinRatePercent)} WR • PF ${String.format(Locale.US, "%.2f", split.inSampleProfitFactor)} • Exp ${String.format(Locale.US, "%+.2fR", split.inSampleExpectancyR)}\n" +
-                    "Out-of-Sample (30%): ${split.outOfSampleCount} trades • ${String.format(Locale.US, "%.1f%%", split.outOfSampleWinRatePercent)} WR • PF ${String.format(Locale.US, "%.2f", split.outOfSampleProfitFactor)} • Exp ${String.format(Locale.US, "%+.2fR", split.outOfSampleExpectancyR)}",
+                text = "In-Sample (${split.inSamplePeriodPkt}, ${split.inSampleCandleCount} bars): ${split.inSampleCount} trades • ${String.format(Locale.US, "%.1f%%", split.inSampleWinRatePercent)} WR • PF ${String.format(Locale.US, "%.2f", split.inSampleProfitFactor)} • Exp ${String.format(Locale.US, "%+.2fR", split.inSampleExpectancyR)}\n" +
+                    "Out-of-Sample (${split.outOfSamplePeriodPkt}, ${split.outOfSampleCandleCount} bars): ${split.outOfSampleCount} trades • ${String.format(Locale.US, "%.1f%%", split.outOfSampleWinRatePercent)} WR • PF ${String.format(Locale.US, "%.2f", split.outOfSampleProfitFactor)} • Exp ${String.format(Locale.US, "%+.2fR", split.outOfSampleExpectancyR)}",
                 style = MaterialTheme.typography.bodySmall.copy(color = colors.textPrimary)
             )
+
+            if (report.marketConditionBreakdowns.isNotEmpty()) {
+                HorizontalDivider(color = colors.border.copy(alpha = 0.5f))
+                Text("MARKET CONDITION BREAKDOWN", fontWeight = FontWeight.Bold, color = colors.gold, fontSize = 11.sp)
+                report.marketConditionBreakdowns.forEach { mc ->
+                    Text(
+                        text = "${mc.conditionLabel}: ${mc.trades} trades • ${String.format(Locale.US, "%.1f%%", mc.winRatePercent)} WR • Net ${formatUsdt(mc.netPnlUsdt)} • PF ${String.format(Locale.US, "%.2f", mc.profitFactor)}",
+                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary)
+                    )
+                }
+            }
 
             if (report.walkForwardWindows.isNotEmpty()) {
                 HorizontalDivider(color = colors.border.copy(alpha = 0.5f))
@@ -1096,7 +1174,7 @@ private fun BacktestResultsCard(report: MultiCoinBacktestReport) {
             Text("COIN-WISE BREAKDOWN", fontWeight = FontWeight.Bold, color = colors.gold, fontSize = 11.sp)
             report.coinBreakdowns.forEach { c ->
                 Text(
-                    text = "${c.symbol}: ${c.statusNote} • Net ${formatUsdt(c.metrics.netPnlUsdt)} (Funding events: ${c.fundingEventsCount})",
+                    text = "${c.symbol} (${c.periodStartPkt} → ${c.periodEndPkt}): ${c.statusNote} • Net ${formatUsdt(c.metrics.netPnlUsdt)} (Funding events: ${c.fundingEventsCount})",
                     style = MaterialTheme.typography.labelSmall.copy(color = if (c.hasSufficientData) colors.textPrimary else colors.textMuted)
                 )
             }

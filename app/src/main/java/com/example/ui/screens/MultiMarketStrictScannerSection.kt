@@ -73,13 +73,17 @@ fun MultiMarketStrictScannerSection(
     rankedBoard: RankedMultiMarketBoard? = null,
     directionalReport: DirectionalSetupBacktestReport? = null,
     managedSignals: List<ManagedSignalEntry> = emptyList(),
-    transitionLog: List<SignalTransitionRecord> = emptyList()
+    transitionLog: List<SignalTransitionRecord> = emptyList(),
+    centralVerdicts: List<com.example.data.signal.CentralSignalVerdict> = emptyList()
 ) {
     val colors = NexusTheme.colors
     var selectedCategory by remember { mutableStateOf(AssetCategory.ALL) }
 
     val managedBySymbol = remember(managedSignals) {
         managedSignals.associateBy { it.symbol.uppercase(Locale.US) }
+    }
+    val centralVerdictBySymbol = remember(centralVerdicts) {
+        centralVerdicts.associateBy { it.symbol.uppercase(Locale.US) }
     }
 
     val rankedItems: List<RankedMultiMarketOpportunity> = if (rankedBoard != null) {
@@ -293,6 +297,7 @@ fun MultiMarketStrictScannerSection(
                         StrictMarketEvalCard(
                             ranked = ranked,
                             managedSignal = managedBySymbol[ranked.evaluation.symbol.uppercase(Locale.US)],
+                            centralVerdict = centralVerdictBySymbol[ranked.evaluation.symbol.uppercase(Locale.US)],
                             onRunBacktest = { setup ->
                                 onRunSetupBacktest(ranked.evaluation.symbol, setup.setupType, setup.direction)
                             },
@@ -386,6 +391,7 @@ private fun DirectionalSideRow(
 private fun StrictMarketEvalCard(
     ranked: RankedMultiMarketOpportunity,
     managedSignal: ManagedSignalEntry?,
+    centralVerdict: com.example.data.signal.CentralSignalVerdict? = null,
     onRunBacktest: (SetupCandidateEvaluation) -> Unit,
     onInspect: () -> Unit
 ) {
@@ -456,6 +462,14 @@ private fun StrictMarketEvalCard(
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         color = colors.neutralCyan
+                    )
+                }
+                centralVerdict?.let { cv ->
+                    Text(
+                        text = "Central: ${cv.state.label}",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (cv.state.isApproved) colors.bullishGreen else colors.warningOrange
                     )
                 }
             }

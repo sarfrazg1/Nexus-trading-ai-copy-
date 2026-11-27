@@ -50,7 +50,11 @@ data class InOutSampleSplitMetrics(
     val outOfSampleWinRatePercent: Double,
     val outOfSampleExpectancyR: Double,
     val outOfSampleProfitFactor: Double,
-    val antiLeakageNote: String = "Strict chronological split: first 70% In-Sample vs final 30% Out-of-Sample with zero shared look-ahead."
+    val antiLeakageNote: String = "Strict chronological split: first 70% In-Sample vs final 30% Out-of-Sample with zero shared look-ahead.",
+    val inSamplePeriodPkt: String = "N/A",
+    val outOfSamplePeriodPkt: String = "N/A",
+    val inSampleCandleCount: Int = 0,
+    val outOfSampleCandleCount: Int = 0
 )
 
 data class HistoricalBacktestResult(

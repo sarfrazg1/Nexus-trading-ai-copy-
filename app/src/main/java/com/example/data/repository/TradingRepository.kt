@@ -167,7 +167,7 @@ class TradingRepository(
     })
     val assets: StateFlow<List<MarketAsset>> = _assets.asStateFlow()
 
-    private val _signals = MutableStateFlow<List<Signal>>(initialSignals())
+    private val _signals = MutableStateFlow<List<Signal>>(emptyList())
     val signals: StateFlow<List<Signal>> = _signals.asStateFlow()
 
     private val _aiSignals = MutableStateFlow<List<AiTradingSignal>>(emptyList())
@@ -215,7 +215,12 @@ class TradingRepository(
 
     private val aiSignalCache = ConcurrentHashMap<String, CachedAiSignal>()
     private val inFlightAiSignals = ConcurrentHashMap<String, CompletableDeferred<AiTradingSignal>>()
-    val aiSignalStateManager = com.example.data.scanner.ActiveSignalStateManager()
+    private val sharedScannerRepo: com.example.data.scanner.FuturesScannerRepository
+        get() = com.example.data.scanner.FuturesScannerRepository.getInstance(notificationManager = notificationManager)
+    val aiSignalStateManager: com.example.data.scanner.ActiveSignalStateManager
+        get() = sharedScannerRepo.signalStateManager
+    val centralSignalAuthority: com.example.data.signal.CentralSignalAuthority
+        get() = sharedScannerRepo.centralAuthority
 
     fun getCachedAiSignalIfFresh(
         symbol: String,
@@ -1832,50 +1837,95 @@ class TradingRepository(
             strictMinScore = com.example.data.signal.StrictSignalQualityEngine.SCORE_THRESHOLD_HIGH_QUALITY
         )
 
-        // Enforce ActiveSignalStateManager: cooldown, duplicate prevention & anti-flip protection
+        // Enforce CentralSignalAuthority (includes ActiveSignalStateManager anti-flip, cooldown & >=92 quality gate)
+        val nowMs = System.currentTimeMillis()
         if (currentPrice != null && currentPrice > 0.0) {
-            aiSignalStateManager.evaluateMarketUpdate(canonical, currentPrice, System.currentTimeMillis())
+            centralSignalAuthority.onMarketPriceUpdate(canonical, currentPrice, nowMs)
         }
 
-        if (gatedSignal.decision != SignalDecision.NO_TRADE && gatedSignal.riskPlan != null) {
-            val dir = if (gatedSignal.decision == SignalDecision.LONG) {
-                com.example.data.scanner.FuturesDirection.LONG
-            } else {
-                com.example.data.scanner.FuturesDirection.SHORT
-            }
-            val lastCloseMs = candles15m.lastOrNull()?.closeTime ?: candles.lastOrNull()?.closeTime ?: System.currentTimeMillis()
-            val intake = aiSignalStateManager.submitCandidate(
-                symbol = canonical,
-                direction = dir,
-                isConfirmed = true,
-                entryPrice = gatedSignal.riskPlan.entryPrice,
-                stopLoss = gatedSignal.riskPlan.stopLoss,
-                takeProfit1 = gatedSignal.riskPlan.takeProfit1,
-                takeProfit2 = gatedSignal.riskPlan.takeProfit3,
-                netRiskReward = gatedSignal.strictQualityReport?.netRiskRewardSummary?.netRiskReward ?: gatedSignal.riskPlan.riskRewardRatio,
-                qualityScore = gatedSignal.strictQualityReport?.totalScore ?: gatedSignal.confidence.totalScore,
-                dataSourceName = dataSourceName,
-                setupReason = "Strict ${gatedSignal.strictQualityReport?.totalScore ?: gatedSignal.confidence.totalScore}/100",
-                confirmationCandleCloseMs = lastCloseMs,
-                expiresAtMs = lastCloseMs + (4 * 3_600_000L)
+        val completedCandles = com.example.util.TimeZoneUtils.filterCompletedCandles(candles, nowMs)
+        val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(candles15m, nowMs)
+        val lastCloseMs = completed15m.lastOrNull()?.closeTime
+            ?: completedCandles.lastOrNull()?.closeTime
+            ?: nowMs
+
+        val candidateList = buildList {
+            add(
+                com.example.data.signal.CentralCandidateAdapters.fromAiTradingSignal(
+                    signal = gatedSignal,
+                    candleCount = completedCandles.size,
+                    confirmationCandleCloseMs = lastCloseMs
+                )
             )
-            if (!intake.accepted) {
-                return@withContext gatedSignal.copy(
-                    decision = SignalDecision.NO_TRADE,
-                    riskPlan = null,
-                    noTradeReason = com.example.data.signal.NoTradeReason(
-                        code = "ANTI_FLIP_COOLDOWN_GUARD",
-                        headline = "WAIT / NO TRADE — Active Opposite Signal Guard",
-                        detailedExplanation = intake.rejectionReason
-                            ?: "Blocked silent direction flip while prior setup remains live.",
-                        conflictingFactors = listOfNotNull(
-                            intake.rejectionReason,
-                            "Anti-noise guard prevents flip-flopping between LONG and SHORT before SL/TP/Expiry"
-                        ),
-                        recommendedAction = "Wait until active signal closes or expires cleanly."
+            strictReportPrecheck?.let { report ->
+                add(
+                    com.example.data.signal.CentralCandidateAdapters.fromStrictQualityReport(
+                        report = report,
+                        dataStatus = dataStatus,
+                        dataSourceName = dataSourceName,
+                        candleCount = completedCandles.size,
+                        confirmationCandleCloseMs = lastCloseMs,
+                        timeframe = timeframe
                     )
                 )
             }
+            _scannerItems.value.firstOrNull {
+                com.example.data.signal.CentralCandidateAdapters.normalizeSymbol(it.symbol) ==
+                    com.example.data.signal.CentralCandidateAdapters.normalizeSymbol(canonical)
+            }?.let { scannerContextItem ->
+                add(
+                    com.example.data.signal.CentralCandidateAdapters.fromMarketScannerItem(
+                        item = scannerContextItem,
+                        dataStatus = dataStatus,
+                        snapshotTimestampMs = nowMs
+                    )
+                )
+            }
+        }
+
+        val fundStatusLabel = when {
+            futuresLiq == null -> "UNAVAILABLE"
+            futuresLiq.status == com.example.data.providers.FuturesTelemetryStatus.STALE -> "STALE"
+            futuresLiq.fundingRatePercent != null -> "LIVE"
+            else -> "UNAVAILABLE"
+        }
+
+        val evalContext = com.example.data.signal.CentralEvaluationContext(
+            symbol = canonical,
+            timeframe = timeframe,
+            dataStatus = dataStatus,
+            dataSourceName = dataSourceName,
+            currentPrice = currentPrice,
+            snapshotTimestampMs = lastCloseMs,
+            completedCandleCount = completedCandles.size,
+            hasClosedCandleConfirmation = completedCandles.isNotEmpty(),
+            strictQualityReport = strictReportPrecheck,
+            fundingStatus = fundStatusLabel,
+            liquidationStatus = if (futuresLiq?.liquidationDataAvailable == true) "LIVE" else "UNAVAILABLE",
+            minNetRiskReward = com.example.data.signal.StrictSignalQualityEngine.MIN_NET_RR,
+            requireNetRiskRewardCheck = strictReportPrecheck != null,
+            referenceTimeMs = nowMs
+        )
+
+        val verdict = sharedScannerRepo.evaluateThroughCentralAuthority(
+            context = evalContext,
+            candidates = candidateList,
+            playSound = false,
+            source = "AI Signal Engine"
+        )
+
+        if (gatedSignal.decision != SignalDecision.NO_TRADE && !verdict.state.isApproved) {
+            return@withContext gatedSignal.copy(
+                decision = SignalDecision.NO_TRADE,
+                riskPlan = null,
+                noTradeReason = com.example.data.signal.NoTradeReason(
+                    code = "CENTRAL_AUTHORITY_${verdict.state.name}",
+                    headline = "${verdict.state.label} — Central Signal Authority Gate",
+                    detailedExplanation = verdict.explanation,
+                    conflictingFactors = verdict.rejectionReasons.ifEmpty { verdict.failedFilters },
+                    recommendedAction = "Wait until all 5 Central Signal Authority gates pass (Score >= 92, all mandatory filters, Net R:R >= 1:4.0)."
+                )
+            )
         }
 
         gatedSignal

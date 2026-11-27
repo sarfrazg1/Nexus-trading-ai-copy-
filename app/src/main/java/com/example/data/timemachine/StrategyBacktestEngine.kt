@@ -55,7 +55,8 @@ data class SimulatedBacktestTrade(
     val netReturnOnAccountPercent: Double,
     val netRMultiple: Double,
     val outcome: BacktestOutcomeType,
-    val isOutOfSample: Boolean
+    val isOutOfSample: Boolean,
+    val marketCondition: String = "RANGE_OR_VOLATILE"
 )
 
 data class DirectionalBacktestBreakdown(
@@ -70,6 +71,15 @@ data class DirectionalBacktestBreakdown(
 
 data class MonthlyBacktestBucket(
     val monthPkt: String,
+    val trades: Int,
+    val wins: Int,
+    val winRatePercent: Double,
+    val netPnlUsdt: Double,
+    val profitFactor: Double
+)
+
+data class MarketConditionBacktestBucket(
+    val conditionLabel: String,
     val trades: Int,
     val wins: Int,
     val winRatePercent: Double,
@@ -105,7 +115,10 @@ data class AggregateBacktestMetrics(
     val maxDrawdownUsdt: Double,
     val maxDrawdownPercent: Double,
     val longStats: DirectionalBacktestBreakdown,
-    val shortStats: DirectionalBacktestBreakdown
+    val shortStats: DirectionalBacktestBreakdown,
+    val averageWinningTradeUsdt: Double = 0.0,
+    val averageLosingTradeUsdt: Double = 0.0,
+    val averageRewardRisk: Double = 0.0
 )
 
 data class CoinBacktestBreakdown(
@@ -132,7 +145,13 @@ data class MultiCoinBacktestReport(
     val sampleTrades: List<SimulatedBacktestTrade>,
     val hasSufficientOverallData: Boolean,
     val statusSummary: String,
-    val methodologyDisclosure: String
+    val methodologyDisclosure: String,
+    val timeframeLabel: String = "15M Execution / 1H+4H+1D HTF",
+    val eligibleSignalsCount: Int = 0,
+    val approvedSignalsCount: Int = overall.totalTrades,
+    val rejectedSignalsCount: Int = 0,
+    val rejectionReasonCounts: Map<String, Int> = emptyMap(),
+    val marketConditionBreakdowns: List<MarketConditionBacktestBucket> = emptyList()
 )
 
 data class SingleCoinHistoricalInput(
@@ -168,6 +187,18 @@ object StrategyBacktestEngine {
         val bearishTrend: Boolean
     )
 
+    private data class SingleCoinSimResult(
+        val trades: List<SimulatedBacktestTrade>,
+        val eligibleCount: Int,
+        val rejectedCount: Int,
+        val rejectionReasons: Map<String, Int>,
+        val inSampleCandles: Int,
+        val outSampleCandles: Int,
+        val startMs: Long,
+        val splitMs: Long,
+        val endMs: Long
+    )
+
     fun runMultiCoinBacktest(
         inputs: List<SingleCoinHistoricalInput>,
         config: MultiCoinBacktestConfig = MultiCoinBacktestConfig(),
@@ -175,6 +206,13 @@ object StrategyBacktestEngine {
     ): MultiCoinBacktestReport {
         val allTrades = mutableListOf<SimulatedBacktestTrade>()
         val coinBreakdowns = mutableListOf<CoinBacktestBreakdown>()
+        var totalEligible = 0
+        var totalRejected = 0
+        val aggregateRejections = LinkedHashMap<String, Int>()
+        var totalInSampleCandles = 0
+        var totalOutSampleCandles = 0
+        var earliestStartMs = Long.MAX_VALUE
+        var latestEndMs = 0L
 
         for (input in inputs) {
             val cleaned15m = input.candles15m
@@ -202,7 +240,7 @@ object StrategyBacktestEngine {
             val candles4h = if (input.candles4h.isNotEmpty()) input.candles4h.sortedBy { it.openTime } else aggregateCandles(cleaned15m, 16)
             val candles1d = if (input.candles1d.isNotEmpty()) input.candles1d.sortedBy { it.openTime } else aggregateCandles(cleaned15m, 96)
 
-            val trades = simulateSingleCoinCausal(
+            val sim = simulateSingleCoinCausal(
                 symbol = input.symbol,
                 candles15m = cleaned15m,
                 candles1h = candles1h,
@@ -211,7 +249,17 @@ object StrategyBacktestEngine {
                 fundingHistory = input.fundingHistory.sortedBy { it.fundingTimeMs },
                 config = config
             )
+            val trades = sim.trades
             allTrades.addAll(trades)
+            totalEligible += sim.eligibleCount
+            totalRejected += sim.rejectedCount
+            sim.rejectionReasons.forEach { (reason, cnt) ->
+                aggregateRejections[reason] = (aggregateRejections[reason] ?: 0) + cnt
+            }
+            totalInSampleCandles += sim.inSampleCandles
+            totalOutSampleCandles += sim.outSampleCandles
+            if (sim.startMs > 0L && sim.startMs < earliestStartMs) earliestStartMs = sim.startMs
+            if (sim.endMs > latestEndMs) latestEndMs = sim.endMs
 
             val coverageDays = estimateCoverageDays(cleaned15m)
             val metrics = computeAggregateMetrics(trades, config.startingCapitalUsdt)
@@ -244,6 +292,16 @@ object StrategyBacktestEngine {
         val inMetrics = computeAggregateMetrics(inSampleTrades, config.startingCapitalUsdt)
         val outMetrics = computeAggregateMetrics(outSampleTrades, config.startingCapitalUsdt)
 
+        val splitBoundaryMs = if (earliestStartMs < Long.MAX_VALUE && latestEndMs > earliestStartMs) {
+            earliestStartMs + ((latestEndMs - earliestStartMs) * 0.70).toLong()
+        } else 0L
+        val inPeriodLabel = if (earliestStartMs < Long.MAX_VALUE && splitBoundaryMs > 0L) {
+            "${TimeZoneUtils.formatKarachiDateOnly(earliestStartMs)} → ${TimeZoneUtils.formatKarachiDateOnly(splitBoundaryMs)}"
+        } else "N/A"
+        val outPeriodLabel = if (splitBoundaryMs > 0L && latestEndMs >= splitBoundaryMs) {
+            "${TimeZoneUtils.formatKarachiDateOnly(splitBoundaryMs)} → ${TimeZoneUtils.formatKarachiDateOnly(latestEndMs)}"
+        } else "N/A"
+
         val inOutSplit = InOutSampleSplitMetrics(
             splitRatioInSample = 0.70,
             inSampleCount = inSampleTrades.size,
@@ -254,11 +312,16 @@ object StrategyBacktestEngine {
             outOfSampleWinRatePercent = outMetrics.winRatePercent,
             outOfSampleExpectancyR = outMetrics.expectancyR,
             outOfSampleProfitFactor = outMetrics.profitFactor,
-            antiLeakageNote = "Chronological 70% In-Sample (${inSampleTrades.size} trades) vs final 30% Out-of-Sample (${outSampleTrades.size} trades) on strict closed bars."
+            antiLeakageNote = "Chronological 70% In-Sample (${inSampleTrades.size} trades) vs final 30% Out-of-Sample (${outSampleTrades.size} trades) on strict closed bars.",
+            inSamplePeriodPkt = inPeriodLabel,
+            outOfSamplePeriodPkt = outPeriodLabel,
+            inSampleCandleCount = totalInSampleCandles,
+            outOfSampleCandleCount = totalOutSampleCandles
         )
 
         val walkForward = computeWalkForwardWindows(sortedAll, config.startingCapitalUsdt)
         val monthly = computeMonthlyBuckets(sortedAll, config.startingCapitalUsdt)
+        val conditionBuckets = computeMarketConditionBuckets(sortedAll, config.startingCapitalUsdt)
 
         val sufficientCount = coinBreakdowns.count { it.total15mCandles >= MIN_15M_CANDLES_PER_COIN }
         val hasSufficientOverall = sufficientCount > 0 && sortedAll.size >= 5
@@ -268,6 +331,10 @@ object StrategyBacktestEngine {
         } else {
             "Tested ${sortedAll.size} strict trades across $sufficientCount coins (${inSampleTrades.size} In-Sample / ${outSampleTrades.size} Out-of-Sample) after fees, slippage & funding."
         }
+
+        val sortedRejections = aggregateRejections.entries
+            .sortedByDescending { it.value }
+            .associate { it.key to it.value }
 
         return MultiCoinBacktestReport(
             config = config,
@@ -281,7 +348,13 @@ object StrategyBacktestEngine {
             sampleTrades = (outSampleTrades + inSampleTrades).sortedByDescending { it.entryTimeMs }.take(40),
             hasSufficientOverallData = hasSufficientOverall,
             statusSummary = summary,
-            methodologyDisclosure = "Causal closed-candle simulation: bar i evaluates only bars [0..i] & closed HTF candles; same-bar SL+TP conflicts are recorded conservatively as losses; past backtests do NOT guarantee future returns."
+            methodologyDisclosure = "Causal closed-candle simulation: bar i evaluates only bars [0..i] & closed HTF candles; same-bar SL+TP conflicts are recorded conservatively as losses; past backtests do NOT guarantee future returns.",
+            timeframeLabel = "15M Execution (with causal 1H/4H/1D alignment)",
+            eligibleSignalsCount = totalEligible,
+            approvedSignalsCount = sortedAll.size,
+            rejectedSignalsCount = totalRejected,
+            rejectionReasonCounts = sortedRejections,
+            marketConditionBreakdowns = conditionBuckets
         )
     }
 
@@ -293,9 +366,11 @@ object StrategyBacktestEngine {
         candles1d: List<Candle>,
         fundingHistory: List<BinanceFuturesApiClient.HistoricalFundingEntry>,
         config: MultiCoinBacktestConfig
-    ): List<SimulatedBacktestTrade> {
+    ): SingleCoinSimResult {
         val n = candles15m.size
-        if (n < MIN_15M_CANDLES_PER_COIN) return emptyList()
+        if (n < MIN_15M_CANDLES_PER_COIN) {
+            return SingleCoinSimResult(emptyList(), 0, 0, emptyMap(), 0, 0, 0L, 0L, 0L)
+        }
 
         val series = precomputeCausal15m(candles15m)
         val htf1h = precomputeHtfTrends(candles1h)
@@ -311,6 +386,13 @@ object StrategyBacktestEngine {
         var ptr1d = 0
         var nextAllowedIndex = startIndex
         val trades = mutableListOf<SimulatedBacktestTrade>()
+        var eligibleCount = 0
+        var rejectedCount = 0
+        val rejectionReasons = LinkedHashMap<String, Int>()
+        fun recordRejection(reason: String) {
+            rejectedCount++
+            rejectionReasons[reason] = (rejectionReasons[reason] ?: 0) + 1
+        }
 
         for (i in startIndex until (n - 2)) {
             if (i < nextAllowedIndex) continue
@@ -329,13 +411,23 @@ object StrategyBacktestEngine {
             val atr = series.atr14[i]
             if (!atr.isFinite() || atr <= 0.0 || bar.close <= 0.0) continue
             val atrPct = (atr / bar.close) * 100.0
-            if (atrPct > 6.5 || atrPct < 0.08) continue // Extreme or dead volatility rejected
+            if (atrPct > 6.5 || atrPct < 0.08) {
+                if (bar.close != prev.close) {
+                    eligibleCount++
+                    recordRejection("Volatility Out of Bounds (ATR%)")
+                }
+                continue
+            }
 
             val barRange = (bar.high - bar.low).coerceAtLeast(1e-9)
             val bodyRatio = abs(bar.close - bar.open) / barRange
-            if (bodyRatio < 0.30) continue
+            if (bodyRatio < 0.30) {
+                eligibleCount++
+                recordRejection("Weak Candle Body (<30%)")
+                continue
+            }
 
-            val candidate = evaluateCausalBarCandidate(
+            val evalOutcome = evaluateCausalBarCandidateWithReason(
                 bar = bar,
                 prev = prev,
                 i = i,
@@ -345,7 +437,17 @@ object StrategyBacktestEngine {
                 t1d = t1d,
                 roundTripCostPct = roundTripCostPct,
                 config = config
-            ) ?: continue
+            )
+            if (evalOutcome.triggeredDirection) {
+                eligibleCount++
+            }
+            val candidate = evalOutcome.candidate
+            if (candidate == null) {
+                if (evalOutcome.triggeredDirection && evalOutcome.rejectionReason != null) {
+                    recordRejection(evalOutcome.rejectionReason)
+                }
+                continue
+            }
 
             // Execute entry causally at NEXT bar (i+1) open price + entry slippage
             val entryBar = candles15m[i + 1]
@@ -367,13 +469,19 @@ object StrategyBacktestEngine {
             } else {
                 entryFill - candidate.takeProfit
             }
-            if (slDist <= entryFill * 0.0025 || tpDist <= slDist * 3.5) continue
+            if (slDist <= entryFill * 0.0025 || tpDist <= slDist * 3.5) {
+                recordRejection("Next-Bar Open Fill SL/TP Distortion")
+                continue
+            }
 
             val actualGrossRR = tpDist / slDist
             val riskPct = (slDist / entryFill) * 100.0
             val grossRewardPct = (tpDist / entryFill) * 100.0
             val actualNetRR = ((grossRewardPct - roundTripCostPct).coerceAtLeast(0.0)) / (riskPct + roundTripCostPct)
-            if (actualNetRR < config.minNetRiskReward) continue
+            if (actualNetRR < config.minNetRiskReward) {
+                recordRejection("Net R:R Below 1:${config.minNetRiskReward} After Open Slippage")
+                continue
+            }
 
             val riskBudgetUsdt = config.startingCapitalUsdt * (config.riskPerTradePercent / 100.0)
             val positionQty = riskBudgetUsdt / slDist
@@ -443,6 +551,12 @@ object StrategyBacktestEngine {
             val netRetPct = (netPnlUsdt / config.startingCapitalUsdt) * 100.0
             val netR = netPnlUsdt / riskBudgetUsdt.coerceAtLeast(1e-6)
 
+            val marketCondition = when {
+                series.ema50[i] > series.ema200[i] && t4h?.bullishTrend == true -> "BULLISH_TREND"
+                series.ema50[i] < series.ema200[i] && t4h?.bearishTrend == true -> "BEARISH_TREND"
+                else -> "RANGE_OR_VOLATILE"
+            }
+
             trades.add(
                 SimulatedBacktestTrade(
                     symbol = symbol,
@@ -454,7 +568,7 @@ object StrategyBacktestEngine {
                     exitTimeMs = exitBar.closeTime,
                     entryTimePkt = TimeZoneUtils.formatKarachiTimestamp(entryBar.openTime),
                     exitTimePkt = TimeZoneUtils.formatKarachiTimestamp(exitBar.closeTime),
-                    monthKeyPkt = TimeZoneUtils.formatKarachiDateOnly(entryBar.openTime).take(7),
+                    monthKeyPkt = TimeZoneUtils.formatKarachiMonthKey(entryBar.openTime),
                     entryPrice = entryFill,
                     exitPrice = execExitPrice,
                     stopLoss = candidate.stopLoss,
@@ -468,12 +582,24 @@ object StrategyBacktestEngine {
                     netReturnOnAccountPercent = netRetPct,
                     netRMultiple = netR,
                     outcome = outcome,
-                    isOutOfSample = false
+                    isOutOfSample = false,
+                    marketCondition = marketCondition
                 )
             )
             nextAllowedIndex = exitIndex + config.cooldownBars15m
         }
-        return trades
+        val splitIdx = ((n * 0.70).toInt()).coerceIn(0, n)
+        return SingleCoinSimResult(
+            trades = trades,
+            eligibleCount = eligibleCount,
+            rejectedCount = rejectedCount,
+            rejectionReasons = rejectionReasons,
+            inSampleCandles = splitIdx,
+            outSampleCandles = n - splitIdx,
+            startMs = candles15m.first().openTime,
+            splitMs = candles15m.getOrNull(splitIdx)?.openTime ?: candles15m.last().closeTime,
+            endMs = candles15m.last().closeTime
+        )
     }
 
     private data class CandidateSignal(
@@ -483,7 +609,13 @@ object StrategyBacktestEngine {
         val takeProfit: Double
     )
 
-    private fun evaluateCausalBarCandidate(
+    private data class CausalEvalOutcome(
+        val triggeredDirection: Boolean,
+        val candidate: CandidateSignal?,
+        val rejectionReason: String?
+    )
+
+    private fun evaluateCausalBarCandidateWithReason(
         bar: Candle,
         prev: Candle,
         i: Int,
@@ -493,7 +625,7 @@ object StrategyBacktestEngine {
         t1d: HtfCausalTrend?,
         roundTripCostPct: Double,
         config: MultiCoinBacktestConfig
-    ): CandidateSignal? {
+    ): CausalEvalOutcome {
         val price = bar.close
         val atr = series.atr14[i]
         val ema20 = series.ema20[i]
@@ -507,7 +639,7 @@ object StrategyBacktestEngine {
         val sh20 = series.swingHigh20[i]
         val sl20 = series.swingLow20[i]
 
-        val bullCandidate = evaluateDirectionalScore(
+        val bullRes = evaluateDirectionalScoreDetailed(
             isLong = true,
             bar = bar,
             prev = prev,
@@ -530,7 +662,7 @@ object StrategyBacktestEngine {
             config = config
         )
 
-        val bearCandidate = evaluateDirectionalScore(
+        val bearRes = evaluateDirectionalScoreDetailed(
             isLong = false,
             bar = bar,
             prev = prev,
@@ -553,10 +685,16 @@ object StrategyBacktestEngine {
             config = config
         )
 
-        return listOfNotNull(bullCandidate, bearCandidate).maxByOrNull { it.qualityScore }
+        val winner = listOfNotNull(bullRes.candidate, bearRes.candidate).maxByOrNull { it.qualityScore }
+        if (winner != null) {
+            return CausalEvalOutcome(triggeredDirection = true, candidate = winner, rejectionReason = null)
+        }
+        val triggered = bullRes.triggeredDirection || bearRes.triggeredDirection
+        val reason = if (bullRes.triggeredDirection) bullRes.rejectionReason else bearRes.rejectionReason
+        return CausalEvalOutcome(triggeredDirection = triggered, candidate = null, rejectionReason = reason)
     }
 
-    private fun evaluateDirectionalScore(
+    private fun evaluateDirectionalScoreDetailed(
         isLong: Boolean,
         bar: Candle,
         prev: Candle,
@@ -577,14 +715,14 @@ object StrategyBacktestEngine {
         t1d: HtfCausalTrend?,
         roundTripCostPct: Double,
         config: MultiCoinBacktestConfig
-    ): CandidateSignal? {
+    ): CausalEvalOutcome {
         // 1. Mandatory 15M candle-close trigger
         val candleOk = if (isLong) {
             bar.close > bar.open && bar.close > prev.close && stBull
         } else {
             bar.close < bar.open && bar.close < prev.close && !stBull
         }
-        if (!candleOk) return null
+        if (!candleOk) return CausalEvalOutcome(triggeredDirection = false, candidate = null, rejectionReason = null)
 
         // 2. Block strong contradictory HTF (4H/1D)
         val strongHtfConflict = if (isLong) {
@@ -592,7 +730,13 @@ object StrategyBacktestEngine {
         } else {
             (t4h?.bullishTrend == true && t1d?.bullishTrend == true) || (t1d?.bullishTrend == true && t4h?.bearishTrend != true)
         }
-        if (strongHtfConflict) return null
+        if (strongHtfConflict) {
+            return CausalEvalOutcome(
+                triggeredDirection = true,
+                candidate = null,
+                rejectionReason = "HTF 4H/1D Direction Conflict"
+            )
+        }
 
         // 3. Structural SL & Target + Fib extension room (without widening artificially)
         val swingRange = (swingHigh - swingLow).coerceAtLeast(atr * 1.5)
@@ -623,7 +767,13 @@ object StrategyBacktestEngine {
         val riskPct = (slDist / price) * 100.0
         val rewardPct = (abs(structuralTp - price) / price) * 100.0
         val netRR = ((rewardPct - roundTripCostPct).coerceAtLeast(0.0)) / (riskPct + roundTripCostPct)
-        if (netRR < config.minNetRiskReward) return null
+        if (netRR < config.minNetRiskReward) {
+            return CausalEvalOutcome(
+                triggeredDirection = true,
+                candidate = null,
+                rejectionReason = "Net R:R Below 1:${config.minNetRiskReward}"
+            )
+        }
 
         // 4. Multi-layer Setup Quality Score (out of 100; >= 92 required)
         var score = 0
@@ -679,13 +829,23 @@ object StrategyBacktestEngine {
         // Group F: Risk & Volatility sanity (max 10)
         if (netRR >= 5.0) score += 10 else if (netRR >= config.minNetRiskReward) score += 8
 
-        if (score < config.minSetupQualityScore) return null
+        if (score < config.minSetupQualityScore) {
+            return CausalEvalOutcome(
+                triggeredDirection = true,
+                candidate = null,
+                rejectionReason = "Quality Score < ${config.minSetupQualityScore}/100"
+            )
+        }
 
-        return CandidateSignal(
-            direction = if (isLong) FuturesDirection.LONG else FuturesDirection.SHORT,
-            qualityScore = score.coerceIn(0, 100),
-            stopLoss = sl,
-            takeProfit = structuralTp
+        return CausalEvalOutcome(
+            triggeredDirection = true,
+            candidate = CandidateSignal(
+                direction = if (isLong) FuturesDirection.LONG else FuturesDirection.SHORT,
+                qualityScore = score.coerceIn(0, 100),
+                stopLoss = sl,
+                takeProfit = structuralTp
+            ),
+            rejectionReason = null
         )
     }
 
@@ -929,6 +1089,10 @@ object StrategyBacktestEngine {
             if (ddPct > maxDdPct) maxDdPct = ddPct
         }
 
+        val avgWinUsdt = if (winsList.isNotEmpty()) winsList.map { it.netPnlUsdt }.average() else 0.0
+        val avgLossUsdt = if (lossList.isNotEmpty()) lossList.map { abs(it.netPnlUsdt) }.average() else 0.0
+        val avgRr = sorted.map { it.netRiskReward }.average()
+
         return AggregateBacktestMetrics(
             totalTrades = sorted.size,
             wins = winsList.size,
@@ -945,7 +1109,10 @@ object StrategyBacktestEngine {
             maxDrawdownUsdt = maxDdUsdt,
             maxDrawdownPercent = maxDdPct,
             longStats = computeDirectionalBreakdown(sorted.filter { it.direction == FuturesDirection.LONG }),
-            shortStats = computeDirectionalBreakdown(sorted.filter { it.direction == FuturesDirection.SHORT })
+            shortStats = computeDirectionalBreakdown(sorted.filter { it.direction == FuturesDirection.SHORT }),
+            averageWinningTradeUsdt = avgWinUsdt,
+            averageLosingTradeUsdt = avgLossUsdt,
+            averageRewardRisk = avgRr
         )
     }
 
@@ -989,6 +1156,27 @@ object StrategyBacktestEngine {
                     profitFactor = agg.profitFactor
                 )
             }
+    }
+
+    private fun computeMarketConditionBuckets(
+        trades: List<SimulatedBacktestTrade>,
+        startingCapitalUsdt: Double
+    ): List<MarketConditionBacktestBucket> {
+        if (trades.isEmpty()) return emptyList()
+        val orderedKeys = listOf("BULLISH_TREND", "BEARISH_TREND", "RANGE_OR_VOLATILE")
+        val grouped = trades.groupBy { it.marketCondition }
+        return orderedKeys.mapNotNull { key ->
+            val list = grouped[key] ?: return@mapNotNull null
+            val agg = computeAggregateMetrics(list, startingCapitalUsdt)
+            MarketConditionBacktestBucket(
+                conditionLabel = key.replace("_", " "),
+                trades = agg.totalTrades,
+                wins = agg.wins,
+                winRatePercent = agg.winRatePercent,
+                netPnlUsdt = agg.netPnlUsdt,
+                profitFactor = agg.profitFactor
+            )
+        }
     }
 
     private fun computeWalkForwardWindows(

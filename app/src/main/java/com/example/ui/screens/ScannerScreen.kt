@@ -131,6 +131,7 @@ fun ScannerScreen(
     budgetConfig: BudgetConfig = BudgetConfig(),
     dailyRiskLedger: DailyRiskLedger = DailyRiskLedger(),
     onUpdateBudgetConfig: (BudgetConfig) -> Unit = {},
+    centralVerdicts: List<com.example.data.signal.CentralSignalVerdict> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val colors = NexusTheme.colors
@@ -412,6 +413,12 @@ fun ScannerScreen(
             }
 
             item {
+                com.example.ui.components.CentralSignalAuthoritySection(
+                    verdicts = centralVerdicts
+                )
+            }
+
+            item {
                 HighRewardOpportunityRadarSection(
                     scanState = highRewardScanState,
                     onScanNow = onScanHighRewardNow,
@@ -430,7 +437,8 @@ fun ScannerScreen(
                     rankedBoard = rankedMultiMarketBoard,
                     directionalReport = multiMarketSetupDirectionalReport,
                     managedSignals = managedSignals,
-                    transitionLog = signalTransitionLog
+                    transitionLog = signalTransitionLog,
+                    centralVerdicts = centralVerdicts
                 )
             }
 

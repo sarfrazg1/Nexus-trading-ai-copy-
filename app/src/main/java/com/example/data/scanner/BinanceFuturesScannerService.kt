@@ -153,60 +153,36 @@ class BinanceFuturesScannerService : Service() {
                         val candles4h = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.H4, limit = 30)
                         val candles5m = apiClient.fetchFuturesCandles(pair.symbol, CandleTimeframe.M5, limit = 30)
 
+                        val resolvedStatus = apiClient.resolveCandleFetchStatus(pair.symbol, CandleTimeframe.M15, candles15m)
                         val completed15m = com.example.util.TimeZoneUtils.filterCompletedCandles(candles15m)
                         val currentPrice = pair.currentPrice.takeIf { it > 0 }
                             ?: completed15m.lastOrNull()?.close
                             ?: 0.0
 
-                        if (currentPrice > 0.0) {
-                            val fundingSnap = apiClient.fetchFundingRateSnapshot(pair.symbol)
-                            val fundingRate = fundingSnap?.ratePercent
-
-                            val result = BinanceFuturesScannerEngine.evaluatePair(
-                                symbol = pair.symbol,
-                                baseAsset = pair.baseAsset,
-                                currentPrice = currentPrice,
-                                candles4h = candles4h,
-                                candles1h = candles1h,
-                                candles15m = candles15m,
-                                candles5m = candles5m,
-                                fundingRate = fundingRate
+                        val fundingSnap = if (currentPrice > 0.0) apiClient.fetchFundingRateSnapshot(pair.symbol) else null
+                        val verdict = repository.evaluatePairWithCentralAuthority(
+                            symbol = pair.symbol,
+                            baseAsset = pair.baseAsset,
+                            currentPrice = currentPrice,
+                            candles4h = candles4h,
+                            candles1h = candles1h,
+                            candles15m = candles15m,
+                            candles5m = candles5m,
+                            fundingRatePercent = fundingSnap?.ratePercent,
+                            fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
+                            isFundingDataStale = fundingSnap == null,
+                            marketDataTimestampMs = resolvedStatus.fetchedAtMs,
+                            dataStatus = resolvedStatus.dataStatus,
+                            dataSourceName = resolvedStatus.dataSourceName,
+                            playSound = repository.scannerState.value.soundAlertsEnabled,
+                            source = "Foreground Scanner Service"
+                        )
+                        if (verdict.state.isApproved) {
+                            val dirLabel = if (verdict.approvedDirection == FuturesDirection.LONG) "🟢 LONG" else "🔴 SHORT"
+                            updateNotification(
+                                "Central Approved: ${verdict.symbol}",
+                                "$dirLabel | Score ${verdict.finalQualityScore ?: 0}/100 | Net R:R 1:${String.format(java.util.Locale.US, "%.2f", verdict.netRiskReward)}"
                             )
-
-                            result.signal?.let { signal ->
-                                repository.onSignalEvaluated(signal)
-                                if (signal.lifecycle == FuturesSignalLifecycle.ENTRY_CONFIRMED) {
-                                    val emoji = if (signal.direction == FuturesDirection.LONG) "🟢 LONG" else "🔴 SHORT"
-                                    updateNotification("Confirmed Entry: ${signal.symbol}", "$emoji at ${signal.entryZoneFormatted} | Quality: ${signal.qualityScore}%")
-                                }
-                            }
-
-                            // Part 4/5: Additive >= 1:4 / >= 1:5 High Reward Opportunity scan with strict funding check
-                            val hrResult = HighRewardOpportunityDetector.scanPair(
-                                symbol = pair.symbol,
-                                baseAsset = pair.baseAsset,
-                                currentPrice = currentPrice,
-                                candles4h = candles4h,
-                                candles1h = candles1h,
-                                candles15m = candles15m,
-                                candles5m = candles5m,
-                                fundingRatePercent = fundingRate,
-                                budgetConfig = repository.budgetConfig.value,
-                                fundingDataTimestampMs = fundingSnap?.serverTimeMs ?: fundingSnap?.fetchedAtMs,
-                                isFundingDataStale = fundingSnap == null
-                            )
-                            repository.onHighRewardScanEvaluated(
-                                symbol = pair.symbol,
-                                result = hrResult,
-                                playSound = repository.scannerState.value.soundAlertsEnabled,
-                                source = "Foreground Scanner Service"
-                            )
-                            hrResult.qualifiedOpportunities.firstOrNull()?.let { topOpp ->
-                                updateNotification(
-                                    topOpp.alertBannerTitle,
-                                    "Entry ${topOpp.entryFormatted} | SL ${topOpp.stopLossFormatted} | TP ${topOpp.takeProfitFormatted} (${topOpp.entryTriggerTimestampPkt})"
-                                )
-                            }
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Error scanning ${pair.symbol}: ${e.message}")

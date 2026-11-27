@@ -24,7 +24,9 @@ data class ParsedFcmAlertPayload(
     val direction: String? = null,
     val expiresAtMs: Long? = null,
     val netRiskReward: Double? = null,
-    val grossRiskReward: Double? = null
+    val grossRiskReward: Double? = null,
+    val qualityScore: Int? = null,
+    val dedupKey: String? = null
 )
 
 /**
@@ -59,7 +61,50 @@ class NexusFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        mgr.notifyTradeLifecycleAlert(
+        val isNewEntrySignalType = payload.alertType in setOf(
+            AlertType.SIGNAL_LONG,
+            AlertType.SIGNAL_SHORT,
+            AlertType.OPPORTUNITY_1_TO_4,
+            AlertType.OPPORTUNITY_1_TO_5
+        )
+        var newEntryDedupKey: String? = null
+        var scannerRepoForNewEntry: com.example.data.scanner.FuturesScannerRepository? = null
+        if (isNewEntrySignalType) {
+            val score = payload.qualityScore
+            if (score == null || score < NexusNotificationManager.CENTRAL_APPROVAL_MIN_SCORE) {
+                Log.d(TAG, "CentralSignalAuthority blocked remote push ${payload.eventId}: score=$score (< 92)")
+                return
+            }
+            if (payload.netRiskReward != null && payload.netRiskReward < 4.0) {
+                Log.d(TAG, "CentralSignalAuthority blocked remote push ${payload.eventId}: netRr=${payload.netRiskReward} < 4.0")
+                return
+            }
+            if (payload.direction == null) {
+                Log.d(TAG, "CentralSignalAuthority blocked remote push ${payload.eventId}: missing direction")
+                return
+            }
+            if (payload.expiresAtMs != null && payload.expiresAtMs <= System.currentTimeMillis()) {
+                Log.d(TAG, "CentralSignalAuthority blocked remote push ${payload.eventId}: expired")
+                return
+            }
+            val scannerRepo = com.example.data.scanner.FuturesScannerRepository.getInstance(applicationContext, mgr)
+            scannerRepoForNewEntry = scannerRepo
+            val existingEntry = scannerRepo.signalStateManager.getEntryForSymbol(payload.symbol)
+            if (existingEntry != null && existingEntry.state.isOpenOrLive &&
+                !existingEntry.direction.name.equals(payload.direction, ignoreCase = true)
+            ) {
+                Log.d(TAG, "CentralSignalAuthority blocked conflicting opposite-direction push for ${payload.symbol}")
+                return
+            }
+            val dedupKey = payload.dedupKey ?: payload.eventId
+            if (scannerRepo.centralAuthority.hasNotifiedDedupKey(dedupKey)) {
+                Log.d(TAG, "CentralSignalAuthority suppressed duplicate remote push $dedupKey")
+                return
+            }
+            newEntryDedupKey = dedupKey
+        }
+
+        val dispatched = mgr.notifyTradeLifecycleAlert(
             eventId = payload.eventId,
             symbol = payload.symbol,
             signalId = payload.signalId,
@@ -73,6 +118,9 @@ class NexusFirebaseMessagingService : FirebaseMessagingService() {
             expiresAtMs = payload.expiresAtMs,
             playSound = mgr.isSoundAlertsEnabled()
         )
+        if (dispatched && isNewEntrySignalType && newEntryDedupKey != null) {
+            scannerRepoForNewEntry?.centralAuthority?.markDedupKeyDispatched(newEntryDedupKey, payload.timestampMs)
+        }
     }
 
     companion object {
@@ -204,6 +252,9 @@ class NexusFirebaseMessagingService : FirebaseMessagingService() {
                 AlertType.OPPORTUNITY_1_TO_5
             ))
 
+            val qualityScore = (data["quality_score"] ?: data["score"])?.toIntOrNull()
+            val dedupKey = data["dedup_key"]?.takeIf { it.isNotBlank() }
+
             return ParsedFcmAlertPayload(
                 eventId = eventId,
                 symbol = symbol,
@@ -216,7 +267,9 @@ class NexusFirebaseMessagingService : FirebaseMessagingService() {
                 direction = direction,
                 expiresAtMs = expiresAtMs,
                 netRiskReward = netRr,
-                grossRiskReward = grossRr
+                grossRiskReward = grossRr,
+                qualityScore = qualityScore,
+                dedupKey = dedupKey
             )
         }
     }

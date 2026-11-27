@@ -38,11 +38,77 @@ class BinanceFuturesApiClient(
 ) {
     // In-memory candle cache: "SYMBOL_TIMEFRAME" -> CachedCandles
     private val candleCache = ConcurrentHashMap<String, CachedCandles>()
+    private val candleProvenance = ConcurrentHashMap<String, CandleFetchProvenance>()
 
     private data class CachedCandles(
         val timestamp: Long,
-        val candles: List<Candle>
+        val candles: List<Candle>,
+        val sourceName: String = "Binance USDT-M Futures Public REST",
+        val isFuturesPrimary: Boolean = true
     )
+
+    data class CandleFetchProvenance(
+        val symbol: String,
+        val timeframe: CandleTimeframe,
+        val sourceName: String,
+        val isFuturesPrimary: Boolean,
+        val isFromStaleFallbackCache: Boolean,
+        val fetchedAtMs: Long,
+        val latestCompletedCloseMs: Long?
+    )
+
+    data class ResolvedCandleFetchStatus(
+        val dataStatus: com.example.data.model.MarketDataStatus,
+        val dataSourceName: String,
+        val fetchedAtMs: Long,
+        val latestCompletedCloseMs: Long
+    )
+
+    fun resolveCandleFetchStatus(
+        symbol: String,
+        timeframe: CandleTimeframe,
+        candles: List<Candle>,
+        nowMs: Long = System.currentTimeMillis()
+    ): ResolvedCandleFetchStatus {
+        val normalizedSymbol = symbol.uppercase().trim()
+        val cacheKey = "${normalizedSymbol}_${timeframe.label}"
+        val completed = com.example.util.TimeZoneUtils.filterCompletedCandles(candles, nowMs)
+        val latestCloseMs = completed.lastOrNull()?.closeTime ?: 0L
+        if (completed.isEmpty() || latestCloseMs <= 0L) {
+            return ResolvedCandleFetchStatus(
+                dataStatus = com.example.data.model.MarketDataStatus.UNAVAILABLE,
+                dataSourceName = "DATA UNAVAILABLE",
+                fetchedAtMs = 0L,
+                latestCompletedCloseMs = 0L
+            )
+        }
+
+        val prov = candleProvenance[cacheKey]
+        val fetchedAtMs = prov?.fetchedAtMs ?: nowMs
+        val sourceName = prov?.sourceName ?: "Binance USDT-M Futures Public REST"
+        val isFuturesPrimary = prov?.isFuturesPrimary ?: true
+        val isStaleCache = prov?.isFromStaleFallbackCache ?: false
+
+        // A 24/7 candle stream is stale if the latest completed bar is more than 1 bar + 20 min behind nowMs
+        val maxCompletedBarAgeMs = timeframe.durationMillis + 20L * 60_000L
+        val barAgeMs = (nowMs - latestCloseMs).coerceAtLeast(0L)
+        val fetchAgeMs = (nowMs - fetchedAtMs).coerceAtLeast(0L)
+
+        val status = when {
+            isStaleCache || barAgeMs > maxCompletedBarAgeMs || fetchAgeMs > 5L * 60_000L ->
+                com.example.data.model.MarketDataStatus.STALE
+            !isFuturesPrimary ->
+                com.example.data.model.MarketDataStatus.DELAYED
+            else ->
+                com.example.data.model.MarketDataStatus.LIVE
+        }
+        return ResolvedCandleFetchStatus(
+            dataStatus = status,
+            dataSourceName = sourceName,
+            fetchedAtMs = fetchedAtMs,
+            latestCompletedCloseMs = latestCloseMs
+        )
+    }
 
     // Live price updates flow
     private val _livePrices = MutableSharedFlow<Map<String, Double>>(extraBufferCapacity = 64)
@@ -74,10 +140,20 @@ class BinanceFuturesApiClient(
     ): List<Candle> = withContext(Dispatchers.IO) {
         val normalizedSymbol = symbol.uppercase().trim()
         val cacheKey = "${normalizedSymbol}_${timeframe.label}"
+        val now = System.currentTimeMillis()
 
         // Use cache if under 15 seconds fresh
         val cached = candleCache[cacheKey]
-        if (cached != null && System.currentTimeMillis() - cached.timestamp < 15_000) {
+        if (cached != null && now - cached.timestamp < 15_000) {
+            candleProvenance[cacheKey] = CandleFetchProvenance(
+                symbol = normalizedSymbol,
+                timeframe = timeframe,
+                sourceName = cached.sourceName,
+                isFuturesPrimary = cached.isFuturesPrimary,
+                isFromStaleFallbackCache = false,
+                fetchedAtMs = cached.timestamp,
+                latestCompletedCloseMs = com.example.util.TimeZoneUtils.filterCompletedCandles(cached.candles, now).lastOrNull()?.closeTime
+            )
             return@withContext cached.candles
         }
 
@@ -87,6 +163,12 @@ class BinanceFuturesApiClient(
         )
 
         for (endpoint in endpoints) {
+            val isFuturesEndpoint = endpoint.contains("fapi")
+            val endpointLabel = if (isFuturesEndpoint) {
+                "Binance USDT-M Futures Public REST"
+            } else {
+                "Binance Spot Public REST (Fallback)"
+            }
             try {
                 val intervalStr = when (timeframe) {
                     CandleTimeframe.M5 -> "5m"
@@ -152,7 +234,17 @@ class BinanceFuturesApiClient(
                     }
 
                     if (candles.isNotEmpty()) {
-                        candleCache[cacheKey] = CachedCandles(System.currentTimeMillis(), candles)
+                        val fetchedAt = System.currentTimeMillis()
+                        candleCache[cacheKey] = CachedCandles(fetchedAt, candles, endpointLabel, isFuturesEndpoint)
+                        candleProvenance[cacheKey] = CandleFetchProvenance(
+                            symbol = normalizedSymbol,
+                            timeframe = timeframe,
+                            sourceName = endpointLabel,
+                            isFuturesPrimary = isFuturesEndpoint,
+                            isFromStaleFallbackCache = false,
+                            fetchedAtMs = fetchedAt,
+                            latestCompletedCloseMs = com.example.util.TimeZoneUtils.filterCompletedCandles(candles, fetchedAt).lastOrNull()?.closeTime
+                        )
                         return@withContext candles
                     }
                 }
@@ -161,8 +253,21 @@ class BinanceFuturesApiClient(
             }
         }
 
-        // Return cached or empty list if network failed
-        cached?.candles ?: emptyList()
+        // Return stale cached candles explicitly flagged as stale cache fallback (never labeled LIVE)
+        if (cached != null && cached.candles.isNotEmpty()) {
+            candleProvenance[cacheKey] = CandleFetchProvenance(
+                symbol = normalizedSymbol,
+                timeframe = timeframe,
+                sourceName = "${cached.sourceName} (Stale Cache)",
+                isFuturesPrimary = cached.isFuturesPrimary,
+                isFromStaleFallbackCache = true,
+                fetchedAtMs = cached.timestamp,
+                latestCompletedCloseMs = com.example.util.TimeZoneUtils.filterCompletedCandles(cached.candles, now).lastOrNull()?.closeTime
+            )
+            return@withContext cached.candles
+        }
+        candleProvenance.remove(cacheKey)
+        emptyList()
     }
 
     data class FundingRateSnapshot(

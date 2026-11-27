@@ -103,6 +103,7 @@ fun SignalsScreen(
     errorMessage: String? = null,
     onRetryClick: () -> Unit = {},
     onPaperTradeClick: (AiTradingSignal) -> Unit = {},
+    currentCentralVerdict: com.example.data.signal.CentralSignalVerdict? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = NexusTheme.colors
@@ -375,6 +376,12 @@ fun SignalsScreen(
                     onSetAlertClick = { onSetAlertClick(currentAiSignal.symbol) },
                     onPaperTradeClick = { onPaperTradeClick(currentAiSignal) }
                 )
+            }
+        }
+
+        currentCentralVerdict?.let { verdict ->
+            item {
+                com.example.ui.components.CentralSignalVerdictCard(verdict = verdict)
             }
         }
 

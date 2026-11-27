@@ -546,7 +546,13 @@ fun NexusTradingApp(
                         },
                         errorMessage = uiState.signalAnalysisError,
                         onRetryClick = { viewModel.retryAiSignal() },
-                        onPaperTradeClick = { aiSignal -> viewModel.openPaperTradeFromAiSignal(aiSignal) }
+                        onPaperTradeClick = { aiSignal -> viewModel.openPaperTradeFromAiSignal(aiSignal) },
+                        currentCentralVerdict = uiState.centralVerdicts.firstOrNull { verdict ->
+                            val target = com.example.data.signal.CentralCandidateAdapters.normalizeSymbol(uiState.selectedSignalAssetSymbol)
+                            verdict.symbol.equals(target, ignoreCase = true) ||
+                                verdict.symbol.equals("${target}USDT", ignoreCase = true) ||
+                                verdict.displaySymbol.equals(uiState.selectedSignalAssetSymbol, ignoreCase = true)
+                        }
                     )
                 }
 
@@ -654,7 +660,8 @@ fun NexusTradingApp(
                         signalTransitionLog = uiState.signalTransitionLog,
                         budgetConfig = uiState.budgetConfig,
                         dailyRiskLedger = uiState.dailyRiskLedger,
-                        onUpdateBudgetConfig = { cfg -> viewModel.updateWorkflowBudgetConfig(cfg) }
+                        onUpdateBudgetConfig = { cfg -> viewModel.updateWorkflowBudgetConfig(cfg) },
+                        centralVerdicts = uiState.centralVerdicts
                     )
                 }
 
@@ -701,7 +708,8 @@ fun NexusTradingApp(
                         onDismissFeedback = { viewModel.dismissPaperOrderFeedback() },
                         onRunSixMonthBacktest = { syms, days ->
                             viewModel.runSixMonthStrategyBacktest(syms, days)
-                        }
+                        },
+                        forwardValidationRecords = uiState.forwardValidationRecords
                     )
                 }
 

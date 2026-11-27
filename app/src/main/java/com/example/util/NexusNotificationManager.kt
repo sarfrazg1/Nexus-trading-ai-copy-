@@ -19,6 +19,7 @@ import com.example.MainActivity
 import com.example.R
 import com.example.data.alerts.AlertHistoryEntry
 import com.example.data.model.AlertType
+import com.example.data.model.MarketDataStatus
 import com.example.data.model.MarketNews
 import com.example.data.model.NavigationTab
 import com.example.data.model.NewsImpactLevel
@@ -27,6 +28,8 @@ import com.example.data.scanner.HighRewardOpportunity
 import com.example.data.scanner.OpportunityPriorityTier
 import com.example.data.scanner.OpportunityStatus
 import com.example.data.signal.AiTradingSignal
+import com.example.data.signal.CentralSignalAuthority
+import com.example.data.signal.CentralSignalVerdict
 import com.example.data.signal.SignalDecision
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -628,6 +631,101 @@ class NexusNotificationManager(context: Context? = null) {
         return true
     }
 
+    /**
+     * Single production push-notification gate authorized by CentralSignalAuthority.
+     * Enforces:
+     * - APPROVED_LONG or APPROVED_SHORT state
+     * - finalQualityScore >= 92 (91 rejected; 92 and 93+ accepted)
+     * - allMandatoryFiltersPassed == true
+     * - isEntryConfirmed == true
+     * - fresh data (LIVE or DELAYED), no direction conflict, not expired
+     * - persistent dedupKey & signalId deduplication across restarts and background workers
+     */
+    fun notifyCentralApprovedSignal(
+        verdict: CentralSignalVerdict,
+        playSound: Boolean = isSoundAlertsEnabled(),
+        source: String = "Central Signal Authority",
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (!isMasterAlertsEnabled()) return false
+        if (!verdict.state.isApproved || verdict.approvedDirection == null) return false
+        val score = verdict.finalQualityScore ?: return false
+        if (score < CENTRAL_APPROVAL_MIN_SCORE) return false
+        if (!verdict.allMandatoryFiltersPassed || !verdict.isEntryConfirmed || verdict.hasDirectionConflict) return false
+        if (verdict.suppressedAsDuplicate || !verdict.shouldNotifyNewSignal) return false
+        if (verdict.dataStatus != MarketDataStatus.LIVE && verdict.dataStatus != MarketDataStatus.DELAYED) return false
+        if (verdict.expiresAtMs > 0L && nowMs > verdict.expiresAtMs) return false
+
+        val isLong = verdict.approvedDirection == FuturesDirection.LONG
+        if (isLong && !isLongSignalsEnabled()) return false
+        if (!isLong && !isShortSignalsEnabled()) return false
+
+        if (verdict.dedupKey.isBlank()) return false
+        if (hasDeliveredEvent(verdict.dedupKey) || hasDeliveredEvent(verdict.signalId)) return false
+
+        markDeliveredEvent(verdict.dedupKey)
+        if (verdict.signalId.isNotBlank()) {
+            markDeliveredEvent(verdict.signalId)
+        }
+
+        val pktTime = TimeZoneUtils.formatKarachiTimestamp(verdict.evaluatedAtMs)
+        val isFiveToOne = verdict.netRiskReward >= 5.0
+        val alertType = when {
+            isFiveToOne -> AlertType.OPPORTUNITY_1_TO_5
+            verdict.netRiskReward >= 4.0 -> AlertType.OPPORTUNITY_1_TO_4
+            isLong -> AlertType.SIGNAL_LONG
+            else -> AlertType.SIGNAL_SHORT
+        }
+        val channelId = when {
+            isFiveToOne -> CHANNEL_ID_HIGH_REWARD
+            verdict.netRiskReward >= 4.0 -> CHANNEL_ID_QUALIFIED_1_4
+            else -> CHANNEL_ID
+        }
+
+        val dirEmoji = if (isLong) "🟢 LONG" else "🔴 SHORT"
+        val title = if (isFiveToOne) {
+            "NEXUS 1:5 APPROVED $dirEmoji • ${verdict.displaySymbol} (${score}%)"
+        } else {
+            "NEXUS APPROVED $dirEmoji • ${verdict.displaySymbol} (${score}%)"
+        }
+        val body = buildString {
+            append("${verdict.displaySymbol} ${verdict.approvedDirection.name} (${verdict.timeframe.label}) | Source: ${verdict.dataSourceName} [${verdict.dataStatus.label}] | PKT: $pktTime\n")
+            append("Entry: ${HighRewardOpportunity.fmtPrice(verdict.entryPrice)} | SL: ${HighRewardOpportunity.fmtPrice(verdict.stopLoss)} | TP1: ${HighRewardOpportunity.fmtPrice(verdict.takeProfit1)} | TP2: ${HighRewardOpportunity.fmtPrice(verdict.takeProfit2)}\n")
+            append("Net R:R 1:${String.format(java.util.Locale.US, "%.2f", verdict.netRiskReward)} (Gross 1:${String.format(java.util.Locale.US, "%.2f", verdict.grossRiskReward)}) | Quality Score: $score/100\n")
+            append("Setup: ${verdict.setupTypeLabel} | Funding: ${verdict.fundingStatus} | Liq: ${verdict.liquidationStatus}\n")
+            append("Alert Only — Not an Executed Order")
+        }
+
+        recordAlertHistory(
+            AlertHistoryEntry(
+                eventId = verdict.dedupKey,
+                symbol = verdict.symbol,
+                signalId = verdict.signalId,
+                alertType = alertType,
+                title = title,
+                message = body,
+                timestampMs = verdict.evaluatedAtMs,
+                timestampPkt = pktTime,
+                deliverySource = source,
+                isOrderExecution = false
+            )
+        )
+
+        postNotification(
+            title = title,
+            message = body,
+            type = alertType,
+            notifId = (verdict.dedupKey.hashCode() and 0x7FFFFFFF) % 40000 + 70000,
+            eventId = verdict.dedupKey,
+            symbol = verdict.symbol,
+            signalId = verdict.signalId,
+            openWorkflow = true,
+            channelId = channelId,
+            playSound = playSound
+        )
+        return true
+    }
+
     fun buildDeepLinkIntent(
         targetContext: Context,
         symbol: String?,
@@ -849,6 +947,7 @@ class NexusNotificationManager(context: Context? = null) {
     }
 
     companion object {
+        const val CENTRAL_APPROVAL_MIN_SCORE = CentralSignalAuthority.MIN_APPROVAL_SCORE
         const val STRICT_ALERT_MIN_EXCLUSIVE_SCORE = 92
         const val CHANNEL_ID = "nexus_trading_alerts"
         const val CHANNEL_ID_HIGH_REWARD = "nexus_1_5_opportunities"

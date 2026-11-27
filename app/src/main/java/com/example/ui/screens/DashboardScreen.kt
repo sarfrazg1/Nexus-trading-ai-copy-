@@ -397,12 +397,31 @@ fun DashboardScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        items(signals.take(2)) { signal ->
-            SignalItemCard(
-                signal = signal,
-                onSetAlertClick = { onSetAlertClick(signal.assetSymbol) },
-                onCopyLevelsClick = { onCopySignalLevels(signal) }
-            )
+        if (signals.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dashboard_empty_signals_card"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.card),
+                    border = BorderStroke(1.dp, colors.border.copy(alpha = 0.7f))
+                ) {
+                    Text(
+                        text = "No verified signals loaded yet. Open Signals or run the Live Scanner to evaluate real market data via Central Signal Authority.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = colors.textMuted),
+                        modifier = Modifier.padding(14.dp)
+                    )
+                }
+            }
+        } else {
+            items(signals.take(2)) { signal ->
+                SignalItemCard(
+                    signal = signal,
+                    onSetAlertClick = { onSetAlertClick(signal.assetSymbol) },
+                    onCopyLevelsClick = { onCopySignalLevels(signal) }
+                )
+            }
         }
 
         // 7. Recent Alerts
